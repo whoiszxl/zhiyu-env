@@ -368,10 +368,17 @@ fn mysql_command(database: &str) -> Result<Command, String> {
 
 fn postgres_command(database: &str) -> Result<Command, String> {
     let root = devbox_root()?;
-    let executable = root
-        .join("installations/postgres")
-        .join(POSTGRES_SERIES)
-        .join("bin/psql");
+    let metadata = root.join("instances/postgres/default/service.json");
+    let executable = ConfigManager
+        .load(metadata)
+        .ok()
+        .filter(|config| config.kind == ServiceKind::Postgres)
+        .map(|config| config.executable.with_file_name("psql"))
+        .unwrap_or_else(|| {
+            root.join("installations/postgres")
+                .join(POSTGRES_SERIES)
+                .join("bin/psql")
+        });
     ensure_executable(&executable)?;
     let mut command = Command::new(executable);
     command

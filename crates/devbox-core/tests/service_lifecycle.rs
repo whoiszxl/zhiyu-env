@@ -183,6 +183,38 @@ fn mysql_legacy_data_is_moved_to_the_selected_version() {
 }
 
 #[test]
+fn postgres_legacy_data_is_moved_to_the_selected_version() {
+    let temp = TempDir::new().unwrap();
+    let mut service_config = config(temp.path(), ServiceKind::Postgres);
+    let data_root = service_config.data_dir();
+    let version_data = data_root.join("17");
+    service_config.arguments = vec![
+        "-D".into(),
+        version_data.display().to_string(),
+        "-c".into(),
+        format!(
+            "config_file={}",
+            service_config
+                .config_dir()
+                .join("postgresql.conf")
+                .display()
+        ),
+    ];
+    std::fs::create_dir_all(&data_root).unwrap();
+    std::fs::write(data_root.join("PG_VERSION"), b"17").unwrap();
+
+    let service = PostgresService::new(service_config).unwrap();
+    service.install().unwrap();
+
+    assert_eq!(service.data_dir(), version_data);
+    assert!(!data_root.join("PG_VERSION").exists());
+    assert_eq!(
+        std::fs::read(version_data.join("PG_VERSION")).unwrap(),
+        b"17"
+    );
+}
+
+#[test]
 fn a_new_manager_can_stop_and_reap_an_existing_child() {
     let temp = TempDir::new().unwrap();
     let service_config = config(temp.path(), ServiceKind::Redis);

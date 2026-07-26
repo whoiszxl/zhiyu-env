@@ -1,8 +1,9 @@
 use devbox_core::{
     installer::{
-        mysql_release, redis_release, MysqlRelease, RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION,
-        MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, POSTGRES_SERIES,
-        POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION,
+        mysql_release, postgres_release, redis_release, MysqlRelease, PostgresRelease,
+        RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION, MONGODB_SERIES, MONGODB_VERSION,
+        MYSQL_RELEASES, MYSQL_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES,
+        REDIS_VERSION,
     },
     ConfigManager, MailpitInstaller, MailpitService, MongodbInstaller, MongodbService,
     MysqlInstaller, MysqlService, PostgresInstaller, PostgresService, RedisInstaller, RedisService,
@@ -99,6 +100,18 @@ pub struct MysqlVersionInfo {
     recommended: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostgresVersionInfo {
+    series: &'static str,
+    version: &'static str,
+    installed: bool,
+    selected: bool,
+    support_label: &'static str,
+    legacy: bool,
+    recommended: bool,
+}
+
 fn devbox_root() -> Result<PathBuf, String> {
     dirs::home_dir()
         .map(|home| home.join(".devbox"))
@@ -172,6 +185,46 @@ fn mysql_service_config(root: &Path, release: &MysqlRelease) -> ServiceConfig {
     }
 }
 
+fn selected_postgres_release(root: &Path) -> &'static PostgresRelease {
+    let metadata = root.join("instances/postgres/default/service.json");
+    ConfigManager
+        .load(metadata)
+        .ok()
+        .filter(|config| config.kind == ServiceKind::Postgres)
+        .and_then(|config| postgres_release(&config.version))
+        .unwrap_or_else(|| {
+            postgres_release(POSTGRES_VERSION).expect("default PostgreSQL release is registered")
+        })
+}
+
+fn postgres_service_config(root: &Path, release: &PostgresRelease) -> ServiceConfig {
+    let instance = root.join("instances/postgres/default");
+    let data_dir = instance.join("data").join(release.series);
+    ServiceConfig {
+        name: "PostgreSQL".into(),
+        kind: ServiceKind::Postgres,
+        version: release.version.into(),
+        port: 5432,
+        executable: root
+            .join("installations/postgres")
+            .join(release.series)
+            .join("bin/postgres"),
+        arguments: vec![
+            "-D".into(),
+            data_dir.display().to_string(),
+            "-c".into(),
+            format!(
+                "config_file={}",
+                instance.join("conf/postgresql.conf").display()
+            ),
+            "-c".into(),
+            format!("data_directory={}", data_dir.display()),
+        ],
+        environment: BTreeMap::new(),
+        instance_dir: instance,
+    }
+}
+
 fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
     let root = devbox_root()?;
     if kind == ServiceKind::Redis {
@@ -180,29 +233,16 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
     if kind == ServiceKind::Mysql {
         return Ok(mysql_service_config(&root, selected_mysql_release(&root)));
     }
+    if kind == ServiceKind::Postgres {
+        return Ok(postgres_service_config(
+            &root,
+            selected_postgres_release(&root),
+        ));
+    }
     let (name, version, port, executable, arguments) = match kind {
         ServiceKind::Redis => unreachable!(),
         ServiceKind::Mysql => unreachable!(),
-        ServiceKind::Postgres => {
-            let instance = root.join("instances/postgres/default");
-            (
-                "PostgreSQL",
-                POSTGRES_VERSION,
-                5432,
-                root.join(format!(
-                    "installations/postgres/{POSTGRES_SERIES}/bin/postgres"
-                )),
-                vec![
-                    "-D".into(),
-                    instance.join("data").display().to_string(),
-                    "-c".into(),
-                    format!(
-                        "config_file={}",
-                        instance.join("conf/postgresql.conf").display()
-                    ),
-                ],
-            )
-        }
+        ServiceKind::Postgres => unreachable!(),
         ServiceKind::Mongodb => {
             let instance = root.join("instances/mongodb/default");
             (
@@ -377,6 +417,9 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             ServiceKindInput::Mysql => MysqlService::new(config.clone())
                 .map_err(stringify_error)?
                 .data_dir(),
+            ServiceKindInput::Postgres => PostgresService::new(config.clone())
+                .map_err(stringify_error)?
+                .data_dir(),
             _ => config.data_dir(),
         },
         log_path: primary_log_path(&config),
@@ -462,12 +505,14 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         }
         ServiceKindInput::Postgres => {
             let root = devbox_root()?;
-            let installer = PostgresInstaller::new(&root);
-            installer.install().map_err(stringify_error)?;
-            with_service(kind, |service| service.install())?;
             let config = service_config(ServiceKind::Postgres)?;
+            let installer =
+                PostgresInstaller::for_version(&root, &config.version).map_err(stringify_error)?;
+            installer.install().map_err(stringify_error)?;
+            let service = PostgresService::new(config).map_err(stringify_error)?;
+            service.install().map_err(stringify_error)?;
             installer
-                .initialize(&config.data_dir())
+                .initialize(&service.data_dir())
                 .map_err(stringify_error)?;
             info(kind)
         }
@@ -603,6 +648,63 @@ pub async fn mysql_version_select(version: String) -> Result<ServiceInfo, String
     })
     .await
     .map_err(|error| format!("MySQL 版本切换任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn postgres_versions() -> Result<Vec<PostgresVersionInfo>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let root = devbox_root()?;
+        let selected = selected_postgres_release(&root);
+        POSTGRES_RELEASES
+            .iter()
+            .map(|release| {
+                let installer = PostgresInstaller::for_version(&root, release.version)
+                    .map_err(stringify_error)?;
+                Ok(PostgresVersionInfo {
+                    series: release.series,
+                    version: release.version,
+                    installed: installer.is_installed(),
+                    selected: release.version == selected.version,
+                    support_label: release.support_label,
+                    legacy: release.legacy,
+                    recommended: release.recommended,
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| format!("PostgreSQL 版本状态任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn postgres_version_select(version: String) -> Result<ServiceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = devbox_root()?;
+        let release = postgres_release(&version)
+            .ok_or_else(|| format!("不支持 PostgreSQL 版本 {version}"))?;
+        let current = service_config(ServiceKind::Postgres)?;
+        let current_service = PostgresService::new(current).map_err(stringify_error)?;
+        let status = current_service.status().map_err(stringify_error)?;
+        if matches!(status, ServiceStatus::Running { .. }) {
+            return Err("请先停止 PostgreSQL，再切换运行版本".into());
+        }
+        current_service
+            .prepare_version_data()
+            .map_err(stringify_error)?;
+
+        let installer =
+            PostgresInstaller::for_version(&root, release.version).map_err(stringify_error)?;
+        installer.install().map_err(stringify_error)?;
+        let service = PostgresService::new(postgres_service_config(&root, release))
+            .map_err(stringify_error)?;
+        service.install().map_err(stringify_error)?;
+        installer
+            .initialize(&service.data_dir())
+            .map_err(stringify_error)?;
+        info(ServiceKindInput::Postgres)
+    })
+    .await
+    .map_err(|error| format!("PostgreSQL 版本切换任务异常结束: {error}"))?
 }
 
 #[tauri::command]
@@ -893,8 +995,9 @@ fn tail_file(path: &PathBuf, max_bytes: u64) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        mailpit_value_allowed, mysql_service_config, path_disk_size, redis_service_config,
-        selected_mysql_release, selected_redis_release,
+        mailpit_value_allowed, mysql_service_config, path_disk_size, postgres_service_config,
+        redis_service_config, selected_mysql_release, selected_postgres_release,
+        selected_redis_release,
     };
     use devbox_core::{ConfigManager, ServiceConfig};
     use std::fs;
@@ -984,6 +1087,41 @@ mod tests {
                 format!(
                     "--datadir={}",
                     root.join("instances/mysql/default/data/8.0").display()
+                ),
+            ]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn postgres_selected_version_is_loaded_from_instance_metadata() {
+        let root = std::env::temp_dir().join(format!(
+            "zhiyu-postgres-version-test-{}",
+            std::process::id()
+        ));
+        let release = devbox_core::installer::postgres_release("16.14").unwrap();
+        let config: ServiceConfig = postgres_service_config(&root, release);
+        ConfigManager.save(&config).unwrap();
+
+        assert_eq!(selected_postgres_release(&root).version, "16.14");
+        assert!(config.executable.ends_with("postgres/16/bin/postgres"));
+        assert_eq!(
+            config.arguments,
+            vec![
+                "-D".to_string(),
+                root.join("instances/postgres/default/data/16")
+                    .display()
+                    .to_string(),
+                "-c".to_string(),
+                format!(
+                    "config_file={}",
+                    root.join("instances/postgres/default/conf/postgresql.conf")
+                        .display()
+                ),
+                "-c".to_string(),
+                format!(
+                    "data_directory={}",
+                    root.join("instances/postgres/default/data/16").display()
                 ),
             ]
         );

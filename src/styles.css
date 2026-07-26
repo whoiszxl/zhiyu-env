@@ -528,6 +528,14 @@ button:disabled {
   border-right: 0;
 }
 
+.redis-version-grid > button:nth-child(3n) {
+  border-right: 0;
+}
+
+.redis-version-grid > button:nth-child(n + 4) {
+  border-top: 1px solid #d8d7d0;
+}
+
 .redis-version-grid > button:hover:not(:disabled) {
   background: #f1efe8;
 }
@@ -2506,6 +2514,7 @@ button:disabled {
   }
 
   .redis-version-grid > button {
+    border-top: 0;
     border-right: 0;
     border-bottom: 1px solid #d8d7d0;
   }

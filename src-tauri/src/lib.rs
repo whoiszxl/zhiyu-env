@@ -26,6 +26,8 @@ pub fn run() {
             commands::redis_version_select,
             commands::mysql_versions,
             commands::mysql_version_select,
+            commands::postgres_versions,
+            commands::postgres_version_select,
             storage_tools::service_cache_clean,
             storage_tools::service_backup_list,
             storage_tools::service_backup_create,

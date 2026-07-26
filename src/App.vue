@@ -25,6 +25,7 @@ import {
   listMongoDatabases,
   listMailpitMessages,
   listMysqlVersions,
+  listPostgresVersions,
   listPortListeners,
   listRedisVersions,
   listServiceBackups,
@@ -38,6 +39,7 @@ import {
   scanRedisKeys,
   selectRedisVersion,
   selectMysqlVersion,
+  selectPostgresVersion,
 } from "./api/services";
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
@@ -53,6 +55,7 @@ import type {
   MongoDatabaseInfo,
   MongoOverview,
   MysqlVersionInfo,
+  PostgresVersionInfo,
   PortListener,
   RedisKeyDetail,
   RedisOverview,
@@ -141,6 +144,10 @@ const mysqlVersions = ref<MysqlVersionInfo[]>([]);
 const mysqlVersionTarget = ref("");
 const mysqlVersionsLoading = ref(false);
 const mysqlVersionChanging = ref(false);
+const postgresVersions = ref<PostgresVersionInfo[]>([]);
+const postgresVersionTarget = ref("");
+const postgresVersionsLoading = ref(false);
+const postgresVersionChanging = ref(false);
 const redisDatabase = ref(0);
 const redisPattern = ref("*");
 const redisCursor = ref("0");
@@ -222,11 +229,19 @@ const selectedMysqlVersionInfo = computed(
     ) ?? null,
 );
 
+const selectedPostgresVersionInfo = computed(
+  () =>
+    postgresVersions.value.find(
+      (release) => release.version === postgresVersionTarget.value,
+    ) ?? null,
+);
+
 const serviceControlBusy = computed(
   () =>
     pendingAction.value !== null ||
     redisVersionChanging.value ||
-    mysqlVersionChanging.value,
+    mysqlVersionChanging.value ||
+    postgresVersionChanging.value,
 );
 
 const filteredPortListeners = computed(() => {
@@ -294,6 +309,17 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     ];
   }
   if (selectedKind.value === "mysql") {
+    return [
+      ["overview", "概览"],
+      ["data", "数据浏览"],
+      ["sql", "SQL 命令台"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["versions", "版本管理"],
+    ];
+  }
+  if (selectedKind.value === "postgres") {
     return [
       ["overview", "概览"],
       ["data", "数据浏览"],
@@ -704,6 +730,75 @@ async function changeMysqlVersion() {
   }
 }
 
+async function loadPostgresVersions() {
+  if (postgresVersionsLoading.value) return;
+  postgresVersionsLoading.value = true;
+  try {
+    postgresVersions.value = await listPostgresVersions();
+    postgresVersionTarget.value =
+      postgresVersions.value.find((release) => release.selected)?.version ??
+      selectedService.value?.version ??
+      "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    postgresVersionsLoading.value = false;
+  }
+}
+
+async function changePostgresVersion() {
+  const service = selectedService.value;
+  const target = selectedPostgresVersionInfo.value;
+  if (
+    !service ||
+    service.kind !== "postgres" ||
+    !target ||
+    target.selected ||
+    serviceControlBusy.value
+  ) {
+    return;
+  }
+  if (service.status === "running") {
+    error.value = "请先停止 PostgreSQL，再切换运行版本";
+    return;
+  }
+  if (
+    !window.confirm(
+      `确定切换到 PostgreSQL ${target.version} 吗？每个主版本使用独立数据目录，不会自动升级或降级原版本数据。切换前仍建议创建备份。`,
+    )
+  ) {
+    return;
+  }
+
+  postgresVersionChanging.value = true;
+  notice.value = "";
+  error.value = "";
+  try {
+    const wasInstalled = target.installed;
+    const updated = await selectPostgresVersion(target.version);
+    const index = services.value.findIndex(
+      (item) => item.kind === updated.kind,
+    );
+    if (index >= 0) services.value[index] = updated;
+    await Promise.all([
+      loadPostgresVersions(),
+      refreshDiskUsage("postgres"),
+    ]);
+    databaseOverview.value = null;
+    databases.value = [];
+    selectedDatabase.value = "";
+    tables.value = [];
+    selectedTable.value = null;
+    notice.value = wasInstalled
+      ? `已切换到 PostgreSQL ${target.version}`
+      : `PostgreSQL ${target.version} 编译安装并切换成功`;
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    postgresVersionChanging.value = false;
+  }
+}
+
 async function selectPortTool() {
   activeTool.value = "ports";
   notice.value = "";
@@ -866,7 +961,9 @@ async function execute(action: ServiceAction) {
         ? loadRedisVersions()
         : service.kind === "mysql" && activeTab.value === "versions"
           ? loadMysqlVersions()
-          : Promise.resolve(),
+          : service.kind === "postgres" && activeTab.value === "versions"
+            ? loadPostgresVersions()
+            : Promise.resolve(),
     ]);
   } catch (cause) {
     error.value = String(cause);
@@ -901,6 +998,9 @@ async function openTab(tab: DetailTab) {
   }
   if (tab === "versions" && selectedKind.value === "mysql") {
     await loadMysqlVersions();
+  }
+  if (tab === "versions" && selectedKind.value === "postgres") {
+    await loadPostgresVersions();
   }
   if (tab === "mail" && mailMessages.value.length === 0) {
     await loadMailMessages();
@@ -2142,6 +2242,99 @@ onUnmounted(() => {
                       : mysqlVersionChanging
                         ? "安装初始化中"
                         : selectedMysqlVersionInfo?.installed
+                          ? "切换版本"
+                          : "安装并切换"
+                  }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'versions' && selectedKind === 'postgres'"
+          class="version-panel"
+        >
+          <div class="redis-version-manager">
+            <div class="redis-version-head">
+              <div>
+                <p>VERSION MANAGER</p>
+                <h2>PostgreSQL 运行版本</h2>
+              </div>
+              <span>源码独立构建 · 数据目录隔离</span>
+            </div>
+
+            <div
+              v-if="
+                postgresVersionsLoading && postgresVersions.length === 0
+              "
+              class="redis-version-loading"
+            >
+              正在读取可用版本…
+            </div>
+            <div v-else class="redis-version-grid">
+              <button
+                v-for="release in postgresVersions"
+                :key="release.version"
+                type="button"
+                :class="{
+                  selected: postgresVersionTarget === release.version,
+                  active: release.selected,
+                  legacy: release.legacy,
+                }"
+                :disabled="postgresVersionChanging"
+                @click="postgresVersionTarget = release.version"
+              >
+                <span class="redis-version-radio"></span>
+                <span class="redis-version-copy">
+                  <strong>PostgreSQL {{ release.series }}</strong>
+                  <small>v{{ release.version }}</small>
+                </span>
+                <span class="redis-version-badges">
+                  <i v-if="release.selected">当前</i>
+                  <i v-else-if="release.installed">已安装</i>
+                  <i v-if="release.recommended" class="recommended">
+                    推荐
+                  </i>
+                </span>
+                <em>{{ release.supportLabel }}</em>
+              </button>
+            </div>
+
+            <div class="redis-version-footer">
+              <p>
+                各主版本使用独立的 <code>data/版本</code> 数据目录。首次切换会编译安装并通过
+                <code>initdb</code> 创建空数据库。
+              </p>
+              <div>
+                <span
+                  v-if="
+                    selectedService.status === 'running' &&
+                    !selectedPostgresVersionInfo?.selected
+                  "
+                >
+                  请先停止 PostgreSQL
+                </span>
+                <button
+                  type="button"
+                  :disabled="
+                    !selectedPostgresVersionInfo ||
+                    selectedPostgresVersionInfo.selected ||
+                    selectedService.status === 'running' ||
+                    serviceControlBusy
+                  "
+                  @click="changePostgresVersion"
+                >
+                  <span
+                    v-if="postgresVersionChanging"
+                    class="spinner"
+                  ></span>
+                  {{
+                    selectedPostgresVersionInfo?.selected
+                      ? "当前版本"
+                      : postgresVersionChanging
+                        ? "编译初始化中"
+                        : selectedPostgresVersionInfo?.installed
                           ? "切换版本"
                           : "安装并切换"
                   }}

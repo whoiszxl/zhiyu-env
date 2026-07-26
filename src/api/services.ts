@@ -25,6 +25,7 @@ import type {
   RedisScanResult,
   RedisVersionInfo,
   MysqlVersionInfo,
+  PostgresVersionInfo,
   RestoreResult,
   ServiceBackup,
   SqlResult,
@@ -117,6 +118,14 @@ export function listMysqlVersions(): Promise<MysqlVersionInfo[]> {
 
 export function selectMysqlVersion(version: string): Promise<ServiceInfo> {
   return invoke<ServiceInfo>("mysql_version_select", { version });
+}
+
+export function listPostgresVersions(): Promise<PostgresVersionInfo[]> {
+  return invoke<PostgresVersionInfo[]>("postgres_versions");
+}
+
+export function selectPostgresVersion(version: string): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("postgres_version_select", { version });
 }
 
 export function scanRedisKeys(

@@ -47,7 +47,7 @@ Zhiyu focuses on making a usable local service available quickly. It is not desi
 | --- | ---: | ---: | --- |
 | Redis | 5.0 / 6.0 / 6.2 / 7.0 / 7.2 / 7.4 | 6379 | Version switching, key browser, type and TTL inspection, command console |
 | MySQL | 8.0 / 8.4 / 9.7 | 3306 | Version switching, database and table browser, column help, SQL console |
-| PostgreSQL | 17.10 | 5432 | Schema and table browser, column help, SQL console |
+| PostgreSQL | 14 / 15 / 16 / 17 / 18 | 5432 | Version switching, schema and table browser, column help, SQL console |
 | MongoDB | 8.0.26 | 27017 | Database and collection browser, field inference, JSON console |
 | Mailpit | 1.30.5 | 1025 / 8025 | Local email capture, message list, and body viewer |
 
@@ -63,7 +63,7 @@ Every service supports:
 - Per-service cleanup for downloads and temporary installation files
 - Local backup and guarded restore for data and configuration
 
-Redis and MySQL both include a dedicated Version Manager page. Binaries and data for different versions can coexist, and the active version can be changed while the service is stopped. Redis 7.2 and MySQL 8.4 LTS are the recommended defaults.
+Redis, MySQL, and PostgreSQL include a dedicated Version Manager page. Binaries and data for different versions can coexist, and the active version can be changed while the service is stopped. PostgreSQL major versions use separate `initdb` data directories.
 
 Zhiyu also includes two lightweight tools with no resident process:
 
@@ -217,12 +217,12 @@ install · start · stop · restart · status
 - DuckDB only accepts query statements; database files open in `safe + readonly` mode, with a 15-second timeout and a 500-row display cap.
 - Redis must be stopped before switching versions. Versions share the base configuration but keep data in separate version directories; creating a backup before switching is still recommended.
 - MySQL 8.0, 8.4, and 9.7 can be installed and switched independently. Each version has its own data directory, and a new empty database is initialized on first use.
+- PostgreSQL supports the current releases of major versions 14 through 18. Each major version uses a separate data directory instead of reusing incompatible database files.
 
 > Zhiyu is not a container isolation mechanism. Managed services run directly on macOS with the current user's permissions.
 
 ## Roadmap
 
-- Multi-version selection for MySQL and PostgreSQL
 - Redis multi-instance management
 - Backup retention policies and scheduled backups
 - Linux and Intel Mac support

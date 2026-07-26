@@ -145,11 +145,79 @@ pub fn mysql_release(version_or_series: &str) -> Option<&'static MysqlRelease> {
         .find(|release| release.version == version_or_series || release.series == version_or_series)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PostgresRelease {
+    pub series: &'static str,
+    pub version: &'static str,
+    pub archive: &'static str,
+    pub source_url: &'static str,
+    pub sha256: &'static str,
+    pub support_label: &'static str,
+    pub legacy: bool,
+    pub recommended: bool,
+}
+
 pub const POSTGRES_SERIES: &str = "17";
 pub const POSTGRES_VERSION: &str = "17.10";
-const POSTGRES_ARCHIVE: &str = "postgresql-17.10.tar.bz2";
-const POSTGRES_URL: &str = "https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2";
-const POSTGRES_SHA256: &str = "078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90";
+
+pub const POSTGRES_RELEASES: &[PostgresRelease] = &[
+    PostgresRelease {
+        series: "14",
+        version: "14.23",
+        archive: "postgresql-14.23.tar.bz2",
+        source_url: "https://ftp.postgresql.org/pub/source/v14.23/postgresql-14.23.tar.bz2",
+        sha256: "cc7216822b546330e29c2f91e123c8734a4c41795082145bb962aa712e8c94a5",
+        support_label: "维护期至 2026-11",
+        legacy: true,
+        recommended: false,
+    },
+    PostgresRelease {
+        series: "15",
+        version: "15.18",
+        archive: "postgresql-15.18.tar.bz2",
+        source_url: "https://ftp.postgresql.org/pub/source/v15.18/postgresql-15.18.tar.bz2",
+        sha256: "11df0df97fe3ea4ba9a791faaf39cee1d2fe571e78885b5b55d8517d27c323b4",
+        support_label: "维护期至 2027-11",
+        legacy: false,
+        recommended: false,
+    },
+    PostgresRelease {
+        series: "16",
+        version: "16.14",
+        archive: "postgresql-16.14.tar.bz2",
+        source_url: "https://ftp.postgresql.org/pub/source/v16.14/postgresql-16.14.tar.bz2",
+        sha256: "f6d077142737920858ce958ccdb75c6ee137a63b5b0853c70693d401ac7e3471",
+        support_label: "维护期至 2028-11",
+        legacy: false,
+        recommended: false,
+    },
+    PostgresRelease {
+        series: POSTGRES_SERIES,
+        version: POSTGRES_VERSION,
+        archive: "postgresql-17.10.tar.bz2",
+        source_url: "https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2",
+        sha256: "078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90",
+        support_label: "维护期至 2029-11",
+        legacy: false,
+        recommended: true,
+    },
+    PostgresRelease {
+        series: "18",
+        version: "18.4",
+        archive: "postgresql-18.4.tar.bz2",
+        source_url: "https://ftp.postgresql.org/pub/source/v18.4/postgresql-18.4.tar.bz2",
+        sha256: "81a81ec695fb0c7901407defaa1d2f7973617154cf27ba74e3a7ab8e64436094",
+        support_label: "维护期至 2030-11",
+        legacy: false,
+        recommended: false,
+    },
+];
+
+pub fn postgres_release(version_or_series: &str) -> Option<&'static PostgresRelease> {
+    POSTGRES_RELEASES
+        .iter()
+        .find(|release| release.version == version_or_series || release.series == version_or_series)
+}
 pub const MONGODB_SERIES: &str = "8.0";
 pub const MONGODB_VERSION: &str = "8.0.26";
 const MONGODB_ARCHIVE: &str = "mongodb-macos-arm64-8.0.26.tgz";
@@ -836,13 +904,32 @@ impl MongodbInstaller {
 #[derive(Debug, Clone)]
 pub struct PostgresInstaller {
     devbox_root: PathBuf,
+    release: &'static PostgresRelease,
 }
 
 impl PostgresInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: postgres_release(POSTGRES_VERSION)
+                .expect("default PostgreSQL release is registered"),
         }
+    }
+
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = postgres_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!(
+                "unsupported PostgreSQL version: {version_or_series}"
+            ))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn release(&self) -> &'static PostgresRelease {
+        self.release
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
@@ -856,11 +943,11 @@ impl PostgresInstaller {
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/postgres");
-        if binary_contains(&executable, &["--version"], POSTGRES_VERSION)
+        if binary_contains(&executable, &["--version"], self.release.version)
             && binary_contains(
                 &installation_dir.join("bin/initdb"),
                 &["--version"],
-                POSTGRES_VERSION,
+                self.release.version,
             )
         {
             return Ok(InstallOutcome::AlreadyInstalled {
@@ -878,10 +965,16 @@ impl PostgresInstaller {
                 .expect("PostgreSQL installation has a parent"),
         )?;
 
-        let archive = downloads_dir.join(POSTGRES_ARCHIVE);
-        prepare_archive(&archive, POSTGRES_ARCHIVE, POSTGRES_URL, POSTGRES_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         let work_dir = temp_root.join(format!(
-            "postgres-{POSTGRES_VERSION}-{}-{}",
+            "postgres-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
@@ -918,7 +1011,20 @@ impl PostgresInstaller {
         self.devbox_root
             .join("installations")
             .join("postgres")
-            .join(POSTGRES_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation_dir = self.installation_dir();
+        binary_contains(
+            &installation_dir.join("bin/postgres"),
+            &["--version"],
+            self.release.version,
+        ) && binary_contains(
+            &installation_dir.join("bin/initdb"),
+            &["--version"],
+            self.release.version,
+        )
     }
 
     fn build_and_commit(
@@ -935,7 +1041,7 @@ impl PostgresInstaller {
                 .arg(work_dir),
             "tar",
         )?;
-        let source = work_dir.join(format!("postgresql-{POSTGRES_VERSION}"));
+        let source = work_dir.join(format!("postgresql-{}", self.release.version));
         let destination_root = work_dir.join("destination");
         let relative_installation = installation_dir.strip_prefix("/").map_err(|_| {
             DevBoxError::InvalidConfig("PostgreSQL installation path must be absolute".into())
@@ -970,21 +1076,24 @@ impl PostgresInstaller {
         if !binary_contains(
             &stage.join("bin/postgres"),
             &["--version"],
-            POSTGRES_VERSION,
-        ) || !binary_contains(&stage.join("bin/initdb"), &["--version"], POSTGRES_VERSION)
-        {
+            self.release.version,
+        ) || !binary_contains(
+            &stage.join("bin/initdb"),
+            &["--version"],
+            self.release.version,
+        ) {
             return Err(DevBoxError::CommandFailed {
                 command: "postgres --version".into(),
-                message: format!("built binary is not PostgreSQL {POSTGRES_VERSION}"),
+                message: format!("built binary is not PostgreSQL {}", self.release.version),
             });
         }
         write_manifest(
             &stage,
             "postgres",
-            POSTGRES_SERIES,
-            POSTGRES_VERSION,
-            POSTGRES_URL,
-            POSTGRES_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-source",
         )?;
         replace_installation(&stage, installation_dir)
@@ -1194,9 +1303,6 @@ mod tests {
 
     #[test]
     fn database_installer_constants_target_matching_releases() {
-        assert!(POSTGRES_URL.ends_with(POSTGRES_ARCHIVE));
-        assert!(POSTGRES_ARCHIVE.contains(POSTGRES_VERSION));
-        assert_eq!(POSTGRES_SHA256.len(), 64);
         assert!(MONGODB_URL.ends_with(MONGODB_ARCHIVE));
         assert!(MONGODB_ARCHIVE.contains(MONGODB_VERSION));
         assert_eq!(MONGODB_SHA256.len(), 64);
@@ -1206,6 +1312,33 @@ mod tests {
         assert!(DUCKDB_URL.ends_with("duckdb_cli-osx-universal.zip"));
         assert!(DUCKDB_ARCHIVE.contains(DUCKDB_VERSION));
         assert_eq!(DUCKDB_SHA256.len(), 64);
+    }
+
+    #[test]
+    fn postgres_constants_target_the_same_release() {
+        assert_eq!(POSTGRES_RELEASES.len(), 5);
+        for release in POSTGRES_RELEASES {
+            assert!(release.source_url.ends_with(release.archive));
+            assert!(release.archive.contains(release.version));
+            assert_eq!(release.sha256.len(), 64);
+            assert_eq!(postgres_release(release.version), Some(release));
+            assert_eq!(postgres_release(release.series), Some(release));
+        }
+        assert!(postgres_release("13").is_none());
+        assert!(postgres_release(POSTGRES_VERSION).is_some_and(|release| release.recommended));
+    }
+
+    #[test]
+    fn postgres_installers_use_independent_series_directories() {
+        let root = Path::new("/tmp/zhiyu-postgres-versions");
+        let postgres_14 = PostgresInstaller::for_version(root, "14.23").unwrap();
+        let postgres_17 = PostgresInstaller::new(root);
+        let postgres_18 = PostgresInstaller::for_version(root, "18").unwrap();
+
+        assert!(postgres_14.installation_dir().ends_with("postgres/14"));
+        assert!(postgres_17.installation_dir().ends_with("postgres/17"));
+        assert!(postgres_18.installation_dir().ends_with("postgres/18"));
+        assert!(PostgresInstaller::for_version(root, "13").is_err());
     }
 
     #[test]

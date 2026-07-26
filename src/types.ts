@@ -91,6 +91,16 @@ export interface MysqlVersionInfo {
   recommended: boolean;
 }
 
+export interface PostgresVersionInfo {
+  series: string;
+  version: string;
+  installed: boolean;
+  selected: boolean;
+  supportLabel: string;
+  legacy: boolean;
+  recommended: boolean;
+}
+
 export interface RedisScanResult {
   nextCursor: string;
   keys: string[];
