@@ -8,6 +8,11 @@ license.workspace = true
 name = "zhiyu_env_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# 二进制名即 macOS 菜单栏 / Dock 中展示的应用名（开发模式未打包成 .app 时生效）
+[[bin]]
+name = "智屿Env"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

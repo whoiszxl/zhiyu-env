@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "智屿",
+  "productName": "智屿Env",
   "version": "0.1.0",
   "identifier": "dev.zhiyu.env",
   "build": {
