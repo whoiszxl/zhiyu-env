@@ -1,11 +1,12 @@
 use devbox_core::{
     installer::{
-        MAILPIT_SERIES, MAILPIT_VERSION, MONGODB_SERIES, MONGODB_VERSION, MYSQL_SERIES,
-        MYSQL_VERSION, POSTGRES_SERIES, POSTGRES_VERSION, REDIS_SERIES, REDIS_VERSION,
+        mysql_release, redis_release, MysqlRelease, RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION,
+        MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, POSTGRES_SERIES,
+        POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION,
     },
-    MailpitInstaller, MailpitService, MongodbInstaller, MongodbService, MysqlInstaller,
-    MysqlService, PostgresInstaller, PostgresService, RedisInstaller, RedisService, ServiceConfig,
-    ServiceKind, ServiceManager, ServiceStatus,
+    ConfigManager, MailpitInstaller, MailpitService, MongodbInstaller, MongodbService,
+    MysqlInstaller, MysqlService, PostgresInstaller, PostgresService, RedisInstaller, RedisService,
+    ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -14,7 +15,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ServiceKindInput {
     Redis,
@@ -41,7 +42,7 @@ impl From<ServiceKindInput> for ServiceKind {
 pub struct ServiceInfo {
     kind: ServiceKind,
     name: &'static str,
-    version: &'static str,
+    version: String,
     port: u16,
     status: &'static str,
     pid: Option<u32>,
@@ -70,7 +71,32 @@ pub struct ServiceDiskUsage {
     logs_bytes: u64,
     config_bytes: u64,
     cache_bytes: u64,
+    backup_bytes: u64,
     other_bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedisVersionInfo {
+    series: &'static str,
+    version: &'static str,
+    installed: bool,
+    selected: bool,
+    support_label: &'static str,
+    legacy: bool,
+    recommended: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MysqlVersionInfo {
+    series: &'static str,
+    version: &'static str,
+    installed: bool,
+    selected: bool,
+    support_label: &'static str,
+    legacy: bool,
+    recommended: bool,
 }
 
 fn devbox_root() -> Result<PathBuf, String> {
@@ -79,34 +105,84 @@ fn devbox_root() -> Result<PathBuf, String> {
         .ok_or_else(|| "无法确定当前用户目录".to_string())
 }
 
+fn selected_redis_release(root: &Path) -> &'static RedisRelease {
+    let metadata = root.join("instances/redis/default/service.json");
+    ConfigManager
+        .load(metadata)
+        .ok()
+        .filter(|config| config.kind == ServiceKind::Redis)
+        .and_then(|config| redis_release(&config.version))
+        .unwrap_or_else(|| {
+            redis_release(REDIS_VERSION).expect("default Redis release is registered")
+        })
+}
+
+fn redis_service_config(root: &Path, release: &RedisRelease) -> ServiceConfig {
+    let instance = root.join("instances/redis/default");
+    let data_dir = instance.join("data").join(release.series);
+    ServiceConfig {
+        name: "Redis".into(),
+        kind: ServiceKind::Redis,
+        version: release.version.into(),
+        port: 6379,
+        executable: root
+            .join("installations")
+            .join("redis")
+            .join(release.series)
+            .join("bin/redis-server"),
+        arguments: vec![
+            instance.join("conf/redis.conf").display().to_string(),
+            "--dir".into(),
+            data_dir.display().to_string(),
+        ],
+        environment: BTreeMap::new(),
+        instance_dir: instance,
+    }
+}
+
+fn selected_mysql_release(root: &Path) -> &'static MysqlRelease {
+    let metadata = root.join("instances/mysql/default/service.json");
+    ConfigManager
+        .load(metadata)
+        .ok()
+        .filter(|config| config.kind == ServiceKind::Mysql)
+        .and_then(|config| mysql_release(&config.version))
+        .unwrap_or_else(|| {
+            mysql_release(MYSQL_VERSION).expect("default MySQL release is registered")
+        })
+}
+
+fn mysql_service_config(root: &Path, release: &MysqlRelease) -> ServiceConfig {
+    let instance = root.join("instances/mysql/default");
+    let installation = root.join("installations/mysql").join(release.series);
+    let data_dir = instance.join("data").join(release.series);
+    ServiceConfig {
+        name: "MySQL".into(),
+        kind: ServiceKind::Mysql,
+        version: release.version.into(),
+        port: 3306,
+        executable: installation.join("bin/mysqld"),
+        arguments: vec![
+            format!("--defaults-file={}", instance.join("conf/my.cnf").display()),
+            format!("--basedir={}", installation.display()),
+            format!("--datadir={}", data_dir.display()),
+        ],
+        environment: BTreeMap::new(),
+        instance_dir: instance,
+    }
+}
+
 fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
     let root = devbox_root()?;
+    if kind == ServiceKind::Redis {
+        return Ok(redis_service_config(&root, selected_redis_release(&root)));
+    }
+    if kind == ServiceKind::Mysql {
+        return Ok(mysql_service_config(&root, selected_mysql_release(&root)));
+    }
     let (name, version, port, executable, arguments) = match kind {
-        ServiceKind::Redis => {
-            let instance = root.join("instances/redis/default");
-            (
-                "Redis",
-                REDIS_VERSION,
-                6379,
-                root.join(format!(
-                    "installations/redis/{REDIS_SERIES}/bin/redis-server"
-                )),
-                vec![instance.join("conf/redis.conf").display().to_string()],
-            )
-        }
-        ServiceKind::Mysql => {
-            let instance = root.join("instances/mysql/default");
-            (
-                "MySQL",
-                MYSQL_VERSION,
-                3306,
-                root.join(format!("installations/mysql/{MYSQL_SERIES}/bin/mysqld")),
-                vec![format!(
-                    "--defaults-file={}",
-                    instance.join("conf/my.cnf").display()
-                )],
-            )
-        }
+        ServiceKind::Redis => unreachable!(),
+        ServiceKind::Mysql => unreachable!(),
         ServiceKind::Postgres => {
             let instance = root.join("instances/postgres/default");
             (
@@ -285,24 +361,24 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Mongodb => "MongoDB",
         ServiceKindInput::Mailpit => "Mailpit",
     };
-    let version = match kind {
-        ServiceKindInput::Redis => REDIS_VERSION,
-        ServiceKindInput::Mysql => MYSQL_VERSION,
-        ServiceKindInput::Postgres => POSTGRES_VERSION,
-        ServiceKindInput::Mongodb => MONGODB_VERSION,
-        ServiceKindInput::Mailpit => MAILPIT_VERSION,
-    };
-
     Ok(ServiceInfo {
         kind: kind.into(),
         name,
-        version,
+        version: config.version.clone(),
         port: config.port,
         status,
         pid,
         instance_dir: config.instance_dir.clone(),
         config_path: native_config_path(&config),
-        data_path: config.data_dir(),
+        data_path: match kind {
+            ServiceKindInput::Redis => RedisService::new(config.clone())
+                .map_err(stringify_error)?
+                .data_dir(),
+            ServiceKindInput::Mysql => MysqlService::new(config.clone())
+                .map_err(stringify_error)?
+                .data_dir(),
+            _ => config.data_dir(),
+        },
         log_path: primary_log_path(&config),
         executable_path: config.executable,
     })
@@ -360,19 +436,27 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
 fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
     match kind {
         ServiceKindInput::Redis => {
-            RedisInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Redis)?;
+            RedisInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
-            run_action(kind, |service| service.install())
+            RedisService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            info(kind)
         }
         ServiceKindInput::Mysql => {
             let root = devbox_root()?;
-            let installer = MysqlInstaller::new(&root);
-            installer.install().map_err(stringify_error)?;
-            with_service(kind, |service| service.install())?;
             let config = service_config(ServiceKind::Mysql)?;
+            let installer =
+                MysqlInstaller::for_version(&root, &config.version).map_err(stringify_error)?;
+            installer.install().map_err(stringify_error)?;
+            let service = MysqlService::new(config).map_err(stringify_error)?;
+            service.install().map_err(stringify_error)?;
             installer
-                .initialize(&config.data_dir())
+                .initialize(&service.data_dir())
                 .map_err(stringify_error)?;
             info(kind)
         }
@@ -407,6 +491,118 @@ pub async fn service_install(kind: ServiceKindInput) -> Result<ServiceInfo, Stri
     tauri::async_runtime::spawn_blocking(move || install_service(kind))
         .await
         .map_err(|error| format!("服务安装任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn redis_versions() -> Result<Vec<RedisVersionInfo>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let root = devbox_root()?;
+        let selected = selected_redis_release(&root);
+        REDIS_RELEASES
+            .iter()
+            .map(|release| {
+                let installer =
+                    RedisInstaller::for_version(&root, release.version).map_err(stringify_error)?;
+                Ok(RedisVersionInfo {
+                    series: release.series,
+                    version: release.version,
+                    installed: installer.is_installed(),
+                    selected: release.version == selected.version,
+                    support_label: release.support_label,
+                    legacy: release.legacy,
+                    recommended: release.recommended,
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| format!("Redis 版本状态任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn redis_version_select(version: String) -> Result<ServiceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = devbox_root()?;
+        let release =
+            redis_release(&version).ok_or_else(|| format!("不支持 Redis 版本 {version}"))?;
+        let current = service_config(ServiceKind::Redis)?;
+        let current_service = RedisService::new(current).map_err(stringify_error)?;
+        let status = current_service.status().map_err(stringify_error)?;
+        if matches!(status, ServiceStatus::Running { .. }) {
+            return Err("请先停止 Redis，再切换运行版本".into());
+        }
+        current_service
+            .prepare_version_data()
+            .map_err(stringify_error)?;
+
+        RedisInstaller::for_version(&root, release.version)
+            .map_err(stringify_error)?
+            .install()
+            .map_err(stringify_error)?;
+        RedisService::new(redis_service_config(&root, release))
+            .and_then(|service| service.install())
+            .map_err(stringify_error)?;
+        info(ServiceKindInput::Redis)
+    })
+    .await
+    .map_err(|error| format!("Redis 版本切换任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn mysql_versions() -> Result<Vec<MysqlVersionInfo>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let root = devbox_root()?;
+        let selected = selected_mysql_release(&root);
+        MYSQL_RELEASES
+            .iter()
+            .map(|release| {
+                let installer =
+                    MysqlInstaller::for_version(&root, release.version).map_err(stringify_error)?;
+                Ok(MysqlVersionInfo {
+                    series: release.series,
+                    version: release.version,
+                    installed: installer.is_installed(),
+                    selected: release.version == selected.version,
+                    support_label: release.support_label,
+                    legacy: release.legacy,
+                    recommended: release.recommended,
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| format!("MySQL 版本状态任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn mysql_version_select(version: String) -> Result<ServiceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = devbox_root()?;
+        let release =
+            mysql_release(&version).ok_or_else(|| format!("不支持 MySQL 版本 {version}"))?;
+        let current = service_config(ServiceKind::Mysql)?;
+        let current_service = MysqlService::new(current).map_err(stringify_error)?;
+        let status = current_service.status().map_err(stringify_error)?;
+        if matches!(status, ServiceStatus::Running { .. }) {
+            return Err("请先停止 MySQL，再切换运行版本".into());
+        }
+        current_service
+            .prepare_version_data()
+            .map_err(stringify_error)?;
+
+        let installer =
+            MysqlInstaller::for_version(&root, release.version).map_err(stringify_error)?;
+        installer.install().map_err(stringify_error)?;
+        let service =
+            MysqlService::new(mysql_service_config(&root, release)).map_err(stringify_error)?;
+        service.install().map_err(stringify_error)?;
+        installer
+            .initialize(&service.data_dir())
+            .map_err(stringify_error)?;
+        info(ServiceKindInput::Mysql)
+    })
+    .await
+    .map_err(|error| format!("MySQL 版本切换任务异常结束: {error}"))?
 }
 
 #[tauri::command]
@@ -573,13 +769,15 @@ fn collect_metrics(kind: ServiceKindInput) -> Result<ServiceMetrics, String> {
 fn collect_disk_usage(kind: ServiceKindInput) -> Result<ServiceDiskUsage, String> {
     let root = devbox_root()?;
     let kind: ServiceKind = kind.into();
-    let installation_bytes = directory_size(&root.join("installations").join(kind.as_str()))?;
+    let installation_bytes = path_disk_size(&root.join("installations").join(kind.as_str()))?;
     let instance = root.join("instances").join(kind.as_str());
-    let data_bytes = directory_size(&instance.join("default/data"))?;
-    let logs_bytes = directory_size(&instance.join("default/logs"))?;
-    let config_bytes = directory_size(&instance.join("default/conf"))?;
-    let instance_bytes = directory_size(&instance)?;
-    let cache_bytes = download_cache_size(&root.join("downloads"), kind)?;
+    let data_bytes = path_disk_size(&instance.join("default/data"))?;
+    let logs_bytes = path_disk_size(&instance.join("default/logs"))?;
+    let config_bytes = path_disk_size(&instance.join("default/conf"))?;
+    let instance_bytes = path_disk_size(&instance)?;
+    let cache_bytes = download_cache_size(&root.join("downloads"), kind)?
+        .saturating_add(download_cache_size(&root.join("tmp"), kind)?);
+    let backup_bytes = path_disk_size(&root.join("backups").join(kind.as_str()))?;
     let other_bytes = instance_bytes.saturating_sub(
         data_bytes
             .saturating_add(logs_bytes)
@@ -587,7 +785,8 @@ fn collect_disk_usage(kind: ServiceKindInput) -> Result<ServiceDiskUsage, String
     );
     let total_bytes = installation_bytes
         .saturating_add(instance_bytes)
-        .saturating_add(cache_bytes);
+        .saturating_add(cache_bytes)
+        .saturating_add(backup_bytes);
 
     Ok(ServiceDiskUsage {
         total_bytes,
@@ -596,8 +795,18 @@ fn collect_disk_usage(kind: ServiceKindInput) -> Result<ServiceDiskUsage, String
         logs_bytes,
         config_bytes,
         cache_bytes,
+        backup_bytes,
         other_bytes,
     })
+}
+
+pub(crate) fn stopped_service_instance(kind: ServiceKindInput) -> Result<PathBuf, String> {
+    let config = service_config(kind.into())?;
+    match with_service(kind, |service| service.status())? {
+        ServiceStatus::NotInstalled => Err(format!("{} 尚未安装，无法备份或恢复", config.name)),
+        ServiceStatus::Running { .. } => Err(format!("请先停止 {}，再执行备份或恢复", config.name)),
+        ServiceStatus::Stopped | ServiceStatus::StalePid { .. } => Ok(config.instance_dir),
+    }
 }
 
 fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, String> {
@@ -620,13 +829,13 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
             .to_ascii_lowercase()
             .starts_with(prefix)
         {
-            total = total.saturating_add(directory_size(&entry.path())?);
+            total = total.saturating_add(path_disk_size(&entry.path())?);
         }
     }
     Ok(total)
 }
 
-fn directory_size(path: &Path) -> Result<u64, String> {
+pub(crate) fn path_disk_size(path: &Path) -> Result<u64, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
@@ -683,7 +892,11 @@ fn tail_file(path: &PathBuf, max_bytes: u64) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{directory_size, mailpit_value_allowed};
+    use super::{
+        mailpit_value_allowed, mysql_service_config, path_disk_size, redis_service_config,
+        selected_mysql_release, selected_redis_release,
+    };
+    use devbox_core::{ConfigManager, ServiceConfig};
     use std::fs;
     use std::path::Path;
 
@@ -717,7 +930,63 @@ mod tests {
         fs::write(root.join("first.bin"), [0_u8; 7]).unwrap();
         fs::write(root.join("nested/second.bin"), [0_u8; 11]).unwrap();
 
-        assert!(directory_size(&root).unwrap() >= 18);
+        assert!(path_disk_size(&root).unwrap() >= 18);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn redis_selected_version_is_loaded_from_instance_metadata() {
+        let root =
+            std::env::temp_dir().join(format!("zhiyu-redis-version-test-{}", std::process::id()));
+        let release = devbox_core::installer::redis_release("6.2.23").unwrap();
+        let mut config: ServiceConfig = redis_service_config(&root, release);
+        config.version = "6.2".into();
+        ConfigManager.save(&config).unwrap();
+
+        assert_eq!(selected_redis_release(&root).version, "6.2.23");
+        assert!(config.executable.ends_with("redis/6.2/bin/redis-server"));
+        assert_eq!(
+            config.arguments,
+            vec![
+                root.join("instances/redis/default/conf/redis.conf")
+                    .display()
+                    .to_string(),
+                "--dir".into(),
+                root.join("instances/redis/default/data/6.2")
+                    .display()
+                    .to_string(),
+            ]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mysql_selected_version_is_loaded_from_instance_metadata() {
+        let root =
+            std::env::temp_dir().join(format!("zhiyu-mysql-version-test-{}", std::process::id()));
+        let release = devbox_core::installer::mysql_release("8.0.45").unwrap();
+        let config: ServiceConfig = mysql_service_config(&root, release);
+        ConfigManager.save(&config).unwrap();
+
+        assert_eq!(selected_mysql_release(&root).version, "8.0.45");
+        assert!(config.executable.ends_with("mysql/8.0/bin/mysqld"));
+        assert_eq!(
+            config.arguments,
+            vec![
+                format!(
+                    "--defaults-file={}",
+                    root.join("instances/mysql/default/conf/my.cnf").display()
+                ),
+                format!(
+                    "--basedir={}",
+                    root.join("installations/mysql/8.0").display()
+                ),
+                format!(
+                    "--datadir={}",
+                    root.join("instances/mysql/default/data/8.0").display()
+                ),
+            ]
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -112,6 +112,77 @@ fn start_rejects_missing_executable() {
 }
 
 #[test]
+fn start_reports_a_process_that_exits_immediately() {
+    let temp = TempDir::new().unwrap();
+    let mut service_config = config(temp.path(), ServiceKind::Redis);
+    service_config.executable = "/usr/bin/false".into();
+    service_config.arguments.clear();
+    let service = RedisService::new(service_config.clone()).unwrap();
+    service.install().unwrap();
+
+    let error = service.start().unwrap_err().to_string();
+    assert!(error.contains("进程在启动阶段退出"));
+    assert!(!service_config.pid_path().exists());
+}
+
+#[test]
+fn redis_legacy_data_is_moved_to_the_selected_version() {
+    let temp = TempDir::new().unwrap();
+    let mut service_config = config(temp.path(), ServiceKind::Redis);
+    let data_root = service_config.data_dir();
+    let version_data = data_root.join("7.2");
+    service_config.arguments = vec![
+        service_config
+            .config_dir()
+            .join("redis.conf")
+            .display()
+            .to_string(),
+        "--dir".into(),
+        version_data.display().to_string(),
+    ];
+    std::fs::create_dir_all(&data_root).unwrap();
+    std::fs::write(data_root.join("dump.rdb"), b"existing redis data").unwrap();
+
+    let service = RedisService::new(service_config).unwrap();
+    service.install().unwrap();
+
+    assert_eq!(service.data_dir(), version_data);
+    assert!(!data_root.join("dump.rdb").exists());
+    assert_eq!(
+        std::fs::read(version_data.join("dump.rdb")).unwrap(),
+        b"existing redis data"
+    );
+}
+
+#[test]
+fn mysql_legacy_data_is_moved_to_the_selected_version() {
+    let temp = TempDir::new().unwrap();
+    let mut service_config = config(temp.path(), ServiceKind::Mysql);
+    let data_root = service_config.data_dir();
+    let version_data = data_root.join("8.4");
+    service_config.arguments = vec![
+        format!(
+            "--defaults-file={}",
+            service_config.config_dir().join("my.cnf").display()
+        ),
+        format!("--datadir={}", version_data.display()),
+    ];
+    std::fs::create_dir_all(data_root.join("mysql")).unwrap();
+    std::fs::write(data_root.join("auto.cnf"), b"existing mysql data").unwrap();
+
+    let service = MysqlService::new(service_config).unwrap();
+    service.install().unwrap();
+
+    assert_eq!(service.data_dir(), version_data);
+    assert!(!data_root.join("auto.cnf").exists());
+    assert!(version_data.join("mysql").is_dir());
+    assert_eq!(
+        std::fs::read(version_data.join("auto.cnf")).unwrap(),
+        b"existing mysql data"
+    );
+}
+
+#[test]
 fn a_new_manager_can_stop_and_reap_an_existing_child() {
     let temp = TempDir::new().unwrap();
     let service_config = config(temp.path(), ServiceKind::Redis);

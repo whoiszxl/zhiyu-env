@@ -8,21 +8,24 @@ fn main() {
     let installer = MysqlInstaller::new(&root);
     if let Err(error) = installer.install().and_then(|outcome| {
         println!("{outcome:?}");
+        let installation = installer.installation_dir();
+        let data_dir = instance.join("data").join(installer.release().series);
         let service = MysqlService::new(ServiceConfig {
             name: "MySQL".into(),
             kind: ServiceKind::Mysql,
-            version: "8.4.10".into(),
+            version: installer.release().version.into(),
             port: 3306,
-            executable: installer.installation_dir().join("bin/mysqld"),
-            arguments: vec![format!(
-                "--defaults-file={}",
-                instance.join("conf/my.cnf").display()
-            )],
+            executable: installation.join("bin/mysqld"),
+            arguments: vec![
+                format!("--defaults-file={}", instance.join("conf/my.cnf").display()),
+                format!("--basedir={}", installer.installation_dir().display()),
+                format!("--datadir={}", data_dir.display()),
+            ],
             environment: BTreeMap::new(),
             instance_dir: instance.clone(),
         })?;
         service.install()?;
-        installer.initialize(&instance.join("data"))
+        installer.initialize(&data_dir)
     }) {
         eprintln!("{error}");
         std::process::exit(1);

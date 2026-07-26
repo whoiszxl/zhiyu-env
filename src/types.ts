@@ -42,7 +42,24 @@ export interface ServiceDiskUsage {
   logsBytes: number;
   configBytes: number;
   cacheBytes: number;
+  backupBytes: number;
   otherBytes: number;
+}
+
+export interface CacheCleanupResult {
+  removedItems: number;
+  freedBytes: number;
+}
+
+export interface ServiceBackup {
+  id: string;
+  createdAtMillis: number;
+  sizeBytes: number;
+  automatic: boolean;
+}
+
+export interface RestoreResult {
+  safetyBackup: ServiceBackup;
 }
 
 export interface RedisOverview {
@@ -52,6 +69,26 @@ export interface RedisOverview {
   operationsPerSecond: number;
   totalKeys: number;
   hitRatePercent: number;
+}
+
+export interface RedisVersionInfo {
+  series: string;
+  version: string;
+  installed: boolean;
+  selected: boolean;
+  supportLabel: string;
+  legacy: boolean;
+  recommended: boolean;
+}
+
+export interface MysqlVersionInfo {
+  series: string;
+  version: string;
+  installed: boolean;
+  selected: boolean;
+  supportLabel: string;
+  legacy: boolean;
+  recommended: boolean;
 }
 
 export interface RedisScanResult {
@@ -197,4 +234,19 @@ export interface PortListener {
   process: string;
   managedService: string | null;
   commonService: string | null;
+}
+
+export interface DuckdbStatus {
+  installed: boolean;
+  version: string;
+  executablePath: string;
+  installationBytes: number;
+}
+
+export interface DuckdbQueryResult {
+  columns: string[];
+  rows: Array<Array<string | null>>;
+  elapsedMs: number;
+  truncated: boolean;
+  summary: string;
 }

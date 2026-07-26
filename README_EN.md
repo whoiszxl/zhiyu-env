@@ -45,8 +45,8 @@ Zhiyu focuses on making a usable local service available quickly. It is not desi
 
 | Service | Current version | Default port | Built-in developer tools |
 | --- | ---: | ---: | --- |
-| Redis | 7.2.15 | 6379 | Key browser, type and TTL inspection, command console |
-| MySQL | 8.4.10 | 3306 | Database and table browser, column help, SQL console |
+| Redis | 5.0 / 6.0 / 6.2 / 7.0 / 7.2 / 7.4 | 6379 | Version switching, key browser, type and TTL inspection, command console |
+| MySQL | 8.0 / 8.4 / 9.7 | 3306 | Version switching, database and table browser, column help, SQL console |
 | PostgreSQL | 17.10 | 5432 | Schema and table browser, column help, SQL console |
 | MongoDB | 8.0.26 | 27017 | Database and collection browser, field inference, JSON console |
 | Mailpit | 1.30.5 | 1025 / 8025 | Local email capture, message list, and body viewer |
@@ -60,8 +60,15 @@ Every service supports:
 - Runtime log viewing
 - CPU, memory, and uptime monitoring
 - Disk usage for programs, data, logs, configuration, and download caches
+- Per-service cleanup for downloads and temporary installation files
+- Local backup and guarded restore for data and configuration
 
-Zhiyu also includes a read-only **TCP port checker** that identifies listening ports and their owning processes.
+Redis and MySQL both include a dedicated Version Manager page. Binaries and data for different versions can coexist, and the active version can be changed while the service is stopped. Redis 7.2 and MySQL 8.4 LTS are the recommended defaults.
+
+Zhiyu also includes two lightweight tools with no resident process:
+
+- **TCP port checker** — identifies listening ports and their owning processes.
+- **DuckDB local file query tool** — runs read-only SQL against CSV, TSV, JSON, JSONL, Parquet, and `.duckdb` files.
 
 ## Desktop features
 
@@ -74,6 +81,7 @@ Each service has its own detail page with runtime status, PID, local endpoint, l
 - Redis: scan keys and inspect values, types, TTLs, and memory size.
 - MySQL / PostgreSQL: browse databases, tables, column definitions, and the first 100 rows.
 - MongoDB: browse databases and collections, infer field types, and preview documents.
+- DuckDB: map a selected local file to `selected_file` for filtering, aggregation, and schema inspection.
 - Database types include compact Chinese help tooltips in the current UI.
 
 ### Guarded consoles
@@ -114,11 +122,18 @@ Zhiyu does not modify the system `PATH`. Runtime arguments, PID files, configura
 ~/.devbox/
 ├── downloads/                 # Verified archive cache
 ├── installations/             # Programs isolated by service and version
-│   ├── redis/7.2/
+│   ├── redis/
+│   │   ├── 5.0/
+│   │   ├── 6.0/
+│   │   ├── 6.2/
+│   │   ├── 7.0/
+│   │   ├── 7.2/
+│   │   └── 7.4/
 │   ├── mysql/8.4/
 │   ├── postgres/17/
 │   ├── mongodb/8.0/
-│   └── mailpit/1.30/
+│   ├── mailpit/1.30/
+│   └── duckdb/1.5/
 ├── instances/                 # Current service instances
 │   └── <service>/default/
 │       ├── conf/
@@ -126,6 +141,7 @@ Zhiyu does not modify the system `PATH`. Runtime arguments, PID files, configura
 │       ├── logs/
 │       ├── run/
 │       └── service.json
+├── backups/                   # Data and configuration backups by service
 └── tmp/                       # Temporary installation files
 ```
 
@@ -194,19 +210,23 @@ install · start · stop · restart · status
 - Services are intended for local development and are not production-hardened.
 - Mailpit is restricted to loopback interfaces, with SMTP relay and forwarding disabled.
 - A `.bak` file is created before configuration changes are saved.
+- The current state is backed up automatically before a data restore.
+- Backup paths, links, and special files are validated before extraction.
 - Email HTML is never rendered directly.
 - Data consoles restrict blocking and destructive commands.
+- DuckDB only accepts query statements; database files open in `safe + readonly` mode, with a 15-second timeout and a 500-row display cap.
+- Redis must be stopped before switching versions. Versions share the base configuration but keep data in separate version directories; creating a backup before switching is still recommended.
+- MySQL 8.0, 8.4, and 9.7 can be installed and switched independently. Each version has its own data directory, and a new empty database is initialized on first use.
 
 > Zhiyu is not a container isolation mechanism. Managed services run directly on macOS with the current user's permissions.
 
 ## Roadmap
 
-- Multi-version selection and multi-instance management
-- Installation cache cleanup
-- Data backup and restore
+- Multi-version selection for MySQL and PostgreSQL
+- Redis multi-instance management
+- Backup retention policies and scheduled backups
 - Linux and Intel Mac support
 - More lightweight developer tools
-- A local DuckDB file explorer
 
 ## Contributing
 

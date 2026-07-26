@@ -1,5 +1,6 @@
 use crate::commands::ServiceKindInput;
 use devbox_core::installer::{MYSQL_SERIES, POSTGRES_SERIES};
+use devbox_core::{ConfigManager, ServiceKind};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -335,10 +336,17 @@ fn run_query(engine: DatabaseEngine, database: &str, sql: &str) -> Result<SqlRes
 
 fn mysql_command(database: &str) -> Result<Command, String> {
     let root = devbox_root()?;
-    let executable = root
-        .join("installations/mysql")
-        .join(MYSQL_SERIES)
-        .join("bin/mysql");
+    let metadata = root.join("instances/mysql/default/service.json");
+    let executable = ConfigManager
+        .load(metadata)
+        .ok()
+        .filter(|config| config.kind == ServiceKind::Mysql)
+        .map(|config| config.executable.with_file_name("mysql"))
+        .unwrap_or_else(|| {
+            root.join("installations/mysql")
+                .join(MYSQL_SERIES)
+                .join("bin/mysql")
+        });
     ensure_executable(&executable)?;
     let mut command = Command::new(executable);
     command.args([

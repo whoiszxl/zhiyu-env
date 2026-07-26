@@ -1,7 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  CacheCleanupResult,
   DatabaseInfo,
   DatabaseOverview,
+  DuckdbQueryResult,
+  DuckdbStatus,
   MailDetail,
   MailpitOverview,
   MailSummary,
@@ -20,6 +23,10 @@ import type {
   RedisKeyDetail,
   RedisOverview,
   RedisScanResult,
+  RedisVersionInfo,
+  MysqlVersionInfo,
+  RestoreResult,
+  ServiceBackup,
   SqlResult,
   SqlServiceKind,
   TableDetail,
@@ -49,6 +56,34 @@ export function getServiceDiskUsage(
   return invoke<ServiceDiskUsage>("service_disk_usage", { kind });
 }
 
+export function cleanServiceCache(
+  kind: ServiceKind,
+): Promise<CacheCleanupResult> {
+  return invoke<CacheCleanupResult>("service_cache_clean", { kind });
+}
+
+export function listServiceBackups(
+  kind: ServiceKind,
+): Promise<ServiceBackup[]> {
+  return invoke<ServiceBackup[]>("service_backup_list", { kind });
+}
+
+export function createServiceBackup(
+  kind: ServiceKind,
+): Promise<ServiceBackup> {
+  return invoke<ServiceBackup>("service_backup_create", { kind });
+}
+
+export function restoreServiceBackup(
+  kind: ServiceKind,
+  backupId: string,
+): Promise<RestoreResult> {
+  return invoke<RestoreResult>("service_backup_restore", {
+    kind,
+    backupId,
+  });
+}
+
 export function readServiceConfig(kind: ServiceKind): Promise<string> {
   return invoke<string>("service_config_read", { kind });
 }
@@ -66,6 +101,22 @@ export function getServiceLogs(kind: ServiceKind): Promise<string> {
 
 export function getRedisOverview(): Promise<RedisOverview> {
   return invoke<RedisOverview>("redis_overview");
+}
+
+export function listRedisVersions(): Promise<RedisVersionInfo[]> {
+  return invoke<RedisVersionInfo[]>("redis_versions");
+}
+
+export function selectRedisVersion(version: string): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("redis_version_select", { version });
+}
+
+export function listMysqlVersions(): Promise<MysqlVersionInfo[]> {
+  return invoke<MysqlVersionInfo[]>("mysql_versions");
+}
+
+export function selectMysqlVersion(version: string): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("mysql_version_select", { version });
 }
 
 export function scanRedisKeys(
@@ -196,4 +247,19 @@ export function listMailpitMessages(): Promise<MailSummary[]> {
 
 export function getMailpitMessageDetail(id: string): Promise<MailDetail> {
   return invoke<MailDetail>("mailpit_message_detail", { id });
+}
+
+export function getDuckdbStatus(): Promise<DuckdbStatus> {
+  return invoke<DuckdbStatus>("duckdb_status");
+}
+
+export function installDuckdb(): Promise<DuckdbStatus> {
+  return invoke<DuckdbStatus>("duckdb_install");
+}
+
+export function queryDuckdbFile(
+  path: string,
+  sql: string,
+): Promise<DuckdbQueryResult> {
+  return invoke<DuckdbQueryResult>("duckdb_query", { path, sql });
 }

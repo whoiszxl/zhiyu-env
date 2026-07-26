@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { open } from "@tauri-apps/plugin-dialog";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
+  cleanServiceCache,
+  createServiceBackup,
   executeSql,
   executeRedisCommand,
   executeMongoCommand,
   getMailpitMessageDetail,
   getMailpitOverview,
   getDatabaseOverview,
+  getDuckdbStatus,
   getMongoCollectionDetail,
   getMongoOverview,
   getRedisKeyDetail,
@@ -20,17 +24,27 @@ import {
   listMongoCollections,
   listMongoDatabases,
   listMailpitMessages,
+  listMysqlVersions,
   listPortListeners,
+  listRedisVersions,
+  listServiceBackups,
   listServices,
+  installDuckdb,
+  queryDuckdbFile,
   readServiceConfig,
   runServiceAction,
+  restoreServiceBackup,
   saveServiceConfig,
   scanRedisKeys,
+  selectRedisVersion,
+  selectMysqlVersion,
 } from "./api/services";
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
   DatabaseInfo,
   DatabaseOverview,
+  DuckdbQueryResult,
+  DuckdbStatus,
   MailDetail,
   MailpitOverview,
   MailSummary,
@@ -38,10 +52,13 @@ import type {
   MongoCollectionInfo,
   MongoDatabaseInfo,
   MongoOverview,
+  MysqlVersionInfo,
   PortListener,
   RedisKeyDetail,
   RedisOverview,
+  RedisVersionInfo,
   ServiceAction,
+  ServiceBackup,
   ServiceDiskUsage,
   ServiceInfo,
   ServiceKind,
@@ -61,8 +78,10 @@ type DetailTab =
   | "sql"
   | "mongoConsole"
   | "mail"
+  | "backup"
   | "config"
-  | "logs";
+  | "logs"
+  | "versions";
 type MetricPoint = { cpu: number; memory: number };
 type ConsoleEntry = {
   database: number;
@@ -77,7 +96,7 @@ type SqlConsoleEntry = {
   result: SqlResult | null;
   error: string;
 };
-type ActiveTool = "ports";
+type ActiveTool = "ports" | "duckdb";
 type MongoConsoleEntry = {
   database: string;
   command: string;
@@ -102,6 +121,11 @@ const diskUsageByKind = ref<
   Partial<Record<ServiceKind, ServiceDiskUsage>>
 >({});
 const metricHistory = ref<MetricPoint[]>([]);
+const cacheCleaning = ref(false);
+const backups = ref<ServiceBackup[]>([]);
+const backupLoading = ref(false);
+const backupCreating = ref(false);
+const restoringBackupId = ref<string | null>(null);
 const configContent = ref("");
 const configOriginal = ref("");
 const configLoading = ref(false);
@@ -109,6 +133,14 @@ const configSaving = ref(false);
 const logs = ref("暂无日志");
 const logsLoading = ref(false);
 const redisOverview = ref<RedisOverview | null>(null);
+const redisVersions = ref<RedisVersionInfo[]>([]);
+const redisVersionTarget = ref("");
+const redisVersionsLoading = ref(false);
+const redisVersionChanging = ref(false);
+const mysqlVersions = ref<MysqlVersionInfo[]>([]);
+const mysqlVersionTarget = ref("");
+const mysqlVersionsLoading = ref(false);
+const mysqlVersionChanging = ref(false);
 const redisDatabase = ref(0);
 const redisPattern = ref("*");
 const redisCursor = ref("0");
@@ -141,6 +173,13 @@ const mailDetailLoading = ref(false);
 const portListeners = ref<PortListener[]>([]);
 const portQuery = ref("");
 const portLoading = ref(false);
+const duckdbStatus = ref<DuckdbStatus | null>(null);
+const duckdbFilePath = ref("");
+const duckdbSql = ref("SELECT * FROM selected_file LIMIT 100;");
+const duckdbResult = ref<DuckdbQueryResult | null>(null);
+const duckdbStatusLoading = ref(false);
+const duckdbInstalling = ref(false);
+const duckdbQuerying = ref(false);
 const databases = ref<DatabaseInfo[]>([]);
 const selectedDatabase = ref("");
 const tables = ref<TableInfo[]>([]);
@@ -167,6 +206,27 @@ const selectedService = computed(
 
 const selectedDiskUsage = computed(
   () => diskUsageByKind.value[selectedKind.value] ?? null,
+);
+
+const selectedRedisVersionInfo = computed(
+  () =>
+    redisVersions.value.find(
+      (release) => release.version === redisVersionTarget.value,
+    ) ?? null,
+);
+
+const selectedMysqlVersionInfo = computed(
+  () =>
+    mysqlVersions.value.find(
+      (release) => release.version === mysqlVersionTarget.value,
+    ) ?? null,
+);
+
+const serviceControlBusy = computed(
+  () =>
+    pendingAction.value !== null ||
+    redisVersionChanging.value ||
+    mysqlVersionChanging.value,
 );
 
 const filteredPortListeners = computed(() => {
@@ -197,6 +257,26 @@ const publicPortCount = computed(
     ).length,
 );
 
+const duckdbFileName = computed(() => {
+  const parts = duckdbFilePath.value.split(/[\\/]/);
+  return parts.at(-1) || "尚未选择文件";
+});
+
+const duckdbFileType = computed(() => {
+  const extension = duckdbFileName.value.split(".").at(-1)?.toLowerCase();
+  if (extension === "csv" || extension === "tsv") return "CSV / TSV";
+  if (["json", "jsonl", "ndjson"].includes(extension ?? "")) return "JSON";
+  if (extension === "parquet") return "PARQUET";
+  if (extension === "duckdb" || extension === "db") return "DUCKDB";
+  return "LOCAL FILE";
+});
+
+const duckdbIsDatabase = computed(() =>
+  ["duckdb", "db"].includes(
+    duckdbFileName.value.split(".").at(-1)?.toLowerCase() ?? "",
+  ),
+);
+
 const configChanged = computed(
   () => configContent.value !== configOriginal.value,
 );
@@ -207,8 +287,21 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["overview", "概览"],
       ["keys", "数据浏览"],
       ["console", "命令台"],
+      ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
+    ];
+  }
+  if (selectedKind.value === "mysql") {
+    return [
+      ["overview", "概览"],
+      ["data", "数据浏览"],
+      ["sql", "SQL 命令台"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["versions", "版本管理"],
     ];
   }
   if (selectedKind.value === "mongodb") {
@@ -216,6 +309,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["overview", "概览"],
       ["data", "数据浏览"],
       ["mongoConsole", "JSON 命令台"],
+      ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
     ];
@@ -224,6 +318,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     return [
       ["overview", "概览"],
       ["mail", "邮件收件箱"],
+      ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
     ];
@@ -232,6 +327,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     ["overview", "概览"],
     ["data", "数据浏览"],
     ["sql", "SQL 命令台"],
+    ["backup", "备份恢复"],
     ["config", "配置文件"],
     ["logs", "运行日志"],
   ];
@@ -346,6 +442,95 @@ async function refreshDiskUsage(kind?: ServiceKind) {
   );
 }
 
+async function clearInstallCache() {
+  const service = selectedService.value;
+  if (!service || cacheCleaning.value) return;
+  const cacheBytes = selectedDiskUsage.value?.cacheBytes ?? 0;
+  if (cacheBytes === 0) {
+    notice.value = `${service.name} 没有可清理的安装缓存`;
+    return;
+  }
+  if (
+    !window.confirm(
+      `将清理 ${service.name} 的下载包和安装临时文件，预计释放 ${formatBytes(cacheBytes)}。已安装程序和数据不会被删除，确定继续吗？`,
+    )
+  ) {
+    return;
+  }
+  cacheCleaning.value = true;
+  try {
+    const result = await cleanServiceCache(service.kind);
+    await refreshDiskUsage(service.kind);
+    notice.value = `已清理 ${result.removedItems} 个缓存项，释放 ${formatBytes(result.freedBytes)}`;
+    error.value = "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    cacheCleaning.value = false;
+  }
+}
+
+async function loadBackups() {
+  const service = selectedService.value;
+  if (!service || backupLoading.value) return;
+  backupLoading.value = true;
+  try {
+    backups.value = await listServiceBackups(service.kind);
+    error.value = "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    backupLoading.value = false;
+  }
+}
+
+async function createBackup() {
+  const service = selectedService.value;
+  if (!service || backupCreating.value) return;
+  if (service.status === "running") {
+    error.value = `请先停止 ${service.name}，再创建一致的数据备份`;
+    return;
+  }
+  backupCreating.value = true;
+  try {
+    const backup = await createServiceBackup(service.kind);
+    await Promise.all([loadBackups(), refreshDiskUsage(service.kind)]);
+    notice.value = `备份创建成功：${formatBytes(backup.sizeBytes)}`;
+    error.value = "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    backupCreating.value = false;
+  }
+}
+
+async function restoreBackup(backup: ServiceBackup) {
+  const service = selectedService.value;
+  if (!service || restoringBackupId.value) return;
+  if (service.status === "running") {
+    error.value = `请先停止 ${service.name}，再恢复数据`;
+    return;
+  }
+  if (
+    !window.confirm(
+      `确定将 ${service.name} 恢复到 ${formatBackupDate(backup.createdAtMillis)} 的状态吗？当前 data 和 conf 会先自动备份，然后再替换。`,
+    )
+  ) {
+    return;
+  }
+  restoringBackupId.value = backup.id;
+  try {
+    const result = await restoreServiceBackup(service.kind, backup.id);
+    await Promise.all([loadBackups(), refreshDiskUsage(service.kind)]);
+    notice.value = `恢复成功；恢复前状态已保存为 ${result.safetyBackup.id}`;
+    error.value = "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    restoringBackupId.value = null;
+  }
+}
+
 async function selectService(kind: ServiceKind) {
   activeTool.value = null;
   selectedKind.value = kind;
@@ -368,6 +553,7 @@ async function selectService(kind: ServiceKind) {
   mailMessages.value = [];
   selectedMailId.value = null;
   mailDetail.value = null;
+  backups.value = [];
   mongoDatabases.value = [];
   selectedMongoDatabase.value = "";
   mongoCollections.value = [];
@@ -378,7 +564,144 @@ async function selectService(kind: ServiceKind) {
   tables.value = [];
   selectedTable.value = null;
   tableDetail.value = null;
-  await Promise.all([refreshMetrics(), refreshDiskUsage(kind)]);
+  await Promise.all([
+    refreshMetrics(),
+    refreshDiskUsage(kind),
+  ]);
+}
+
+async function loadRedisVersions() {
+  if (redisVersionsLoading.value) return;
+  redisVersionsLoading.value = true;
+  try {
+    redisVersions.value = await listRedisVersions();
+    redisVersionTarget.value =
+      redisVersions.value.find((release) => release.selected)?.version ??
+      selectedService.value?.version ??
+      "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    redisVersionsLoading.value = false;
+  }
+}
+
+async function changeRedisVersion() {
+  const service = selectedService.value;
+  const target = selectedRedisVersionInfo.value;
+  if (
+    !service ||
+    service.kind !== "redis" ||
+    !target ||
+    target.selected ||
+    serviceControlBusy.value
+  ) {
+    return;
+  }
+  if (service.status === "running") {
+    error.value = "请先停止 Redis，再切换运行版本";
+    return;
+  }
+  if (
+    !window.confirm(
+      `确定切换到 Redis ${target.version} 吗？各版本使用独立数据目录；切回原版本时会恢复该版本的数据。切换前仍建议创建备份。`,
+    )
+  ) {
+    return;
+  }
+
+  redisVersionChanging.value = true;
+  notice.value = "";
+  error.value = "";
+  try {
+    const wasInstalled = target.installed;
+    const updated = await selectRedisVersion(target.version);
+    const index = services.value.findIndex(
+      (item) => item.kind === updated.kind,
+    );
+    if (index >= 0) services.value[index] = updated;
+    await Promise.all([
+      loadRedisVersions(),
+      refreshDiskUsage("redis"),
+    ]);
+    redisOverview.value = null;
+    notice.value = wasInstalled
+      ? `已切换到 Redis ${target.version}`
+      : `Redis ${target.version} 安装并切换成功`;
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    redisVersionChanging.value = false;
+  }
+}
+
+async function loadMysqlVersions() {
+  if (mysqlVersionsLoading.value) return;
+  mysqlVersionsLoading.value = true;
+  try {
+    mysqlVersions.value = await listMysqlVersions();
+    mysqlVersionTarget.value =
+      mysqlVersions.value.find((release) => release.selected)?.version ??
+      selectedService.value?.version ??
+      "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    mysqlVersionsLoading.value = false;
+  }
+}
+
+async function changeMysqlVersion() {
+  const service = selectedService.value;
+  const target = selectedMysqlVersionInfo.value;
+  if (
+    !service ||
+    service.kind !== "mysql" ||
+    !target ||
+    target.selected ||
+    serviceControlBusy.value
+  ) {
+    return;
+  }
+  if (service.status === "running") {
+    error.value = "请先停止 MySQL，再切换运行版本";
+    return;
+  }
+  if (
+    !window.confirm(
+      `确定切换到 MySQL ${target.version} 吗？每个版本使用独立数据目录，不会自动升级或降级原版本数据。切换前仍建议创建备份。`,
+    )
+  ) {
+    return;
+  }
+
+  mysqlVersionChanging.value = true;
+  notice.value = "";
+  error.value = "";
+  try {
+    const wasInstalled = target.installed;
+    const updated = await selectMysqlVersion(target.version);
+    const index = services.value.findIndex(
+      (item) => item.kind === updated.kind,
+    );
+    if (index >= 0) services.value[index] = updated;
+    await Promise.all([
+      loadMysqlVersions(),
+      refreshDiskUsage("mysql"),
+    ]);
+    databaseOverview.value = null;
+    databases.value = [];
+    selectedDatabase.value = "";
+    tables.value = [];
+    selectedTable.value = null;
+    notice.value = wasInstalled
+      ? `已切换到 MySQL ${target.version}`
+      : `MySQL ${target.version} 安装并切换成功`;
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    mysqlVersionChanging.value = false;
+  }
 }
 
 async function selectPortTool() {
@@ -386,6 +709,120 @@ async function selectPortTool() {
   notice.value = "";
   error.value = "";
   await loadPortListeners();
+}
+
+async function selectDuckdbTool() {
+  activeTool.value = "duckdb";
+  notice.value = "";
+  error.value = "";
+  await loadDuckdbStatus();
+}
+
+async function loadDuckdbStatus() {
+  if (duckdbStatusLoading.value) return;
+  duckdbStatusLoading.value = true;
+  try {
+    duckdbStatus.value = await getDuckdbStatus();
+    error.value = "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    duckdbStatusLoading.value = false;
+  }
+}
+
+async function installDuckdbTool() {
+  if (duckdbInstalling.value) return;
+  duckdbInstalling.value = true;
+  notice.value = "";
+  error.value = "";
+  try {
+    duckdbStatus.value = await installDuckdb();
+    notice.value = `DuckDB ${duckdbStatus.value.version} 安装成功`;
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    duckdbInstalling.value = false;
+  }
+}
+
+async function chooseDuckdbFile() {
+  try {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      title: "选择本地数据文件",
+      filters: [
+        {
+          name: "DuckDB 可查询文件",
+          extensions: [
+            "csv",
+            "tsv",
+            "json",
+            "jsonl",
+            "ndjson",
+            "parquet",
+            "duckdb",
+            "db",
+          ],
+        },
+      ],
+    });
+    if (typeof selected !== "string") return;
+    duckdbFilePath.value = selected;
+    duckdbResult.value = null;
+    const extension = selected.split(".").at(-1)?.toLowerCase();
+    duckdbSql.value = ["duckdb", "db"].includes(extension ?? "")
+      ? "SHOW ALL TABLES;"
+      : "SELECT * FROM selected_file LIMIT 100;";
+    notice.value = "";
+    error.value = "";
+  } catch (cause) {
+    error.value = String(cause);
+  }
+}
+
+function useDuckdbTemplate(template: "preview" | "count" | "schema" | "tables") {
+  if (template === "preview") {
+    duckdbSql.value = "SELECT * FROM selected_file LIMIT 100;";
+  } else if (template === "count") {
+    duckdbSql.value = "SELECT count(*) AS total_rows FROM selected_file;";
+  } else if (template === "schema") {
+    duckdbSql.value = "DESCRIBE selected_file;";
+  } else {
+    duckdbSql.value = "SHOW ALL TABLES;";
+  }
+}
+
+async function runDuckdbQuery() {
+  if (
+    duckdbQuerying.value ||
+    !duckdbStatus.value?.installed ||
+    !duckdbFilePath.value
+  ) {
+    return;
+  }
+  duckdbQuerying.value = true;
+  notice.value = "";
+  error.value = "";
+  try {
+    duckdbResult.value = await queryDuckdbFile(
+      duckdbFilePath.value,
+      duckdbSql.value,
+    );
+  } catch (cause) {
+    duckdbResult.value = null;
+    error.value = String(cause);
+  } finally {
+    duckdbQuerying.value = false;
+  }
+}
+
+function handleDuckdbShortcut(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    void runDuckdbQuery();
+  }
 }
 
 async function loadPortListeners(silent = false) {
@@ -403,7 +840,7 @@ async function loadPortListeners(silent = false) {
 
 async function execute(action: ServiceAction) {
   const service = selectedService.value;
-  if (!service || pendingAction.value) return;
+  if (!service || serviceControlBusy.value) return;
 
   pendingAction.value = action;
   notice.value = "";
@@ -425,6 +862,11 @@ async function execute(action: ServiceAction) {
     await Promise.all([
       refreshMetrics(),
       refreshDiskUsage(service.kind),
+      service.kind === "redis" && activeTab.value === "versions"
+        ? loadRedisVersions()
+        : service.kind === "mysql" && activeTab.value === "versions"
+          ? loadMysqlVersions()
+          : Promise.resolve(),
     ]);
   } catch (cause) {
     error.value = String(cause);
@@ -454,9 +896,16 @@ async function openTab(tab: DetailTab) {
   }
   if (tab === "config") await loadConfig();
   if (tab === "logs") await loadLogs();
+  if (tab === "versions" && selectedKind.value === "redis") {
+    await loadRedisVersions();
+  }
+  if (tab === "versions" && selectedKind.value === "mysql") {
+    await loadMysqlVersions();
+  }
   if (tab === "mail" && mailMessages.value.length === 0) {
     await loadMailMessages();
   }
+  if (tab === "backup") await loadBackups();
 }
 
 async function loadMailMessages() {
@@ -937,6 +1386,10 @@ function formatMailDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
 }
 
+function formatBackupDate(value: number) {
+  return new Date(value).toLocaleString("zh-CN");
+}
+
 function chartPoints(values: number[], width = 560, height = 112) {
   if (values.length < 2) return "";
   const maximum = Math.max(...values, 1);
@@ -951,7 +1404,10 @@ function chartPoints(values: number[], width = 560, height = 112) {
 
 onMounted(async () => {
   await refreshServices();
-  await Promise.all([refreshMetrics(), refreshDiskUsage()]);
+  await Promise.all([
+    refreshMetrics(),
+    refreshDiskUsage(),
+  ]);
   serviceTimer = window.setInterval(() => refreshServices(true), 3000);
   metricTimer = window.setInterval(async () => {
     if (activeTool.value === "ports") {
@@ -989,7 +1445,9 @@ onUnmounted(() => {
           :key="service.kind"
           type="button"
           class="service-nav-item"
-          :class="{ active: selectedKind === service.kind }"
+          :class="{
+            active: activeTool === null && selectedKind === service.kind,
+          }"
           @click="selectService(service.kind)"
         >
           <span class="nav-icon" :class="service.kind">{{
@@ -1020,6 +1478,19 @@ onUnmounted(() => {
           <span class="nav-copy">
             <strong>端口检查器</strong>
             <small>TCP LISTEN</small>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          class="service-nav-item"
+          :class="{ active: activeTool === 'duckdb' }"
+          @click="selectDuckdbTool"
+        >
+          <span class="nav-icon duckdb">D</span>
+          <span class="nav-copy">
+            <strong>DuckDB 查询器</strong>
+            <small>LOCAL FILE SQL</small>
           </span>
         </button>
 
@@ -1174,6 +1645,240 @@ onUnmounted(() => {
         </section>
       </template>
 
+      <template v-else-if="activeTool === 'duckdb'">
+        <header class="detail-header">
+          <div class="detail-identity">
+            <span class="service-logo duckdb">D</span>
+            <div>
+              <div class="title-line">
+                <h1>DuckDB 本地文件查询器</h1>
+                <span>v{{ duckdbStatus?.version ?? "1.5.5" }}</span>
+              </div>
+              <p>
+                直接查询 CSV、JSON、Parquet 和 DuckDB 文件，不启动后台服务
+              </p>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button
+              v-if="!duckdbStatus?.installed"
+              class="primary"
+              type="button"
+              :disabled="duckdbInstalling || duckdbStatusLoading"
+              @click="installDuckdbTool"
+            >
+              <span v-if="duckdbInstalling" class="spinner"></span>
+              {{ duckdbInstalling ? "安装中" : "下载并安装" }}
+            </button>
+            <button
+              v-else
+              class="primary"
+              type="button"
+              @click="chooseDuckdbFile"
+            >
+              选择本地文件
+            </button>
+          </div>
+        </header>
+
+        <div v-if="notice || error" class="notice" :class="{ danger: error }">
+          <span>{{ error || notice }}</span>
+          <button type="button" @click="notice = error = ''">×</button>
+        </div>
+
+        <section class="duckdb-tool-page">
+          <div v-if="duckdbStatusLoading && !duckdbStatus" class="duckdb-empty">
+            正在检查 DuckDB CLI…
+          </div>
+
+          <div v-else-if="!duckdbStatus?.installed" class="duckdb-install-card">
+            <span class="service-logo duckdb">D</span>
+            <h2>安装 DuckDB CLI</h2>
+            <p>
+              智屿会下载官方 macOS universal 单文件程序，校验 SHA-256
+              后安装到 <code>~/.devbox/</code>，不会修改系统 PATH。
+            </p>
+            <button
+              type="button"
+              :disabled="duckdbInstalling"
+              @click="installDuckdbTool"
+            >
+              <span v-if="duckdbInstalling" class="spinner"></span>
+              {{ duckdbInstalling ? "正在下载并校验…" : "安装 DuckDB 1.5.5" }}
+            </button>
+          </div>
+
+          <template v-else>
+            <div class="metric-grid duckdb-metrics">
+              <article class="metric-card">
+                <p>ENGINE</p>
+                <strong>v{{ duckdbStatus.version }}</strong>
+                <small>官方 DuckDB CLI</small>
+              </article>
+              <article class="metric-card">
+                <p>FILE TYPE</p>
+                <strong class="small-metric">{{ duckdbFileType }}</strong>
+                <small>当前数据源</small>
+              </article>
+              <article class="metric-card">
+                <p>DISK</p>
+                <strong>{{ formatBytes(duckdbStatus.installationBytes) }}</strong>
+                <small>查询引擎占用</small>
+              </article>
+              <article class="metric-card">
+                <p>EXECUTION</p>
+                <strong class="small-metric">LOCAL</strong>
+                <small>只读 · 15 秒超时</small>
+              </article>
+            </div>
+
+            <div class="duckdb-file-card">
+              <div class="duckdb-file-icon">{{ duckdbFileType.slice(0, 1) }}</div>
+              <div>
+                <p>SELECTED FILE</p>
+                <strong>{{ duckdbFileName }}</strong>
+                <small :title="duckdbFilePath">
+                  {{
+                    duckdbFilePath ||
+                    "选择一个 CSV、JSON、Parquet 或 DuckDB 文件"
+                  }}
+                </small>
+              </div>
+              <button type="button" @click="chooseDuckdbFile">
+                {{ duckdbFilePath ? "更换文件" : "选择文件" }}
+              </button>
+            </div>
+
+            <div class="duckdb-workbench">
+              <div class="duckdb-editor">
+                <div class="duckdb-editor-head">
+                  <div>
+                    <p>READ-ONLY SQL</p>
+                    <h2>查询语句</h2>
+                  </div>
+                  <div class="duckdb-templates">
+                    <template v-if="!duckdbIsDatabase">
+                      <button
+                        type="button"
+                        @click="useDuckdbTemplate('preview')"
+                      >
+                        预览 100 行
+                      </button>
+                      <button
+                        type="button"
+                        @click="useDuckdbTemplate('count')"
+                      >
+                        统计行数
+                      </button>
+                      <button
+                        type="button"
+                        @click="useDuckdbTemplate('schema')"
+                      >
+                        查看字段
+                      </button>
+                    </template>
+                    <button
+                      v-else
+                      type="button"
+                      @click="useDuckdbTemplate('tables')"
+                    >
+                      查看所有表
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  v-model="duckdbSql"
+                  spellcheck="false"
+                  :disabled="!duckdbFilePath"
+                  @keydown="handleDuckdbShortcut"
+                ></textarea>
+                <div class="duckdb-runbar">
+                  <span>
+                    {{
+                      duckdbIsDatabase
+                        ? ".duckdb 文件以 safe + readonly 模式打开"
+                        : "使用 selected_file 作为所选文件的表名"
+                    }}
+                  </span>
+                  <span>⌘ Enter 执行</span>
+                  <button
+                    type="button"
+                    :disabled="!duckdbFilePath || duckdbQuerying"
+                    @click="runDuckdbQuery"
+                  >
+                    <span v-if="duckdbQuerying" class="spinner"></span>
+                    {{ duckdbQuerying ? "查询中" : "运行查询" }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="duckdb-result-panel">
+                <div class="duckdb-result-head">
+                  <div>
+                    <p>QUERY RESULT</p>
+                    <h2>结果</h2>
+                  </div>
+                  <span v-if="duckdbResult">
+                    {{ duckdbResult.summary }} · {{ duckdbResult.elapsedMs }} ms
+                  </span>
+                </div>
+                <div
+                  v-if="duckdbQuerying && !duckdbResult"
+                  class="duckdb-empty"
+                >
+                  正在本机执行查询…
+                </div>
+                <div v-else-if="!duckdbResult" class="duckdb-empty">
+                  {{
+                    duckdbFilePath
+                      ? "输入只读 SQL 后运行查询"
+                      : "请先选择一个本地文件"
+                  }}
+                </div>
+                <div
+                  v-else-if="duckdbResult.columns.length === 0"
+                  class="duckdb-empty"
+                >
+                  {{ duckdbResult.summary }}
+                </div>
+                <div v-else class="duckdb-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th
+                          v-for="column in duckdbResult.columns"
+                          :key="column"
+                        >
+                          {{ column }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="(row, rowIndex) in duckdbResult.rows"
+                        :key="rowIndex"
+                      >
+                        <td
+                          v-for="(value, columnIndex) in row"
+                          :key="columnIndex"
+                          :class="{ null: value === null }"
+                        >
+                          {{ value === null ? "NULL" : value }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p v-if="duckdbResult?.truncated" class="duckdb-result-note">
+                  为保持界面流畅，单次最多展示 500 行；请用 WHERE 或 LIMIT
+                  缩小结果。
+                </p>
+              </div>
+            </div>
+          </template>
+        </section>
+      </template>
+
       <template v-else-if="selectedService">
         <header class="detail-header">
           <div class="detail-identity">
@@ -1190,11 +1895,13 @@ onUnmounted(() => {
                   class="status-dot"
                   :class="[
                     selectedService.status,
-                    { busy: pendingAction !== null },
+                    { busy: serviceControlBusy },
                   ]"
                 ></i>
                 {{
-                  pendingAction
+                  redisVersionChanging
+                    ? "版本安装与切换中"
+                    : pendingAction
                     ? actionLabel[pendingAction]
                     : statusLabel[selectedService.status]
                 }}
@@ -1210,16 +1917,16 @@ onUnmounted(() => {
               v-if="selectedService.status === 'not_installed'"
               class="primary"
               type="button"
-              :disabled="pendingAction !== null"
+              :disabled="serviceControlBusy"
               @click="execute('install')"
             >
-              <span v-if="pendingAction" class="spinner"></span>
-              {{ pendingAction ? "安装中" : "下载并安装" }}
+              <span v-if="serviceControlBusy" class="spinner"></span>
+              {{ serviceControlBusy ? "安装中" : "下载并安装" }}
             </button>
             <template v-else-if="selectedService.status === 'running'">
               <button
                 type="button"
-                :disabled="pendingAction !== null"
+                :disabled="serviceControlBusy"
                 @click="execute('restart')"
               >
                 <span
@@ -1231,7 +1938,7 @@ onUnmounted(() => {
               <button
                 class="danger"
                 type="button"
-                :disabled="pendingAction !== null"
+                :disabled="serviceControlBusy"
                 @click="execute('stop')"
               >
                 <span v-if="pendingAction === 'stop'" class="spinner"></span>
@@ -1242,11 +1949,11 @@ onUnmounted(() => {
               v-else
               class="primary"
               type="button"
-              :disabled="pendingAction !== null"
+              :disabled="serviceControlBusy"
               @click="execute('start')"
             >
-              <span v-if="pendingAction" class="spinner"></span>
-              {{ pendingAction ? "启动中" : "启动服务" }}
+              <span v-if="serviceControlBusy" class="spinner"></span>
+              {{ serviceControlBusy ? "处理中" : "启动服务" }}
             </button>
           </div>
         </header>
@@ -1268,7 +1975,183 @@ onUnmounted(() => {
           </button>
         </nav>
 
-        <section v-if="activeTab === 'overview'" class="overview">
+        <section
+          v-if="activeTab === 'versions' && selectedKind === 'redis'"
+          class="version-panel"
+        >
+          <div class="redis-version-manager">
+            <div class="redis-version-head">
+              <div>
+                <p>VERSION MANAGER</p>
+                <h2>Redis 运行版本</h2>
+              </div>
+              <span>二进制独立安装 · 单个活动版本</span>
+            </div>
+
+            <div
+              v-if="redisVersionsLoading && redisVersions.length === 0"
+              class="redis-version-loading"
+            >
+              正在读取可用版本…
+            </div>
+            <div v-else class="redis-version-grid">
+              <button
+                v-for="release in redisVersions"
+                :key="release.version"
+                type="button"
+                :class="{
+                  selected: redisVersionTarget === release.version,
+                  active: release.selected,
+                  legacy: release.legacy,
+                }"
+                :disabled="redisVersionChanging"
+                @click="redisVersionTarget = release.version"
+              >
+                <span class="redis-version-radio"></span>
+                <span class="redis-version-copy">
+                  <strong>Redis {{ release.series }}</strong>
+                  <small>v{{ release.version }}</small>
+                </span>
+                <span class="redis-version-badges">
+                  <i v-if="release.selected">当前</i>
+                  <i v-else-if="release.installed">已安装</i>
+                  <i v-if="release.recommended" class="recommended">
+                    推荐
+                  </i>
+                </span>
+                <em>{{ release.supportLabel }}</em>
+              </button>
+            </div>
+
+            <div class="redis-version-footer">
+              <p>
+                各版本程序和数据相互隔离，数据保存在
+                <code>data/版本</code>；基础配置共用。切换前建议备份。
+              </p>
+              <div>
+                <span
+                  v-if="
+                    selectedService.status === 'running' &&
+                    !selectedRedisVersionInfo?.selected
+                  "
+                >
+                  请先停止 Redis
+                </span>
+                <button
+                  type="button"
+                  :disabled="
+                    !selectedRedisVersionInfo ||
+                    selectedRedisVersionInfo.selected ||
+                    selectedService.status === 'running' ||
+                    serviceControlBusy
+                  "
+                  @click="changeRedisVersion"
+                >
+                  <span v-if="redisVersionChanging" class="spinner"></span>
+                  {{
+                    selectedRedisVersionInfo?.selected
+                      ? "当前版本"
+                      : redisVersionChanging
+                        ? "安装切换中"
+                        : selectedRedisVersionInfo?.installed
+                          ? "切换版本"
+                          : "安装并切换"
+                  }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'versions' && selectedKind === 'mysql'"
+          class="version-panel"
+        >
+          <div class="redis-version-manager">
+            <div class="redis-version-head">
+              <div>
+                <p>VERSION MANAGER</p>
+                <h2>MySQL 运行版本</h2>
+              </div>
+              <span>二进制与数据独立 · 单个活动版本</span>
+            </div>
+
+            <div
+              v-if="mysqlVersionsLoading && mysqlVersions.length === 0"
+              class="redis-version-loading"
+            >
+              正在读取可用版本…
+            </div>
+            <div v-else class="redis-version-grid">
+              <button
+                v-for="release in mysqlVersions"
+                :key="release.version"
+                type="button"
+                :class="{
+                  selected: mysqlVersionTarget === release.version,
+                  active: release.selected,
+                  legacy: release.legacy,
+                }"
+                :disabled="mysqlVersionChanging"
+                @click="mysqlVersionTarget = release.version"
+              >
+                <span class="redis-version-radio"></span>
+                <span class="redis-version-copy">
+                  <strong>MySQL {{ release.series }}</strong>
+                  <small>v{{ release.version }}</small>
+                </span>
+                <span class="redis-version-badges">
+                  <i v-if="release.selected">当前</i>
+                  <i v-else-if="release.installed">已安装</i>
+                  <i v-if="release.recommended" class="recommended">
+                    推荐
+                  </i>
+                </span>
+                <em>{{ release.supportLabel }}</em>
+              </button>
+            </div>
+
+            <div class="redis-version-footer">
+              <p>
+                各版本程序和数据相互隔离，数据保存在
+                <code>data/版本</code>。新版本首次切换时会自动初始化空数据库。
+              </p>
+              <div>
+                <span
+                  v-if="
+                    selectedService.status === 'running' &&
+                    !selectedMysqlVersionInfo?.selected
+                  "
+                >
+                  请先停止 MySQL
+                </span>
+                <button
+                  type="button"
+                  :disabled="
+                    !selectedMysqlVersionInfo ||
+                    selectedMysqlVersionInfo.selected ||
+                    selectedService.status === 'running' ||
+                    serviceControlBusy
+                  "
+                  @click="changeMysqlVersion"
+                >
+                  <span v-if="mysqlVersionChanging" class="spinner"></span>
+                  {{
+                    selectedMysqlVersionInfo?.selected
+                      ? "当前版本"
+                      : mysqlVersionChanging
+                        ? "安装初始化中"
+                        : selectedMysqlVersionInfo?.installed
+                          ? "切换版本"
+                          : "安装并切换"
+                  }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section v-else-if="activeTab === 'overview'" class="overview">
           <div class="metric-grid">
             <article class="metric-card">
               <p>MEMORY</p>
@@ -1324,9 +2207,24 @@ onUnmounted(() => {
               <span>配置文件</span>
               <strong>{{ formatBytes(selectedDiskUsage.configBytes) }}</strong>
             </div>
-            <div>
-              <span>下载缓存</span>
+            <div class="cache-usage-cell">
+              <span>
+                下载缓存
+                <button
+                  type="button"
+                  :disabled="
+                    cacheCleaning || selectedDiskUsage.cacheBytes === 0
+                  "
+                  @click="clearInstallCache"
+                >
+                  {{ cacheCleaning ? "清理中" : "清理" }}
+                </button>
+              </span>
               <strong>{{ formatBytes(selectedDiskUsage.cacheBytes) }}</strong>
+            </div>
+            <div>
+              <span>备份文件</span>
+              <strong>{{ formatBytes(selectedDiskUsage.backupBytes) }}</strong>
             </div>
             <div>
               <span>其他文件</span>
@@ -2398,6 +3296,122 @@ onUnmounted(() => {
             <code>{{ selectedService.dataPath }}/mailpit.db</code>；
             HTML 不会直接渲染，避免测试邮件中的脚本或远程资源影响桌面端。
           </p>
+        </section>
+
+        <section v-else-if="activeTab === 'backup'" class="backup-panel">
+          <div class="backup-head">
+            <div>
+              <p>DATA SAFETY</p>
+              <h2>备份与恢复</h2>
+              <span>
+                保存数据与配置到
+                <code>~/.devbox/backups/{{ selectedKind }}/</code>
+              </span>
+            </div>
+            <div class="backup-actions">
+              <button
+                type="button"
+                :disabled="
+                  backupLoading ||
+                  backupCreating ||
+                  restoringBackupId !== null
+                "
+                @click="loadBackups"
+              >
+                {{ backupLoading ? "读取中" : "刷新" }}
+              </button>
+              <button
+                class="primary"
+                type="button"
+                :disabled="
+                  selectedService.status === 'running' ||
+                  selectedService.status === 'not_installed' ||
+                  backupCreating ||
+                  restoringBackupId !== null
+                "
+                @click="createBackup"
+              >
+                <span v-if="backupCreating" class="spinner"></span>
+                {{ backupCreating ? "备份中" : "创建备份" }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="selectedService.status === 'running'"
+            class="backup-warning"
+          >
+            为保证数据一致性，请先停止 {{ selectedService.name }}，再创建或恢复备份。
+          </div>
+          <div
+            v-else-if="selectedService.status === 'not_installed'"
+            class="backup-warning"
+          >
+            服务安装后才能创建数据备份。
+          </div>
+
+          <div class="backup-list">
+            <div class="backup-list-head">
+              <span>备份时间</span>
+              <span>类型</span>
+              <span>压缩后大小</span>
+              <span>操作</span>
+            </div>
+            <div v-if="backupLoading && backups.length === 0" class="backup-empty">
+              正在读取备份…
+            </div>
+            <div v-else-if="backups.length === 0" class="backup-empty">
+              还没有备份。停止服务后点击“创建备份”。
+            </div>
+            <article v-for="backup in backups" :key="backup.id">
+              <div>
+                <strong>{{ formatBackupDate(backup.createdAtMillis) }}</strong>
+                <small>{{ backup.id }}</small>
+              </div>
+              <div>
+                <span
+                  class="backup-type"
+                  :class="{ automatic: backup.automatic }"
+                >
+                  {{ backup.automatic ? "恢复前安全备份" : "手动备份" }}
+                </span>
+              </div>
+              <div>
+                <strong>{{ formatBytes(backup.sizeBytes) }}</strong>
+              </div>
+              <div>
+                <button
+                  type="button"
+                  :disabled="
+                    selectedService.status === 'running' ||
+                    selectedService.status === 'not_installed' ||
+                    restoringBackupId !== null ||
+                    backupCreating
+                  "
+                  @click="restoreBackup(backup)"
+                >
+                  <span
+                    v-if="restoringBackupId === backup.id"
+                    class="spinner"
+                  ></span>
+                  {{
+                    restoringBackupId === backup.id ? "恢复中" : "恢复"
+                  }}
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <div class="backup-notes">
+            <p>
+              <strong>备份范围：</strong>
+              <code>data/</code> 与 <code>conf/</code>。日志、PID 和程序文件不会进入备份。
+            </p>
+            <p>
+              <strong>恢复保护：</strong>
+              恢复前会自动保存当前状态；压缩包通过路径与文件类型检查后才会替换实例目录。
+            </p>
+          </div>
         </section>
 
         <section v-else-if="activeTab === 'config'" class="editor-panel">

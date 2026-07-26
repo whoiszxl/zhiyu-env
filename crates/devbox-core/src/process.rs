@@ -55,7 +55,7 @@ impl ProcessManager {
             .append(true)
             .open(config.stderr_log_path())?;
 
-        let child = Command::new(&config.executable)
+        let mut child = Command::new(&config.executable)
             .args(&config.arguments)
             .envs(&config.environment)
             .current_dir(&config.instance_dir)
@@ -65,6 +65,18 @@ impl ProcessManager {
             .spawn()?;
 
         let pid = child.id();
+        let startup_deadline = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < startup_deadline {
+            if let Some(status) = child.try_wait()? {
+                let details = startup_log_details(config);
+                return Err(DevBoxError::CommandFailed {
+                    command: config.executable.display().to_string(),
+                    message: format!("进程在启动阶段退出（{status}）。{details}"),
+                });
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+
         fs::write(config.pid_path(), pid.to_string())?;
         child_registry()
             .lock()
@@ -166,6 +178,21 @@ impl ProcessManager {
             .expect("process child registry mutex poisoned")
             .contains_key(&pid)
     }
+}
+
+fn startup_log_details(config: &ServiceConfig) -> String {
+    for path in [config.stderr_log_path(), config.stdout_log_path()] {
+        let Ok(contents) = fs::read(&path) else {
+            continue;
+        };
+        if contents.is_empty() {
+            continue;
+        }
+        let start = contents.len().saturating_sub(4_096);
+        let tail = String::from_utf8_lossy(&contents[start..]);
+        return format!("请检查日志 {}：{}", path.display(), tail.trim());
+    }
+    format!("请检查日志目录 {}", config.logs_dir().display())
 }
 
 fn child_registry() -> &'static Mutex<HashMap<u32, Child>> {

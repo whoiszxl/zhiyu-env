@@ -9,8 +9,8 @@ pub mod status;
 pub use config::{ConfigManager, ServiceConfig, ServiceKind};
 pub use error::{DevBoxError, Result};
 pub use installer::{
-    InstallOutcome, MailpitInstaller, MongodbInstaller, MysqlInstaller, PostgresInstaller,
-    RedisInstaller,
+    DuckdbInstaller, InstallOutcome, MailpitInstaller, MongodbInstaller, MysqlInstaller,
+    PostgresInstaller, RedisInstaller,
 };
 pub use process::ProcessManager;
 pub use service::ServiceManager;
