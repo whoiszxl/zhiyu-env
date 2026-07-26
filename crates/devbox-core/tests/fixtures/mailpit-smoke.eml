@@ -1,0 +1,6 @@
+From: Zhiyu Dev <dev@zhiyu.local>
+To: Local User <user@example.test>
+Subject: Zhiyu Mailpit smoke test
+Content-Type: text/plain; charset=utf-8
+
+Mailpit integration is working.
