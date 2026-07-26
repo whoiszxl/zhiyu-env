@@ -2545,3 +2545,193 @@ button:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+.install-progress-panel {
+  position: relative;
+  margin: 14px 18px 0;
+  border: 1px solid #c9c8c0;
+  background: #f8f7f2;
+  box-shadow: 0 8px 22px rgba(47, 48, 42, 0.08);
+}
+
+.install-progress-summary {
+  display: grid;
+  width: 100%;
+  min-height: 43px;
+  grid-template-columns: 9px auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 38px 9px 12px;
+  border: 0;
+  background: transparent;
+  color: #383a34;
+  cursor: pointer;
+  text-align: left;
+}
+
+.install-progress-state {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d0a536;
+  box-shadow: 0 0 0 3px rgba(208, 165, 54, 0.15);
+}
+
+.install-progress-panel.running .install-progress-state {
+  animation: install-pulse 1.2s ease-in-out infinite;
+}
+
+.install-progress-panel.completed .install-progress-state {
+  background: #4b8a58;
+  box-shadow: 0 0 0 3px rgba(75, 138, 88, 0.14);
+}
+
+.install-progress-panel.failed .install-progress-state {
+  background: #c94f3a;
+  box-shadow: 0 0 0 3px rgba(201, 79, 58, 0.14);
+}
+
+.install-progress-summary strong {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.install-progress-stage {
+  overflow: hidden;
+  color: #7f8179;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.install-progress-value {
+  min-width: 36px;
+  color: #555850;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  text-align: right;
+}
+
+.install-progress-toggle {
+  color: #8a8c84;
+  font-size: 8px;
+}
+
+.install-progress-track {
+  height: 3px;
+  overflow: hidden;
+  background: #e4e2da;
+}
+
+.install-progress-track span {
+  display: block;
+  height: 100%;
+  background: #d0a536;
+  transition: width 260ms ease;
+}
+
+.install-progress-panel.running .install-progress-track span {
+  background: linear-gradient(90deg, #bd8e24, #e4c55c, #bd8e24);
+  background-size: 200% 100%;
+  animation: install-progress-flow 1.4s linear infinite;
+}
+
+.install-progress-panel.completed .install-progress-track span {
+  background: #4b8a58;
+}
+
+.install-progress-panel.failed .install-progress-track span {
+  background: #c94f3a;
+}
+
+.install-log-preview,
+.install-log-full p {
+  display: grid;
+  grid-template-columns: 58px 82px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.install-log-preview {
+  padding: 8px 12px;
+  border-top: 1px solid #e1dfd7;
+}
+
+.install-progress-panel.expanded .install-log-preview {
+  display: none;
+}
+
+.install-log-preview time,
+.install-log-full time {
+  color: #9a9c94;
+}
+
+.install-log-preview strong,
+.install-log-full strong {
+  overflow: hidden;
+  color: #696b64;
+  font-size: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.install-log-preview span {
+  overflow: hidden;
+  color: #777971;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.install-log-full {
+  max-height: 230px;
+  overflow: auto;
+  padding: 8px 12px 11px;
+  border-top: 1px solid #e1dfd7;
+  background: #252721;
+  color: #d5d7cf;
+}
+
+.install-log-full p {
+  padding: 3px 0;
+}
+
+.install-log-full p > span {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.install-progress-close {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #96988f;
+  font-size: 15px;
+}
+
+@keyframes install-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes install-progress-flow {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}

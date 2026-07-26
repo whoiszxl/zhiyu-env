@@ -1,3 +1,4 @@
+use crate::commands::run_install_task;
 use devbox_core::{
     installer::{DUCKDB_SERIES, DUCKDB_VERSION},
     DuckdbInstaller,
@@ -8,6 +9,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tauri::AppHandle;
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_SQL_BYTES: usize = 50 * 1024;
@@ -50,13 +52,15 @@ pub async fn duckdb_status() -> Result<DuckdbStatus, String> {
 }
 
 #[tauri::command]
-pub async fn duckdb_install() -> Result<DuckdbStatus, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let root = devbox_root()?;
-        DuckdbInstaller::new(&root)
-            .install()
-            .map_err(|error| error.to_string())?;
-        read_status()
+pub async fn duckdb_install(app: AppHandle, operation_id: String) -> Result<DuckdbStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_install_task(app, operation_id, "duckdb".into(), || {
+            let root = devbox_root()?;
+            DuckdbInstaller::new(&root)
+                .install()
+                .map_err(|error| error.to_string())?;
+            read_status()
+        })
     })
     .await
     .map_err(|error| format!("DuckDB 安装任务异常结束: {error}"))?

@@ -5,9 +5,10 @@ use devbox_core::{
         MYSQL_RELEASES, MYSQL_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES,
         REDIS_VERSION,
     },
-    ConfigManager, MailpitInstaller, MailpitService, MongodbInstaller, MongodbService,
-    MysqlInstaller, MysqlService, PostgresInstaller, PostgresService, RedisInstaller, RedisService,
-    ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    report_install_progress, with_install_reporter, ConfigManager, InstallReporter,
+    MailpitInstaller, MailpitService, MongodbInstaller, MongodbService, MysqlInstaller,
+    MysqlService, PostgresInstaller, PostgresService, RedisInstaller, RedisService, ServiceConfig,
+    ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -15,6 +16,91 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tauri::{AppHandle, Emitter};
+
+pub(crate) const INSTALL_PROGRESS_EVENT: &str = "install-progress";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallProgressEvent {
+    operation_id: String,
+    kind: String,
+    percent: Option<u8>,
+    stage: String,
+    message: String,
+    status: &'static str,
+}
+
+fn emit_install_event(app: &AppHandle, event: InstallProgressEvent) {
+    let _ = app.emit(INSTALL_PROGRESS_EVENT, event);
+}
+
+pub(crate) fn run_install_task<T>(
+    app: AppHandle,
+    operation_id: String,
+    kind: String,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if operation_id.is_empty() || operation_id.len() > 100 {
+        return Err("无效的安装任务标识".into());
+    }
+
+    emit_install_event(
+        &app,
+        InstallProgressEvent {
+            operation_id: operation_id.clone(),
+            kind: kind.clone(),
+            percent: Some(1),
+            stage: "创建任务".into(),
+            message: "安装任务已进入后台线程".into(),
+            status: "running",
+        },
+    );
+
+    let event_app = app.clone();
+    let event_operation_id = operation_id.clone();
+    let event_kind = kind.clone();
+    let reporter = InstallReporter::new(move |update| {
+        emit_install_event(
+            &event_app,
+            InstallProgressEvent {
+                operation_id: event_operation_id.clone(),
+                kind: event_kind.clone(),
+                percent: update.percent,
+                stage: update.stage,
+                message: update.message,
+                status: "running",
+            },
+        );
+    });
+
+    let result = with_install_reporter(reporter, operation);
+    match &result {
+        Ok(_) => emit_install_event(
+            &app,
+            InstallProgressEvent {
+                operation_id,
+                kind,
+                percent: Some(100),
+                stage: "安装完成".into(),
+                message: "安装、配置和初始化均已完成".into(),
+                status: "completed",
+            },
+        ),
+        Err(error) => emit_install_event(
+            &app,
+            InstallProgressEvent {
+                operation_id,
+                kind,
+                percent: None,
+                stage: "安装失败".into(),
+                message: error.clone(),
+                status: "failed",
+            },
+        ),
+    }
+    result
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -485,6 +571,7 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 Redis 实例配置");
             RedisService::new(config)
                 .and_then(|service| service.install())
                 .map_err(stringify_error)?;
@@ -496,6 +583,7 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             let installer =
                 MysqlInstaller::for_version(&root, &config.version).map_err(stringify_error)?;
             installer.install().map_err(stringify_error)?;
+            report_install_progress(92, "写入配置", "正在创建 MySQL 实例配置");
             let service = MysqlService::new(config).map_err(stringify_error)?;
             service.install().map_err(stringify_error)?;
             installer
@@ -509,6 +597,7 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             let installer =
                 PostgresInstaller::for_version(&root, &config.version).map_err(stringify_error)?;
             installer.install().map_err(stringify_error)?;
+            report_install_progress(92, "写入配置", "正在创建 PostgreSQL 实例配置");
             let service = PostgresService::new(config).map_err(stringify_error)?;
             service.install().map_err(stringify_error)?;
             installer
@@ -520,22 +609,35 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             MongodbInstaller::new(devbox_root()?)
                 .install()
                 .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 MongoDB 实例配置");
             run_action(kind, |service| service.install())
         }
         ServiceKindInput::Mailpit => {
             MailpitInstaller::new(devbox_root()?)
                 .install()
                 .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 Mailpit 实例配置");
             run_action(kind, |service| service.install())
         }
     }
 }
 
 #[tauri::command]
-pub async fn service_install(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
-    tauri::async_runtime::spawn_blocking(move || install_service(kind))
-        .await
-        .map_err(|error| format!("服务安装任务异常结束: {error}"))?
+pub async fn service_install(
+    app: AppHandle,
+    kind: ServiceKindInput,
+    operation_id: String,
+) -> Result<ServiceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_install_task(
+            app,
+            operation_id,
+            ServiceKind::from(kind).as_str().into(),
+            || install_service(kind),
+        )
+    })
+    .await
+    .map_err(|error| format!("服务安装任务异常结束: {error}"))?
 }
 
 #[tauri::command]
@@ -565,29 +667,36 @@ pub async fn redis_versions() -> Result<Vec<RedisVersionInfo>, String> {
 }
 
 #[tauri::command]
-pub async fn redis_version_select(version: String) -> Result<ServiceInfo, String> {
+pub async fn redis_version_select(
+    app: AppHandle,
+    version: String,
+    operation_id: String,
+) -> Result<ServiceInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let root = devbox_root()?;
-        let release =
-            redis_release(&version).ok_or_else(|| format!("不支持 Redis 版本 {version}"))?;
-        let current = service_config(ServiceKind::Redis)?;
-        let current_service = RedisService::new(current).map_err(stringify_error)?;
-        let status = current_service.status().map_err(stringify_error)?;
-        if matches!(status, ServiceStatus::Running { .. }) {
-            return Err("请先停止 Redis，再切换运行版本".into());
-        }
-        current_service
-            .prepare_version_data()
-            .map_err(stringify_error)?;
+        run_install_task(app, operation_id, "redis".into(), || {
+            let root = devbox_root()?;
+            let release =
+                redis_release(&version).ok_or_else(|| format!("不支持 Redis 版本 {version}"))?;
+            let current = service_config(ServiceKind::Redis)?;
+            let current_service = RedisService::new(current).map_err(stringify_error)?;
+            let status = current_service.status().map_err(stringify_error)?;
+            if matches!(status, ServiceStatus::Running { .. }) {
+                return Err("请先停止 Redis，再切换运行版本".into());
+            }
+            current_service
+                .prepare_version_data()
+                .map_err(stringify_error)?;
 
-        RedisInstaller::for_version(&root, release.version)
-            .map_err(stringify_error)?
-            .install()
-            .map_err(stringify_error)?;
-        RedisService::new(redis_service_config(&root, release))
-            .and_then(|service| service.install())
-            .map_err(stringify_error)?;
-        info(ServiceKindInput::Redis)
+            RedisInstaller::for_version(&root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "切换版本", "正在更新 Redis 活动版本配置");
+            RedisService::new(redis_service_config(&root, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            info(ServiceKindInput::Redis)
+        })
     })
     .await
     .map_err(|error| format!("Redis 版本切换任务异常结束: {error}"))?
@@ -620,31 +729,38 @@ pub async fn mysql_versions() -> Result<Vec<MysqlVersionInfo>, String> {
 }
 
 #[tauri::command]
-pub async fn mysql_version_select(version: String) -> Result<ServiceInfo, String> {
+pub async fn mysql_version_select(
+    app: AppHandle,
+    version: String,
+    operation_id: String,
+) -> Result<ServiceInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let root = devbox_root()?;
-        let release =
-            mysql_release(&version).ok_or_else(|| format!("不支持 MySQL 版本 {version}"))?;
-        let current = service_config(ServiceKind::Mysql)?;
-        let current_service = MysqlService::new(current).map_err(stringify_error)?;
-        let status = current_service.status().map_err(stringify_error)?;
-        if matches!(status, ServiceStatus::Running { .. }) {
-            return Err("请先停止 MySQL，再切换运行版本".into());
-        }
-        current_service
-            .prepare_version_data()
-            .map_err(stringify_error)?;
+        run_install_task(app, operation_id, "mysql".into(), || {
+            let root = devbox_root()?;
+            let release =
+                mysql_release(&version).ok_or_else(|| format!("不支持 MySQL 版本 {version}"))?;
+            let current = service_config(ServiceKind::Mysql)?;
+            let current_service = MysqlService::new(current).map_err(stringify_error)?;
+            let status = current_service.status().map_err(stringify_error)?;
+            if matches!(status, ServiceStatus::Running { .. }) {
+                return Err("请先停止 MySQL，再切换运行版本".into());
+            }
+            current_service
+                .prepare_version_data()
+                .map_err(stringify_error)?;
 
-        let installer =
-            MysqlInstaller::for_version(&root, release.version).map_err(stringify_error)?;
-        installer.install().map_err(stringify_error)?;
-        let service =
-            MysqlService::new(mysql_service_config(&root, release)).map_err(stringify_error)?;
-        service.install().map_err(stringify_error)?;
-        installer
-            .initialize(&service.data_dir())
-            .map_err(stringify_error)?;
-        info(ServiceKindInput::Mysql)
+            let installer =
+                MysqlInstaller::for_version(&root, release.version).map_err(stringify_error)?;
+            installer.install().map_err(stringify_error)?;
+            report_install_progress(92, "切换版本", "正在更新 MySQL 活动版本配置");
+            let service =
+                MysqlService::new(mysql_service_config(&root, release)).map_err(stringify_error)?;
+            service.install().map_err(stringify_error)?;
+            installer
+                .initialize(&service.data_dir())
+                .map_err(stringify_error)?;
+            info(ServiceKindInput::Mysql)
+        })
     })
     .await
     .map_err(|error| format!("MySQL 版本切换任务异常结束: {error}"))?
@@ -677,31 +793,38 @@ pub async fn postgres_versions() -> Result<Vec<PostgresVersionInfo>, String> {
 }
 
 #[tauri::command]
-pub async fn postgres_version_select(version: String) -> Result<ServiceInfo, String> {
+pub async fn postgres_version_select(
+    app: AppHandle,
+    version: String,
+    operation_id: String,
+) -> Result<ServiceInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let root = devbox_root()?;
-        let release = postgres_release(&version)
-            .ok_or_else(|| format!("不支持 PostgreSQL 版本 {version}"))?;
-        let current = service_config(ServiceKind::Postgres)?;
-        let current_service = PostgresService::new(current).map_err(stringify_error)?;
-        let status = current_service.status().map_err(stringify_error)?;
-        if matches!(status, ServiceStatus::Running { .. }) {
-            return Err("请先停止 PostgreSQL，再切换运行版本".into());
-        }
-        current_service
-            .prepare_version_data()
-            .map_err(stringify_error)?;
+        run_install_task(app, operation_id, "postgres".into(), || {
+            let root = devbox_root()?;
+            let release = postgres_release(&version)
+                .ok_or_else(|| format!("不支持 PostgreSQL 版本 {version}"))?;
+            let current = service_config(ServiceKind::Postgres)?;
+            let current_service = PostgresService::new(current).map_err(stringify_error)?;
+            let status = current_service.status().map_err(stringify_error)?;
+            if matches!(status, ServiceStatus::Running { .. }) {
+                return Err("请先停止 PostgreSQL，再切换运行版本".into());
+            }
+            current_service
+                .prepare_version_data()
+                .map_err(stringify_error)?;
 
-        let installer =
-            PostgresInstaller::for_version(&root, release.version).map_err(stringify_error)?;
-        installer.install().map_err(stringify_error)?;
-        let service = PostgresService::new(postgres_service_config(&root, release))
-            .map_err(stringify_error)?;
-        service.install().map_err(stringify_error)?;
-        installer
-            .initialize(&service.data_dir())
-            .map_err(stringify_error)?;
-        info(ServiceKindInput::Postgres)
+            let installer =
+                PostgresInstaller::for_version(&root, release.version).map_err(stringify_error)?;
+            installer.install().map_err(stringify_error)?;
+            report_install_progress(92, "切换版本", "正在更新 PostgreSQL 活动版本配置");
+            let service = PostgresService::new(postgres_service_config(&root, release))
+                .map_err(stringify_error)?;
+            service.install().map_err(stringify_error)?;
+            installer
+                .initialize(&service.data_dir())
+                .map_err(stringify_error)?;
+            info(ServiceKindInput::Postgres)
+        })
     })
     .await
     .map_err(|error| format!("PostgreSQL 版本切换任务异常结束: {error}"))?

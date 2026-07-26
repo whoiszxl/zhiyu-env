@@ -54,6 +54,7 @@ Zhiyu focuses on making a usable local service available quickly. It is not desi
 Every service supports:
 
 - Automatic installation
+- Installation progress, collapsible log preview, and failure details
 - Start, stop, and restart
 - PID and runtime status detection
 - Configuration editing

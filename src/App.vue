@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   cleanServiceCache,
@@ -107,6 +108,29 @@ type MongoConsoleEntry = {
   elapsedMs: number;
   error: string;
 };
+type InstallTaskStatus = "running" | "completed" | "failed";
+type InstallProgressPayload = {
+  operationId: string;
+  kind: string;
+  percent: number | null;
+  stage: string;
+  message: string;
+  status: InstallTaskStatus;
+};
+type InstallLogEntry = {
+  time: string;
+  stage: string;
+  message: string;
+};
+type InstallTask = {
+  operationId: string;
+  kind: string;
+  title: string;
+  percent: number;
+  stage: string;
+  status: InstallTaskStatus;
+  logs: InstallLogEntry[];
+};
 
 const services = ref<ServiceInfo[]>([]);
 const selectedKind = ref<ServiceKind>("redis");
@@ -199,9 +223,12 @@ const sqlHistory = ref<SqlConsoleEntry[]>([]);
 const sqlRunning = ref(false);
 const notice = ref("");
 const error = ref("");
+const installTask = ref<InstallTask | null>(null);
+const installLogExpanded = ref(true);
 let serviceTimer: number | undefined;
 let metricTimer: number | undefined;
 let diskTimer: number | undefined;
+let unlistenInstallProgress: UnlistenFn | undefined;
 
 const selectedService = computed(
   () => activeTool.value
@@ -243,6 +270,78 @@ const serviceControlBusy = computed(
     mysqlVersionChanging.value ||
     postgresVersionChanging.value,
 );
+const latestInstallLog = computed(
+  () => installTask.value?.logs.at(-1) ?? null,
+);
+
+function newOperationId() {
+  return globalThis.crypto?.randomUUID?.() ??
+    `install-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function startInstallTask(kind: string, title: string) {
+  const operationId = newOperationId();
+  installTask.value = {
+    operationId,
+    kind,
+    title,
+    percent: 0,
+    stage: "等待开始",
+    status: "running",
+    logs: [],
+  };
+  installLogExpanded.value = true;
+  return operationId;
+}
+
+function recordInstallFailure(operationId: string, cause: unknown) {
+  const task = installTask.value;
+  if (!task || task.operationId !== operationId || task.status === "failed") {
+    return;
+  }
+  const message = String(cause);
+  task.status = "failed";
+  task.stage = "安装失败";
+  task.logs.push({
+    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+    stage: "安装失败",
+    message,
+  });
+}
+
+function recordInstallSuccess(operationId: string) {
+  const task = installTask.value;
+  if (
+    !task ||
+    task.operationId !== operationId ||
+    task.status === "completed"
+  ) {
+    return;
+  }
+  task.status = "completed";
+  task.percent = 100;
+  task.stage = "安装完成";
+  task.logs.push({
+    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+    stage: "安装完成",
+    message: "安装、配置和初始化均已完成",
+  });
+}
+
+function handleInstallProgress(payload: InstallProgressPayload) {
+  const task = installTask.value;
+  if (!task || task.operationId !== payload.operationId) return;
+  if (payload.percent !== null) {
+    task.percent = Math.max(task.percent, payload.percent);
+  }
+  task.stage = payload.stage;
+  task.status = payload.status;
+  task.logs.push({
+    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+    stage: payload.stage,
+    message: payload.message,
+  });
+}
 
 const filteredPortListeners = computed(() => {
   const query = portQuery.value.trim().toLowerCase();
@@ -639,9 +738,14 @@ async function changeRedisVersion() {
   redisVersionChanging.value = true;
   notice.value = "";
   error.value = "";
+  const operationId = startInstallTask(
+    "redis",
+    `Redis ${target.version}`,
+  );
   try {
     const wasInstalled = target.installed;
-    const updated = await selectRedisVersion(target.version);
+    const updated = await selectRedisVersion(target.version, operationId);
+    recordInstallSuccess(operationId);
     const index = services.value.findIndex(
       (item) => item.kind === updated.kind,
     );
@@ -655,6 +759,7 @@ async function changeRedisVersion() {
       ? `已切换到 Redis ${target.version}`
       : `Redis ${target.version} 安装并切换成功`;
   } catch (cause) {
+    recordInstallFailure(operationId, cause);
     error.value = String(cause);
   } finally {
     redisVersionChanging.value = false;
@@ -704,9 +809,14 @@ async function changeMysqlVersion() {
   mysqlVersionChanging.value = true;
   notice.value = "";
   error.value = "";
+  const operationId = startInstallTask(
+    "mysql",
+    `MySQL ${target.version}`,
+  );
   try {
     const wasInstalled = target.installed;
-    const updated = await selectMysqlVersion(target.version);
+    const updated = await selectMysqlVersion(target.version, operationId);
+    recordInstallSuccess(operationId);
     const index = services.value.findIndex(
       (item) => item.kind === updated.kind,
     );
@@ -724,6 +834,7 @@ async function changeMysqlVersion() {
       ? `已切换到 MySQL ${target.version}`
       : `MySQL ${target.version} 安装并切换成功`;
   } catch (cause) {
+    recordInstallFailure(operationId, cause);
     error.value = String(cause);
   } finally {
     mysqlVersionChanging.value = false;
@@ -773,9 +884,17 @@ async function changePostgresVersion() {
   postgresVersionChanging.value = true;
   notice.value = "";
   error.value = "";
+  const operationId = startInstallTask(
+    "postgres",
+    `PostgreSQL ${target.version}`,
+  );
   try {
     const wasInstalled = target.installed;
-    const updated = await selectPostgresVersion(target.version);
+    const updated = await selectPostgresVersion(
+      target.version,
+      operationId,
+    );
+    recordInstallSuccess(operationId);
     const index = services.value.findIndex(
       (item) => item.kind === updated.kind,
     );
@@ -793,6 +912,7 @@ async function changePostgresVersion() {
       ? `已切换到 PostgreSQL ${target.version}`
       : `PostgreSQL ${target.version} 编译安装并切换成功`;
   } catch (cause) {
+    recordInstallFailure(operationId, cause);
     error.value = String(cause);
   } finally {
     postgresVersionChanging.value = false;
@@ -831,10 +951,13 @@ async function installDuckdbTool() {
   duckdbInstalling.value = true;
   notice.value = "";
   error.value = "";
+  const operationId = startInstallTask("duckdb", "DuckDB 1.5.5");
   try {
-    duckdbStatus.value = await installDuckdb();
+    duckdbStatus.value = await installDuckdb(operationId);
+    recordInstallSuccess(operationId);
     notice.value = `DuckDB ${duckdbStatus.value.version} 安装成功`;
   } catch (cause) {
+    recordInstallFailure(operationId, cause);
     error.value = String(cause);
   } finally {
     duckdbInstalling.value = false;
@@ -940,8 +1063,17 @@ async function execute(action: ServiceAction) {
   pendingAction.value = action;
   notice.value = "";
   error.value = "";
+  const operationId =
+    action === "install"
+      ? startInstallTask(service.kind, service.name)
+      : undefined;
   try {
-    const updated = await runServiceAction(action, service.kind);
+    const updated = await runServiceAction(
+      action,
+      service.kind,
+      operationId,
+    );
+    if (operationId) recordInstallSuccess(operationId);
     const index = services.value.findIndex(
       (item) => item.kind === updated.kind,
     );
@@ -966,6 +1098,7 @@ async function execute(action: ServiceAction) {
             : Promise.resolve(),
     ]);
   } catch (cause) {
+    if (operationId) recordInstallFailure(operationId, cause);
     error.value = String(cause);
   } finally {
     pendingAction.value = null;
@@ -1503,6 +1636,14 @@ function chartPoints(values: number[], width = 560, height = 112) {
 }
 
 onMounted(async () => {
+  try {
+    unlistenInstallProgress = await listen<InstallProgressPayload>(
+      "install-progress",
+      (event) => handleInstallProgress(event.payload),
+    );
+  } catch {
+    // Service management remains usable if the event channel is unavailable.
+  }
   await refreshServices();
   await Promise.all([
     refreshMetrics(),
@@ -1521,6 +1662,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  unlistenInstallProgress?.();
   if (serviceTimer) window.clearInterval(serviceTimer);
   if (metricTimer) window.clearInterval(metricTimer);
   if (diskTimer) window.clearInterval(diskTimer);
@@ -1609,6 +1751,65 @@ onUnmounted(() => {
     </aside>
 
     <main class="content">
+      <section
+        v-if="installTask"
+        class="install-progress-panel"
+        :class="[installTask.status, { expanded: installLogExpanded }]"
+      >
+        <button
+          type="button"
+          class="install-progress-summary"
+          :aria-expanded="installLogExpanded"
+          @click="installLogExpanded = !installLogExpanded"
+        >
+          <span class="install-progress-state"></span>
+          <strong>{{ installTask.title }}</strong>
+          <span class="install-progress-stage">{{ installTask.stage }}</span>
+          <span class="install-progress-value">
+            {{
+              installTask.status === "completed"
+                ? "完成"
+                : installTask.status === "failed"
+                  ? "失败"
+                  : `${installTask.percent}%`
+            }}
+          </span>
+          <span class="install-progress-toggle">
+            {{ installLogExpanded ? "收起" : "展开" }}
+          </span>
+        </button>
+        <div class="install-progress-track">
+          <span :style="{ width: `${installTask.percent}%` }"></span>
+        </div>
+        <p v-if="latestInstallLog" class="install-log-preview">
+          <time>{{ latestInstallLog.time }}</time>
+          <strong>{{ latestInstallLog.stage }}</strong>
+          <span>{{ latestInstallLog.message }}</span>
+        </p>
+        <div v-if="installLogExpanded" class="install-log-full">
+          <p v-if="installTask.logs.length === 0">等待安装器输出…</p>
+          <template v-else>
+            <p
+              v-for="(entry, index) in installTask.logs"
+              :key="`${entry.time}-${index}`"
+            >
+              <time>{{ entry.time }}</time>
+              <strong>{{ entry.stage }}</strong>
+              <span>{{ entry.message }}</span>
+            </p>
+          </template>
+        </div>
+        <button
+          v-if="installTask.status !== 'running'"
+          type="button"
+          class="install-progress-close"
+          aria-label="关闭安装日志"
+          @click="installTask = null"
+        >
+          ×
+        </button>
+      </section>
+
       <div v-if="loading" class="page-loading">正在读取服务状态…</div>
 
       <template v-else-if="activeTool === 'ports'">

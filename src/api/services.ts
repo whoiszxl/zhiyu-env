@@ -41,8 +41,12 @@ export function listServices(): Promise<ServiceInfo[]> {
 export function runServiceAction(
   action: ServiceAction,
   kind: ServiceKind,
+  operationId?: string,
 ): Promise<ServiceInfo> {
-  return invoke<ServiceInfo>(`service_${action}`, { kind });
+  return invoke<ServiceInfo>(`service_${action}`, {
+    kind,
+    ...(operationId ? { operationId } : {}),
+  });
 }
 
 export function getServiceMetrics(
@@ -108,24 +112,42 @@ export function listRedisVersions(): Promise<RedisVersionInfo[]> {
   return invoke<RedisVersionInfo[]>("redis_versions");
 }
 
-export function selectRedisVersion(version: string): Promise<ServiceInfo> {
-  return invoke<ServiceInfo>("redis_version_select", { version });
+export function selectRedisVersion(
+  version: string,
+  operationId: string,
+): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("redis_version_select", {
+    version,
+    operationId,
+  });
 }
 
 export function listMysqlVersions(): Promise<MysqlVersionInfo[]> {
   return invoke<MysqlVersionInfo[]>("mysql_versions");
 }
 
-export function selectMysqlVersion(version: string): Promise<ServiceInfo> {
-  return invoke<ServiceInfo>("mysql_version_select", { version });
+export function selectMysqlVersion(
+  version: string,
+  operationId: string,
+): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("mysql_version_select", {
+    version,
+    operationId,
+  });
 }
 
 export function listPostgresVersions(): Promise<PostgresVersionInfo[]> {
   return invoke<PostgresVersionInfo[]>("postgres_versions");
 }
 
-export function selectPostgresVersion(version: string): Promise<ServiceInfo> {
-  return invoke<ServiceInfo>("postgres_version_select", { version });
+export function selectPostgresVersion(
+  version: string,
+  operationId: string,
+): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("postgres_version_select", {
+    version,
+    operationId,
+  });
 }
 
 export function scanRedisKeys(
@@ -262,8 +284,8 @@ export function getDuckdbStatus(): Promise<DuckdbStatus> {
   return invoke<DuckdbStatus>("duckdb_status");
 }
 
-export function installDuckdb(): Promise<DuckdbStatus> {
-  return invoke<DuckdbStatus>("duckdb_install");
+export function installDuckdb(operationId: string): Promise<DuckdbStatus> {
+  return invoke<DuckdbStatus>("duckdb_install", { operationId });
 }
 
 export function queryDuckdbFile(

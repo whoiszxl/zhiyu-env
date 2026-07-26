@@ -1,11 +1,85 @@
 use crate::error::{DevBoxError, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::cell::RefCell;
+use std::fmt;
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallUpdate {
+    pub percent: Option<u8>,
+    pub stage: String,
+    pub message: String,
+}
+
+type InstallCallback = dyn Fn(InstallUpdate) + Send + Sync;
+
+#[derive(Clone, Default)]
+pub struct InstallReporter {
+    callback: Option<Arc<InstallCallback>>,
+}
+
+impl fmt::Debug for InstallReporter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("InstallReporter")
+            .field("enabled", &self.callback.is_some())
+            .finish()
+    }
+}
+
+impl InstallReporter {
+    pub fn new(callback: impl Fn(InstallUpdate) + Send + Sync + 'static) -> Self {
+        Self {
+            callback: Some(Arc::new(callback)),
+        }
+    }
+
+    fn emit(&self, update: InstallUpdate) {
+        if let Some(callback) = &self.callback {
+            callback(update);
+        }
+    }
+}
+
+thread_local! {
+    static ACTIVE_INSTALL_REPORTER: RefCell<Option<InstallReporter>> = const { RefCell::new(None) };
+}
+
+pub fn with_install_reporter<T>(reporter: InstallReporter, operation: impl FnOnce() -> T) -> T {
+    ACTIVE_INSTALL_REPORTER.with(|active| {
+        let previous = active.replace(Some(reporter));
+        let result = operation();
+        active.replace(previous);
+        result
+    })
+}
+
+pub fn report_install_progress(percent: u8, stage: &str, message: impl Into<String>) {
+    report_install_update(Some(percent.min(100)), stage, message);
+}
+
+fn report_install_log(stage: &str, message: impl Into<String>) {
+    report_install_update(None, stage, message);
+}
+
+fn report_install_update(percent: Option<u8>, stage: &str, message: impl Into<String>) {
+    let update = InstallUpdate {
+        percent,
+        stage: stage.into(),
+        message: message.into(),
+    };
+    ACTIVE_INSTALL_REPORTER.with(|active| {
+        if let Some(reporter) = active.borrow().as_ref() {
+            reporter.emit(update);
+        }
+    });
+}
 
 pub const REDIS_SERIES: &str = "7.2";
 pub const REDIS_VERSION: &str = "7.2.15";
@@ -271,11 +345,17 @@ impl RedisInstaller {
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 Redis {}", self.release.version),
+        );
         self.ensure_build_tools()?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/redis-server");
         if self.is_expected_version(&executable) {
+            report_install_progress(90, "已安装", "目标版本已经安装，无需重复构建");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
             });
@@ -350,6 +430,7 @@ impl RedisInstaller {
         work_dir: &Path,
         installation_dir: &Path,
     ) -> Result<()> {
+        report_install_progress(42, "解压源码", "正在解压 Redis 源码");
         run(
             Command::new("/usr/bin/tar")
                 .args(["-xzf"])
@@ -360,6 +441,7 @@ impl RedisInstaller {
         )?;
 
         let source_dir = work_dir.join(format!("redis-{}", self.release.version));
+        report_install_progress(50, "准备编译", "正在应用 macOS 构建配置");
         self.apply_build_compatibility(&source_dir)?;
         let jobs = std::thread::available_parallelism()
             .map(usize::from)
@@ -377,8 +459,10 @@ impl RedisInstaller {
             // even though fstat is correct and the old fstat64 alias was removed.
             make.arg("REDIS_CFLAGS=-DMAC_OS_X_VERSION_10_6=1060");
         }
+        report_install_progress(55, "编译程序", format!("使用 {jobs} 个并行任务编译 Redis"));
         run(&mut make, "make")?;
 
+        report_install_progress(82, "整理文件", "正在整理 Redis 可执行程序");
         let stage = work_dir.join("installation");
         let bin_dir = stage.join("bin");
         fs::create_dir_all(&bin_dir)?;
@@ -410,6 +494,7 @@ impl RedisInstaller {
             self.release.sha256,
             "official-source",
         )?;
+        report_install_progress(90, "完成安装", "Redis 程序已写入版本目录");
         replace_installation(&stage, installation_dir)
     }
 
@@ -471,10 +556,16 @@ impl MysqlInstaller {
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 MySQL {}", self.release.version),
+        );
         ensure_macos_arm64("MySQL")?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/mysqld");
         if binary_contains(&executable, &["--version"], self.release.version) {
+            report_install_progress(90, "已安装", "目标版本已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
             });
@@ -515,8 +606,10 @@ impl MysqlInstaller {
 
     pub fn initialize(&self, data_dir: &Path) -> Result<()> {
         if data_dir.join("mysql").is_dir() {
+            report_install_log("初始化数据", "MySQL 数据目录已经初始化");
             return Ok(());
         }
+        report_install_progress(94, "初始化数据", "正在创建 MySQL 系统数据库");
         fs::create_dir_all(data_dir)?;
         run(
             Command::new(self.installation_dir().join("bin/mysqld"))
@@ -549,6 +642,7 @@ impl MysqlInstaller {
         work_dir: &Path,
         installation_dir: &Path,
     ) -> Result<()> {
+        report_install_progress(45, "解压程序", "正在解压 MySQL 官方二进制包");
         run(
             Command::new("/usr/bin/tar")
                 .args(["-xzf"])
@@ -566,6 +660,7 @@ impl MysqlInstaller {
             .expect("MySQL release archive name ends with .tar.gz");
         let source = work_dir.join(archive_stem);
         let stage = work_dir.join("installation");
+        report_install_progress(75, "整理文件", "正在写入 MySQL 版本目录");
         fs::rename(source, &stage)?;
 
         if !binary_contains(
@@ -587,6 +682,7 @@ impl MysqlInstaller {
             self.release.sha256,
             "official-binary",
         )?;
+        report_install_progress(90, "完成安装", "MySQL 程序安装完成");
         replace_installation(&stage, installation_dir)
     }
 }
@@ -614,12 +710,14 @@ impl DuckdbInstaller {
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 DuckDB {DUCKDB_VERSION}"));
         ensure_macos_arm64("DuckDB")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/unzip"])?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/duckdb");
         if binary_contains(&executable, &["--version"], DUCKDB_VERSION) {
+            report_install_progress(90, "已安装", "DuckDB 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
             });
@@ -665,6 +763,7 @@ impl DuckdbInstaller {
         work_dir: &Path,
         installation_dir: &Path,
     ) -> Result<()> {
+        report_install_progress(45, "解压程序", "正在解压 DuckDB");
         run(
             Command::new("/usr/bin/unzip")
                 .args(["-q", "-o"])
@@ -675,6 +774,7 @@ impl DuckdbInstaller {
         )?;
 
         let stage = work_dir.join("installation");
+        report_install_progress(75, "整理文件", "正在写入 DuckDB 版本目录");
         let bin_dir = stage.join("bin");
         fs::create_dir_all(&bin_dir)?;
         fs::copy(work_dir.join("duckdb"), bin_dir.join("duckdb"))?;
@@ -700,6 +800,7 @@ impl DuckdbInstaller {
             DUCKDB_SHA256,
             "official-binary",
         )?;
+        report_install_progress(90, "完成安装", "DuckDB 安装完成");
         replace_installation(&stage, installation_dir)
     }
 }
@@ -712,12 +813,14 @@ impl MailpitInstaller {
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 Mailpit {MAILPIT_VERSION}"));
         ensure_macos_arm64("Mailpit")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/mailpit");
         if binary_contains(&executable, &["version"], MAILPIT_VERSION) {
+            report_install_progress(90, "已安装", "Mailpit 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
             });
@@ -763,6 +866,7 @@ impl MailpitInstaller {
         work_dir: &Path,
         installation_dir: &Path,
     ) -> Result<()> {
+        report_install_progress(45, "解压程序", "正在解压 Mailpit");
         run(
             Command::new("/usr/bin/tar")
                 .args(["-xzf"])
@@ -773,6 +877,7 @@ impl MailpitInstaller {
         )?;
         let source = work_dir.join("mailpit");
         let stage = work_dir.join("installation");
+        report_install_progress(75, "整理文件", "正在写入 Mailpit 版本目录");
         let bin_dir = stage.join("bin");
         fs::create_dir_all(&bin_dir)?;
         fs::copy(source, bin_dir.join("mailpit"))?;
@@ -792,6 +897,7 @@ impl MailpitInstaller {
             MAILPIT_SHA256,
             "official-binary",
         )?;
+        report_install_progress(90, "完成安装", "Mailpit 安装完成");
         replace_installation(&stage, installation_dir)
     }
 }
@@ -804,12 +910,14 @@ impl MongodbInstaller {
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 MongoDB {MONGODB_VERSION}"));
         ensure_macos_arm64("MongoDB")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/mongod");
         if binary_contains(&executable, &["--version"], MONGODB_VERSION) {
+            report_install_progress(90, "已安装", "MongoDB 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
             });
@@ -855,6 +963,7 @@ impl MongodbInstaller {
         work_dir: &Path,
         installation_dir: &Path,
     ) -> Result<()> {
+        report_install_progress(45, "解压程序", "正在解压 MongoDB");
         run(
             Command::new("/usr/bin/tar")
                 .args(["-xzf"])
@@ -880,6 +989,7 @@ impl MongodbInstaller {
                 message: "MongoDB archive does not contain the expected directory".into(),
             })?;
         let stage = work_dir.join("installation");
+        report_install_progress(75, "整理文件", "正在写入 MongoDB 版本目录");
         fs::rename(source, &stage)?;
 
         if !binary_contains(&stage.join("bin/mongod"), &["--version"], MONGODB_VERSION) {
@@ -897,6 +1007,7 @@ impl MongodbInstaller {
             MONGODB_SHA256,
             "official-binary",
         )?;
+        report_install_progress(90, "完成安装", "MongoDB 安装完成");
         replace_installation(&stage, installation_dir)
     }
 }
@@ -933,6 +1044,11 @@ impl PostgresInstaller {
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 PostgreSQL {}", self.release.version),
+        );
         ensure_macos_arm64("PostgreSQL")?;
         ensure_tools(&[
             "/usr/bin/curl",
@@ -950,6 +1066,7 @@ impl PostgresInstaller {
                 self.release.version,
             )
         {
+            report_install_progress(90, "已安装", "目标版本已经安装，无需重复编译");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
             });
@@ -990,8 +1107,10 @@ impl PostgresInstaller {
 
     pub fn initialize(&self, data_dir: &Path) -> Result<()> {
         if data_dir.join("PG_VERSION").is_file() {
+            report_install_log("初始化数据", "PostgreSQL 数据目录已经初始化");
             return Ok(());
         }
+        report_install_progress(94, "初始化数据", "正在执行 initdb 创建数据库集群");
         fs::create_dir_all(data_dir)?;
         run(
             Command::new(self.installation_dir().join("bin/initdb"))
@@ -1033,6 +1152,7 @@ impl PostgresInstaller {
         work_dir: &Path,
         installation_dir: &Path,
     ) -> Result<()> {
+        report_install_progress(42, "解压源码", "正在解压 PostgreSQL 源码");
         run(
             Command::new("/usr/bin/tar")
                 .args(["-xjf"])
@@ -1047,6 +1167,7 @@ impl PostgresInstaller {
             DevBoxError::InvalidConfig("PostgreSQL installation path must be absolute".into())
         })?;
         let stage = destination_root.join(relative_installation);
+        report_install_progress(50, "配置构建", "正在检查编译环境并生成构建配置");
         let mut configure = Command::new(source.join("configure"));
         configure
             .current_dir(&source)
@@ -1057,6 +1178,11 @@ impl PostgresInstaller {
             .map(usize::from)
             .unwrap_or(2)
             .min(8);
+        report_install_progress(
+            58,
+            "编译程序",
+            format!("使用 {jobs} 个并行任务编译 PostgreSQL"),
+        );
         run(
             Command::new("/usr/bin/make")
                 .arg("-C")
@@ -1064,6 +1190,7 @@ impl PostgresInstaller {
                 .arg(format!("-j{jobs}")),
             "make",
         )?;
+        report_install_progress(80, "安装程序", "正在整理 PostgreSQL 编译产物");
         run(
             Command::new("/usr/bin/make")
                 .arg("-C")
@@ -1096,6 +1223,7 @@ impl PostgresInstaller {
             self.release.sha256,
             "official-source",
         )?;
+        report_install_progress(90, "完成安装", "PostgreSQL 程序已写入版本目录");
         replace_installation(&stage, installation_dir)
     }
 }
@@ -1116,15 +1244,19 @@ fn prepare_archive(
     source_url: &str,
     expected_sha256: &str,
 ) -> Result<()> {
+    report_install_progress(8, "检查缓存", format!("检查安装包缓存：{archive_name}"));
     if archive.is_file() {
         if sha256(archive)? == expected_sha256 {
+            report_install_progress(35, "使用缓存", format!("安装包校验通过：{archive_name}"));
             return Ok(());
         }
+        report_install_log("检查缓存", "缓存校验失败，将重新下载");
         fs::remove_file(archive)?;
     }
 
     let partial = archive.with_file_name(format!("{archive_name}.partial"));
     let _ = fs::remove_file(&partial);
+    report_install_progress(12, "下载安装包", format!("开始下载：{source_url}"));
     run(
         Command::new("/usr/bin/curl")
             .args(["--fail", "--location", "--silent", "--show-error"])
@@ -1133,6 +1265,7 @@ fn prepare_archive(
             .arg(source_url),
         "curl",
     )?;
+    report_install_progress(30, "校验安装包", "下载完成，正在计算 SHA-256");
     let actual = sha256(&partial)?;
     if actual != expected_sha256 {
         let _ = fs::remove_file(&partial);
@@ -1142,6 +1275,7 @@ fn prepare_archive(
         });
     }
     fs::rename(partial, archive)?;
+    report_install_progress(35, "安装包就绪", format!("校验通过：{archive_name}"));
     Ok(())
 }
 
@@ -1226,8 +1360,10 @@ fn sha256(path: &Path) -> Result<String> {
 }
 
 fn run(command: &mut Command, name: &str) -> Result<()> {
+    report_install_log("执行命令", format!("开始执行：{name}"));
     let output = command.output()?;
     if output.status.success() {
+        report_install_log("执行命令", format!("执行完成：{name}"));
         return Ok(());
     }
 
@@ -1239,9 +1375,11 @@ fn run(command: &mut Command, name: &str) -> Result<()> {
         (true, false) => stderr,
         (true, true) => format!("process exited with {}", output.status),
     };
+    let message = tail_chars(&message, 32 * 1024);
+    report_install_log("命令失败", format!("{name}：{message}"));
     Err(DevBoxError::CommandFailed {
         command: name.into(),
-        message: tail_chars(&message, 32 * 1024),
+        message,
     })
 }
 
@@ -1267,6 +1405,37 @@ fn unique_suffix() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn install_reporter_preserves_progress_and_log_updates() {
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&updates);
+        let reporter = InstallReporter::new(move |update| {
+            captured.lock().unwrap().push(update);
+        });
+
+        with_install_reporter(reporter, || {
+            report_install_progress(25, "下载", "正在下载安装包");
+            report_install_log("执行命令", "开始执行：tar");
+        });
+
+        assert_eq!(
+            *updates.lock().unwrap(),
+            vec![
+                InstallUpdate {
+                    percent: Some(25),
+                    stage: "下载".into(),
+                    message: "正在下载安装包".into(),
+                },
+                InstallUpdate {
+                    percent: None,
+                    stage: "执行命令".into(),
+                    message: "开始执行：tar".into(),
+                },
+            ]
+        );
+    }
 
     #[test]
     fn redis_constants_target_the_same_release() {
