@@ -2,6 +2,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import ServiceDocs from "./components/ServiceDocs.vue";
 import {
   cleanServiceCache,
   createServiceBackup,
@@ -85,7 +86,8 @@ type DetailTab =
   | "backup"
   | "config"
   | "logs"
-  | "versions";
+  | "versions"
+  | "docs";
 type MetricPoint = { cpu: number; memory: number };
 type ConsoleEntry = {
   database: number;
@@ -405,6 +407,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["config", "配置文件"],
       ["logs", "运行日志"],
       ["versions", "版本管理"],
+      ["docs", "使用文档"],
     ];
   }
   if (selectedKind.value === "mysql") {
@@ -416,6 +419,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["config", "配置文件"],
       ["logs", "运行日志"],
       ["versions", "版本管理"],
+      ["docs", "使用文档"],
     ];
   }
   if (selectedKind.value === "postgres") {
@@ -427,6 +431,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["config", "配置文件"],
       ["logs", "运行日志"],
       ["versions", "版本管理"],
+      ["docs", "使用文档"],
     ];
   }
   if (selectedKind.value === "mongodb") {
@@ -437,6 +442,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["docs", "使用文档"],
     ];
   }
   if (selectedKind.value === "mailpit") {
@@ -446,6 +452,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["docs", "使用文档"],
     ];
   }
   return [
@@ -3807,6 +3814,13 @@ onUnmounted(() => {
             </p>
           </div>
         </section>
+
+        <ServiceDocs
+          v-else-if="activeTab === 'docs'"
+          :kind="selectedService.kind"
+          :port="selectedService.port"
+          :service-name="selectedService.name"
+        />
 
         <section v-else-if="activeTab === 'config'" class="editor-panel">
           <div class="editor-head">
