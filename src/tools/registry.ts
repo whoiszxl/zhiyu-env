@@ -4,6 +4,7 @@ import JwtTool from "../components/tools/JwtTool.vue";
 import PortTool from "../components/tools/PortTool.vue";
 import SqliteTool from "../components/tools/SqliteTool.vue";
 import ClipboardTool from "../components/tools/ClipboardTool.vue";
+import S3BrowserTool from "../components/tools/S3BrowserTool.vue";
 import type { ToolDefinition, ToolId } from "./types";
 
 /**
@@ -52,6 +53,13 @@ export const TOOLS: ToolDefinition[] = [
     navHint: "CLIPBOARD",
     icon: "\u2398",
     component: ClipboardTool,
+  },
+  {
+    id: "s3",
+    navLabel: "S3 浏览器",
+    navHint: "OBJECT STORAGE",
+    icon: "\u2610",
+    component: S3BrowserTool,
   },
 ];
 

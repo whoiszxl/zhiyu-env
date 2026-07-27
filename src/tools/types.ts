@@ -4,7 +4,7 @@ import type { Component, InjectionKey } from "vue";
  * 内置工具的标识。新增工具时在这里追加，并在 registry.ts 中登记。
  * 工具与「托管服务」的区别：工具不下载常驻二进制、不受进程生命周期管理。
  */
-export type ToolId = "ports" | "duckdb" | "sqlite" | "dataformat" | "jwt" | "clipboard";
+export type ToolId = "ports" | "duckdb" | "sqlite" | "dataformat" | "jwt" | "clipboard" | "s3";
 
 export interface ToolDefinition {
   id: ToolId;

@@ -2,12 +2,14 @@ mod clipboard;
 mod commands;
 mod database_tools;
 mod duckdb_tools;
+mod kafka_tools;
 mod mailpit_tools;
 mod meilisearch_tools;
 mod mongodb_tools;
 mod nats_tools;
 mod port_tools;
 mod redis_tools;
+mod s3_tools;
 mod settings;
 mod sqlite_tools;
 mod storage_tools;
@@ -27,9 +29,7 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
-                    if event.state
-                        != tauri_plugin_global_shortcut::ShortcutState::Pressed
-                    {
+                    if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
                         return;
                     }
                     if let Some(win) = app.get_webview_window("clipboard") {
@@ -55,8 +55,7 @@ pub fn run() {
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             {
                 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
-                let shortcut =
-                    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV);
+                let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV);
                 if let Err(e) = app.global_shortcut().register(shortcut) {
                     eprintln!("全局快捷键注册失败: {e}");
                 }
@@ -118,6 +117,11 @@ pub fn run() {
             nats_tools::nats_overview,
             nats_tools::nats_publish,
             nats_tools::nats_receive,
+            kafka_tools::kafka_overview,
+            kafka_tools::kafka_topics,
+            kafka_tools::kafka_topic_create,
+            kafka_tools::kafka_topic_delete,
+            kafka_tools::kafka_publish,
             port_tools::port_listeners,
             duckdb_tools::duckdb_status,
             duckdb_tools::duckdb_install,
@@ -146,6 +150,12 @@ pub fn run() {
             clipboard::commands::clipboard_clear,
             clipboard::commands::clipboard_settings_get,
             clipboard::commands::clipboard_settings_save,
+            s3_tools::s3_list_buckets,
+            s3_tools::s3_list_objects,
+            s3_tools::s3_get_object,
+            s3_tools::s3_put_object,
+            s3_tools::s3_delete_object,
+            s3_tools::s3_presigned_url,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");

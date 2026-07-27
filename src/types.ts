@@ -5,6 +5,7 @@ export type ServiceKind =
   | "mongodb"
   | "mailpit"
   | "nats"
+  | "kafka"
   | "meilisearch"
   | "minio"
   | "rustfs"
@@ -288,6 +289,23 @@ export interface NatsMessage {
   elapsedMs: number;
 }
 
+export interface KafkaOverview {
+  version: string;
+  broker: string;
+  topicCount: number;
+  storageEngine: string;
+}
+
+export interface KafkaTopic {
+  name: string;
+}
+
+export interface KafkaPublishResult {
+  topic: string;
+  payloadBytes: number;
+  elapsedMs: number;
+}
+
 export interface MeilisearchOverview {
   version: string;
   indexCount: number;
@@ -486,4 +504,36 @@ export interface ClipboardSettings {
   maxItems: number;
   retentionDays: number;
   autoStartMonitoring: boolean;
+}
+
+// ── S3 对象存储浏览器 ──────────────────────────────────────
+
+export interface S3Config {
+  endpoint: string;
+  accessKey: string;
+  secretKey: string;
+  region: string;
+  bucket: string;
+}
+
+export interface S3Bucket {
+  name: string;
+  creationDate: string;
+}
+
+export interface S3Object {
+  key: string;
+  size: number;
+  lastModified: string;
+  etag: string;
+}
+
+export interface S3ObjectContent {
+  contentType: string;
+  data: string;
+  size: number;
+}
+
+export interface S3PresignedUrl {
+  url: string;
 }

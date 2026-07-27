@@ -8,10 +8,16 @@ import type {
   JwtDecoded,
   JwtVerifyResult,
   OutputStyle,
+  S3Bucket,
+  S3Config,
+  S3Object,
+  S3ObjectContent,
+  S3PresignedUrl,
   SecretEncoding,
   SqliteOverview,
   SqliteQueryResult,
   SqliteTable,
+  TokenStatus,
   TransformResult,
 } from "../types";
 
@@ -102,4 +108,34 @@ export function executeSqlite(
     sql,
     confirmed,
   });
+}
+
+// ── S3 对象存储浏览器 ──────────────────────────────────────
+
+export function s3ListBuckets(config: S3Config): Promise<S3Bucket[]> {
+  return invoke<S3Bucket[]>("s3_list_buckets", { config });
+}
+
+export function s3ListObjects(config: S3Config, prefix?: string): Promise<S3Object[]> {
+  return invoke<S3Object[]>("s3_list_objects", { config, prefix });
+}
+
+export function s3GetObject(config: S3Config, key: string): Promise<S3ObjectContent> {
+  return invoke<S3ObjectContent>("s3_get_object", { config, key });
+}
+
+export function s3PutObject(config: S3Config, key: string, data: string): Promise<void> {
+  return invoke<void>("s3_put_object", { config, key, data });
+}
+
+export function s3DeleteObject(config: S3Config, key: string): Promise<void> {
+  return invoke<void>("s3_delete_object", { config, key });
+}
+
+export function s3PresignedUrl(
+  config: S3Config,
+  key: string,
+  expires?: number,
+): Promise<S3PresignedUrl> {
+  return invoke<S3PresignedUrl>("s3_presigned_url", { config, key, expires });
 }
