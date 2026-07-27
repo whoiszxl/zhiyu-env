@@ -16,6 +16,12 @@ pub struct S3Config {
     pub secret_key: String,
     pub region: String,
     pub bucket: String,
+    #[serde(default = "default_true")]
+    pub path_style: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -128,7 +134,7 @@ fn build_auth_header(
 fn s3_request(
     config: &S3Config,
     method: &str,
-    path: &str,
+    object_key: &str,
     query: &str,
     body: Option<&[u8]>,
 ) -> Result<String, String> {
@@ -139,23 +145,47 @@ fn s3_request(
         .map_err(|e| e.to_string())?;
 
     let endpoint = config.endpoint.trim_end_matches('/');
-    let query_str = if query.is_empty() {
-        String::new()
-    } else {
-        format!("?{query}")
-    };
-    let url = format!("{endpoint}/{path}{query_str}");
-    let payload = body.unwrap_or(b"");
-    let payload_hash = sha256_hex(std::str::from_utf8(payload).unwrap_or(""));
-    let amz_date = now_iso();
-    let date_stamp = now_date();
     let host = endpoint
         .strip_prefix("https://")
         .or_else(|| endpoint.strip_prefix("http://"))
         .unwrap_or(endpoint);
 
+    // Build URL and canonical URI based on addressing style
+    let (url, canonical_uri, host_header) = if config.path_style {
+        (
+            format!("{endpoint}/{object_key}"),
+            format!("/{object_key}"),
+            host.to_string(),
+        )
+    } else if object_key.is_empty() {
+        // List buckets: request to endpoint root
+        (
+            endpoint.to_string(),
+            "/".to_string(),
+            host.to_string(),
+        )
+    } else {
+        // Virtual-hosted style: bucket is in hostname
+        let bucket_host = format!("{}.{}", config.bucket, host);
+        let rest = object_key
+            .strip_prefix(&format!("{}/", config.bucket))
+            .unwrap_or(object_key);
+        (
+            format!("https://{bucket_host}/{rest}"),
+            format!("/{rest}"),
+            bucket_host,
+        )
+    };
+
+    let query_str = if query.is_empty() { String::new() } else { format!("?{query}") };
+    let url = format!("{url}{query_str}");
+    let payload = body.unwrap_or(b"");
+    let payload_hash = sha256_hex(std::str::from_utf8(payload).unwrap_or(""));
+    let amz_date = now_iso();
+    let date_stamp = now_date();
+
     let mut headers = BTreeMap::new();
-    headers.insert("host".into(), host.to_string());
+    headers.insert("host".into(), host_header);
     headers.insert("x-amz-content-sha256".into(), payload_hash.clone());
     headers.insert("x-amz-date".into(), amz_date.clone());
     if !payload.is_empty() {
@@ -165,7 +195,7 @@ fn s3_request(
     let signed_headers = "host;x-amz-content-sha256;x-amz-date";
     let canonical_request = build_canonical_request(
         method,
-        &format!("/{path}"),
+        &canonical_uri,
         query,
         &headers,
         signed_headers,
@@ -174,24 +204,11 @@ fn s3_request(
     let scope = format!("{date_stamp}/{}/{}/aws4_request", config.region, "s3");
     let string_to_sign = format!(
         "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        amz_date,
-        scope,
-        sha256_hex(&canonical_request)
+        amz_date, scope, sha256_hex(&canonical_request)
     );
-    let signature = sign_v4(
-        &config.secret_key,
-        &date_stamp,
-        &config.region,
-        "s3",
-        &string_to_sign,
-    );
+    let signature = sign_v4(&config.secret_key, &date_stamp, &config.region, "s3", &string_to_sign);
     let auth = build_auth_header(
-        &config.access_key,
-        &date_stamp,
-        &config.region,
-        "s3",
-        signed_headers,
-        &signature,
+        &config.access_key, &date_stamp, &config.region, "s3", signed_headers, &signature,
     );
     headers.insert("authorization".into(), auth);
 
@@ -202,7 +219,6 @@ fn s3_request(
         "HEAD" => client.head(&url),
         _ => return Err("不支持的方法".into()),
     };
-
     for (k, v) in &headers {
         req = req.header(k.as_str(), v.as_str());
     }
@@ -306,24 +322,31 @@ pub async fn s3_list_objects(
             "list-type=2&prefix={}&max-keys=500",
             prefix.as_deref().unwrap_or("")
         );
-        let xml = s3_request(&config, "GET", &config.bucket, &query, None)?;
+        let key = if config.path_style {
+            config.bucket.clone()
+        } else {
+            String::new()
+        };
+        let xml = s3_request(&config, "GET", &key, &query, None)?;
         Ok(parse_list_objects(&xml).0)
     })
     .await
     .map_err(|e| format!("S3 任务异常: {e}"))?
 }
 
+fn obj_key(config: &S3Config, key: &str) -> String {
+    if config.path_style {
+        format!("{}/{}", config.bucket, key)
+    } else {
+        key.to_string()
+    }
+}
+
 #[tauri::command]
 pub async fn s3_get_object(config: S3Config, key: String) -> Result<S3ObjectContent, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let xml = s3_request(
-            &config,
-            "GET",
-            &format!("{}/{}", config.bucket, key),
-            "",
-            None,
-        )?;
-        // Return as base64 for binary safety; frontend decodes for text preview
+        let k = obj_key(&config, &key);
+        let xml = s3_request(&config, "GET", &k, "", None)?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(xml.as_bytes());
         Ok(S3ObjectContent {
             content_type: "application/octet-stream".into(),
@@ -338,13 +361,8 @@ pub async fn s3_get_object(config: S3Config, key: String) -> Result<S3ObjectCont
 #[tauri::command]
 pub async fn s3_put_object(config: S3Config, key: String, data: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        s3_request(
-            &config,
-            "PUT",
-            &format!("{}/{}", config.bucket, key),
-            "",
-            Some(data.as_bytes()),
-        )?;
+        let k = obj_key(&config, &key);
+        s3_request(&config, "PUT", &k, "", Some(data.as_bytes()))?;
         Ok(())
     })
     .await
@@ -354,13 +372,8 @@ pub async fn s3_put_object(config: S3Config, key: String, data: String) -> Resul
 #[tauri::command]
 pub async fn s3_delete_object(config: S3Config, key: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        s3_request(
-            &config,
-            "DELETE",
-            &format!("{}/{}", config.bucket, key),
-            "",
-            None,
-        )?;
+        let k = obj_key(&config, &key);
+        s3_request(&config, "DELETE", &k, "", None)?;
         Ok(())
     })
     .await

@@ -13,6 +13,7 @@ const config = ref<S3Config>({
   secretKey: "",
   region: "oss-cn-hangzhou",
   bucket: "",
+  pathStyle: true,
 });
 
 const connected = ref(false);
@@ -138,16 +139,17 @@ function disconnect() {
 }
 
 const presets = [
-  { label: "阿里云 OSS", endpoint: "https://oss-cn-hangzhou.aliyuncs.com", region: "oss-cn-hangzhou" },
-  { label: "腾讯云 COS", endpoint: "https://cos.ap-guangzhou.myqcloud.com", region: "ap-guangzhou" },
-  { label: "七牛云 Kodo", endpoint: "https://s3-cn-east-1.qiniucs.com", region: "cn-east-1" },
-  { label: "AWS S3", endpoint: "https://s3.amazonaws.com", region: "us-east-1" },
-  { label: "MinIO", endpoint: "http://127.0.0.1:9000", region: "us-east-1" },
+  { label: "阿里云 OSS", endpoint: "https://oss-cn-hangzhou.aliyuncs.com", region: "oss-cn-hangzhou", pathStyle: true },
+  { label: "腾讯云 COS", endpoint: "https://cos.ap-guangzhou.myqcloud.com", region: "ap-guangzhou", pathStyle: false },
+  { label: "七牛云 Kodo", endpoint: "https://s3-cn-east-1.qiniucs.com", region: "cn-east-1", pathStyle: true },
+  { label: "AWS S3", endpoint: "https://s3.amazonaws.com", region: "us-east-1", pathStyle: false },
+  { label: "MinIO", endpoint: "http://127.0.0.1:9000", region: "us-east-1", pathStyle: true },
 ];
 
 function applyPreset(p: typeof presets[0]) {
   config.value.endpoint = p.endpoint;
   config.value.region = p.region;
+  config.value.pathStyle = p.pathStyle;
 }
 </script>
 
@@ -206,6 +208,10 @@ function applyPreset(p: typeof presets[0]) {
         <label>
           <span>Bucket（可选）</span>
           <input v-model="config.bucket" type="text" placeholder="留空则先列出 Bucket" spellcheck="false" />
+        </label>
+        <label class="checkbox-label">
+          <input v-model="config.pathStyle" type="checkbox" />
+          <span>路径风格 (Path-Style)</span>
         </label>
         <button
           v-if="!connected"

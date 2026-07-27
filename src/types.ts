@@ -514,6 +514,7 @@ export interface S3Config {
   secretKey: string;
   region: string;
   bucket: string;
+  pathStyle: boolean;
 }
 
 export interface S3Bucket {
