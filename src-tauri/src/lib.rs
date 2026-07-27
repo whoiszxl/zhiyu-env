@@ -23,6 +23,8 @@ pub fn run() {
             commands::service_restart,
             commands::service_metrics,
             commands::service_disk_usage,
+            commands::environment_metrics,
+            commands::environment_disk_usage,
             commands::service_config_read,
             commands::service_config_save,
             commands::service_logs,

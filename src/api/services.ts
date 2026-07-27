@@ -5,6 +5,7 @@ import type {
   DatabaseOverview,
   DuckdbQueryResult,
   DuckdbStatus,
+  EnvironmentMetrics,
   MailDetail,
   MailpitOverview,
   MailSummary,
@@ -66,6 +67,14 @@ export function getServiceDiskUsage(
   kind: ServiceKind,
 ): Promise<ServiceDiskUsage> {
   return invoke<ServiceDiskUsage>("service_disk_usage", { kind });
+}
+
+export function getEnvironmentMetrics(): Promise<EnvironmentMetrics> {
+  return invoke<EnvironmentMetrics>("environment_metrics");
+}
+
+export function getEnvironmentDiskUsage(): Promise<number> {
+  return invoke<number>("environment_disk_usage");
 }
 
 export function cleanServiceCache(

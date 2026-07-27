@@ -12,6 +12,8 @@ import {
   executeSql,
   executeRedisCommand,
   executeMongoCommand,
+  getEnvironmentDiskUsage,
+  getEnvironmentMetrics,
   getMailpitMessageDetail,
   getMailpitOverview,
   getMeilisearchOverview,
@@ -52,6 +54,7 @@ import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
   DatabaseInfo,
   DatabaseOverview,
+  EnvironmentMetrics,
   MailDetail,
   MailpitOverview,
   MailSummary,
@@ -159,6 +162,11 @@ const metrics = ref<ServiceMetrics>({
   memoryBytes: null,
   uptime: null,
 });
+const environmentMetrics = ref<EnvironmentMetrics>({
+  memoryBytes: 0,
+  runningServiceCount: 0,
+});
+const environmentDiskBytes = ref(0);
 const diskUsageByKind = ref<
   Partial<Record<ServiceKind, ServiceDiskUsage>>
 >({});
@@ -702,6 +710,22 @@ async function refreshDiskUsage(kind?: ServiceKind) {
       }
     }),
   );
+}
+
+async function refreshEnvironmentMetrics() {
+  try {
+    environmentMetrics.value = await getEnvironmentMetrics();
+  } catch {
+    // The brand summary is best-effort and must not interrupt service controls.
+  }
+}
+
+async function refreshEnvironmentDiskUsage() {
+  try {
+    environmentDiskBytes.value = await getEnvironmentDiskUsage();
+  } catch {
+    // Disk usage can be temporarily unavailable while files are being moved.
+  }
 }
 
 async function clearInstallCache() {
@@ -1761,14 +1785,22 @@ onMounted(async () => {
   await Promise.all([
     refreshMetrics(),
     refreshDiskUsage(),
+    refreshEnvironmentMetrics(),
+    refreshEnvironmentDiskUsage(),
   ]);
-  serviceTimer = window.setInterval(() => refreshServices(true), 3000);
+  serviceTimer = window.setInterval(() => {
+    void refreshServices(true);
+    void refreshEnvironmentMetrics();
+  }, 3000);
   metricTimer = window.setInterval(async () => {
     if (activeTool.value) return;
     await refreshMetrics();
     if (activeTab.value === "logs") await loadLogs();
   }, 2000);
-  diskTimer = window.setInterval(() => refreshDiskUsage(), 60_000);
+  diskTimer = window.setInterval(() => {
+    void refreshDiskUsage();
+    void refreshEnvironmentDiskUsage();
+  }, 60_000);
 });
 
 onUnmounted(() => {
@@ -1784,9 +1816,21 @@ onUnmounted(() => {
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark"><span></span><span></span><span></span></div>
-        <div>
+        <div class="brand-copy">
           <strong>智屿</strong>
           <small>轻量本地开发环境</small>
+          <div class="brand-resource-row">
+            <span
+              :title="`智屿桌面应用与当前 ${environmentMetrics.runningServiceCount} 个运行服务的常驻内存总和`"
+            >
+              内存 {{ formatBytes(environmentMetrics.memoryBytes) }}
+            </span>
+            <span
+              title="智屿在 ~/.devbox 中保存的程序、数据、日志、备份与缓存总和"
+            >
+              磁盘 {{ formatBytes(environmentDiskBytes) }}
+            </span>
+          </div>
         </div>
       </div>
 

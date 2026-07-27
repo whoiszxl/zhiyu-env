@@ -16,7 +16,7 @@ use devbox_core::{
     ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -181,6 +181,13 @@ pub struct ServiceDiskUsage {
     cache_bytes: u64,
     backup_bytes: u64,
     other_bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentMetrics {
+    memory_bytes: u64,
+    running_service_count: usize,
 }
 
 #[derive(Serialize)]
@@ -1134,6 +1141,20 @@ pub async fn service_disk_usage(kind: ServiceKindInput) -> Result<ServiceDiskUsa
 }
 
 #[tauri::command]
+pub async fn environment_metrics() -> Result<EnvironmentMetrics, String> {
+    tauri::async_runtime::spawn_blocking(collect_environment_metrics)
+        .await
+        .map_err(|error| format!("总内存统计任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn environment_disk_usage() -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(|| devbox_root().and_then(|root| path_disk_size(&root)))
+        .await
+        .map_err(|error| format!("总磁盘统计任务异常结束: {error}"))?
+}
+
+#[tauri::command]
 pub fn service_config_read(kind: ServiceKindInput) -> Result<String, String> {
     let config = service_config(kind.into())?;
     let path = native_config_path(&config);
@@ -1291,6 +1312,46 @@ fn collect_metrics(kind: ServiceKindInput) -> Result<ServiceMetrics, String> {
     })
 }
 
+fn collect_environment_metrics() -> Result<EnvironmentMetrics, String> {
+    let services = service_list()?;
+    let running_service_count = services
+        .iter()
+        .filter(|service| service.status == "running")
+        .count();
+    let mut pids = BTreeSet::from([std::process::id()]);
+    pids.extend(services.into_iter().filter_map(|service| {
+        (service.status == "running")
+            .then_some(service.pid)
+            .flatten()
+    }));
+    let pid_list = pids
+        .into_iter()
+        .map(|pid| pid.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let output = Command::new("/bin/ps")
+        .args(["-p", &pid_list, "-o", "rss="])
+        .output()
+        .map_err(|error| format!("无法读取智屿进程指标: {error}"))?;
+    if !output.status.success() {
+        return Err("无法读取智屿进程指标".into());
+    }
+
+    Ok(EnvironmentMetrics {
+        memory_bytes: sum_rss_bytes(&String::from_utf8_lossy(&output.stdout)),
+        running_service_count,
+    })
+}
+
+fn sum_rss_bytes(output: &str) -> u64 {
+    output
+        .split_whitespace()
+        .filter_map(|value| value.parse::<u64>().ok())
+        .fold(0_u64, |total, rss_kib| {
+            total.saturating_add(rss_kib.saturating_mul(1024))
+        })
+}
+
 fn collect_disk_usage(kind: ServiceKindInput) -> Result<ServiceDiskUsage, String> {
     let root = devbox_root()?;
     let kind: ServiceKind = kind.into();
@@ -1428,7 +1489,7 @@ mod tests {
     use super::{
         mailpit_value_allowed, mysql_service_config, path_disk_size, postgres_service_config,
         redis_service_config, selected_mysql_release, selected_postgres_release,
-        selected_redis_release,
+        selected_redis_release, sum_rss_bytes,
     };
     use devbox_core::{ConfigManager, ServiceConfig};
     use std::fs;
@@ -1466,6 +1527,12 @@ mod tests {
 
         assert!(path_disk_size(&root).unwrap() >= 18);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rss_values_are_summed_and_converted_from_kibibytes() {
+        assert_eq!(sum_rss_bytes(" 1024\n 2048\n"), 3 * 1024 * 1024);
+        assert_eq!(sum_rss_bytes(""), 0);
     }
 
     #[test]

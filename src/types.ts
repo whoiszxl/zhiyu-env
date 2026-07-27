@@ -54,6 +54,11 @@ export interface ServiceDiskUsage {
   otherBytes: number;
 }
 
+export interface EnvironmentMetrics {
+  memoryBytes: number;
+  runningServiceCount: number;
+}
+
 export interface CacheCleanupResult {
   removedItems: number;
   freedBytes: number;
