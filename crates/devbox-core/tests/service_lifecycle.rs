@@ -1,9 +1,9 @@
 #![cfg(unix)]
 
 use devbox_core::{
-    ConsulService, EtcdService, MailpitService, MeilisearchService, MinioService, MongodbService,
-    MysqlService, NatsService, PostgresService, RabbitmqService, RedisService, RnacosService,
-    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    ConsulService, EtcdService, KafkaService, MailpitService, MeilisearchService, MinioService,
+    MongodbService, MysqlService, NatsService, PostgresService, RabbitmqService, RedisService,
+    RnacosService, RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -95,6 +95,14 @@ fn nats_service_lifecycle() {
     let service = NatsService::new(config(temp.path(), ServiceKind::Nats)).unwrap();
     assert_lifecycle(&service);
     assert!(temp.path().join("nats/conf/nats.conf").is_file());
+}
+
+#[test]
+fn kafka_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = KafkaService::new(config(temp.path(), ServiceKind::Kafka)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("kafka/conf/kafka.conf").is_file());
 }
 
 #[test]

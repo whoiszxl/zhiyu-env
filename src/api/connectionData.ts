@@ -347,6 +347,52 @@ await nc.connect("nats://127.0.0.1:4222")`,
           },
         ],
       );
+    case "kafka":
+      return r(
+        "Kafka Sandbox",
+        "Kafka API 兼容消息沙箱",
+        9092,
+        false, "", "",
+        [
+          { label: "Bootstrap Servers", value: "127.0.0.1:9092" },
+        ],
+        [
+          { label: "运行时", value: "Tansu（无需 JVM / ZooKeeper）" },
+          { label: "持久化", value: "SQLite" },
+        ],
+        [
+          { key: "KAFKA_BOOTSTRAP_SERVERS", value: "127.0.0.1:9092" },
+        ],
+        [
+          {
+            label: "Java Spring",
+            lang: "yaml", caption: "application.yml",
+            code: `spring:
+  kafka:
+    bootstrap-servers: 127.0.0.1:9092`,
+          },
+          {
+            label: "Go",
+            lang: "go", caption: "franz-go",
+            code: `client, _ := kgo.NewClient(kgo.SeedBrokers("127.0.0.1:9092"))`,
+          },
+          {
+            label: "TypeScript",
+            lang: "typescript", caption: "kafkajs",
+            code: `const kafka = new Kafka({
+  clientId: "local-app",
+  brokers: ["127.0.0.1:9092"],
+});`,
+          },
+          {
+            label: "Python",
+            lang: "python", caption: "kafka-python",
+            code: `producer = KafkaProducer(
+    bootstrap_servers="127.0.0.1:9092"
+)`,
+          },
+        ],
+      );
     case "meilisearch":
       return r(
         "Meilisearch",

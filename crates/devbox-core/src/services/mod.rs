@@ -1,6 +1,7 @@
 mod common;
 mod consul;
 mod etcd;
+mod kafka;
 mod mailpit;
 mod meilisearch;
 mod minio;
@@ -15,6 +16,7 @@ mod rustfs;
 
 pub use consul::ConsulService;
 pub use etcd::EtcdService;
+pub use kafka::KafkaService;
 pub use mailpit::MailpitService;
 pub use meilisearch::MeilisearchService;
 pub use minio::MinioService;

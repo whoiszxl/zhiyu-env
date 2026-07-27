@@ -28,6 +28,7 @@ import {
   getMongoCollectionDetail,
   getMongoOverview,
   getNatsOverview,
+  getKafkaOverview,
   getRedisKeyDetail,
   getRedisOverview,
   getServiceLogs,
@@ -46,6 +47,10 @@ import {
   listRedisVersions,
   listServiceBackups,
   listServices,
+  listKafkaTopics,
+  createKafkaTopic,
+  deleteKafkaTopic,
+  publishKafkaMessage,
   publishNatsMessage,
   readServiceConfig,
   receiveNatsMessage,
@@ -80,6 +85,9 @@ import type {
   NatsMessage,
   NatsOverview,
   NatsPublishResult,
+  KafkaOverview,
+  KafkaPublishResult,
+  KafkaTopic,
   MysqlVersionInfo,
   PostgresVersionInfo,
   PortListener,
@@ -284,6 +292,16 @@ const natsPublishResult = ref<NatsPublishResult | null>(null);
 const natsMessage = ref<NatsMessage | null>(null);
 const natsPublishing = ref(false);
 const natsReceiving = ref(false);
+const kafkaOverview = ref<KafkaOverview | null>(null);
+const kafkaTopics = ref<KafkaTopic[]>([]);
+const kafkaTopicName = ref("dev.events");
+const kafkaPartitions = ref(3);
+const kafkaSelectedTopic = ref("");
+const kafkaMessageKey = ref("");
+const kafkaMessagePayload = ref('{"message":"Hello Kafka"}');
+const kafkaPublishResult = ref<KafkaPublishResult | null>(null);
+const kafkaLoading = ref(false);
+const kafkaPublishing = ref(false);
 const meilisearchOverview = ref<MeilisearchOverview | null>(null);
 const meilisearchIndexes = ref<MeilisearchIndex[]>([]);
 const meilisearchIndex = ref("movies");
@@ -657,6 +675,17 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
+  if (selectedKind.value === "kafka") {
+    return [
+      ["overview", "概览"],
+      ["messages", "主题与消息"],
+      ["connect", "连接"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["docs", "使用文档"],
+    ];
+  }
   if (selectedKind.value === "meilisearch") {
     return [
       ["overview", "概览"],
@@ -720,6 +749,7 @@ const iconLetter: Record<ServiceKind, string> = {
   mongodb: "M",
   mailpit: "@",
   nats: "N",
+  kafka: "K",
   meilisearch: "M",
   minio: "M",
   rustfs: "R",
@@ -832,6 +862,7 @@ async function refreshMetrics() {
     mongoOverview.value = null;
     mailpitOverview.value = null;
     natsOverview.value = null;
+    kafkaOverview.value = null;
     meilisearchOverview.value = null;
     return;
   }
@@ -870,6 +901,12 @@ async function refreshMetrics() {
         natsOverview.value = await getNatsOverview();
       } catch {
         natsOverview.value = null;
+      }
+    } else if (service.kind === "kafka") {
+      try {
+        kafkaOverview.value = await getKafkaOverview();
+      } catch {
+        kafkaOverview.value = null;
       }
     } else if (service.kind === "meilisearch") {
       try {
@@ -1254,6 +1291,8 @@ async function selectService(kind: ServiceKind) {
   mongoOverview.value = null;
   mailpitOverview.value = null;
   natsOverview.value = null;
+  kafkaOverview.value = null;
+  kafkaTopics.value = [];
   meilisearchOverview.value = null;
   meilisearchIndexes.value = [];
   mailMessages.value = [];
@@ -1641,6 +1680,9 @@ async function openTab(tab: DetailTab) {
   if (tab === "mail" && mailMessages.value.length === 0) {
     await loadMailMessages();
   }
+  if (tab === "messages" && selectedKind.value === "kafka") {
+    await loadKafkaTopics();
+  }
   if (tab === "backup") await loadBackups();
   if (tab === "search" && meilisearchIndexes.value.length === 0) {
     await loadMeilisearchIndexes();
@@ -1753,6 +1795,99 @@ async function receiveNats() {
     notice.value = "";
   } finally {
     natsReceiving.value = false;
+  }
+}
+
+async function loadKafkaTopics() {
+  if (
+    selectedKind.value !== "kafka" ||
+    selectedService.value?.status !== "running" ||
+    kafkaLoading.value
+  ) {
+    return;
+  }
+  kafkaLoading.value = true;
+  error.value = "";
+  try {
+    kafkaTopics.value = await listKafkaTopics();
+    if (
+      kafkaSelectedTopic.value &&
+      !kafkaTopics.value.some((topic) => topic.name === kafkaSelectedTopic.value)
+    ) {
+      kafkaSelectedTopic.value = "";
+    }
+    kafkaSelectedTopic.value ||= kafkaTopics.value[0]?.name ?? "";
+    kafkaOverview.value = await getKafkaOverview();
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    kafkaLoading.value = false;
+  }
+}
+
+async function addKafkaTopic() {
+  if (kafkaLoading.value || !kafkaTopicName.value.trim()) return;
+  kafkaLoading.value = true;
+  error.value = "";
+  try {
+    kafkaTopics.value = await createKafkaTopic(
+      kafkaTopicName.value.trim(),
+      kafkaPartitions.value,
+    );
+    kafkaSelectedTopic.value = kafkaTopicName.value.trim();
+    notice.value = `主题 ${kafkaSelectedTopic.value} 已创建`;
+    kafkaOverview.value = await getKafkaOverview();
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    kafkaLoading.value = false;
+  }
+}
+
+async function removeKafkaTopic(name: string) {
+  if (
+    kafkaLoading.value ||
+    !window.confirm(`确定删除 Kafka 主题 ${name} 吗？主题内消息会一并删除。`)
+  ) {
+    return;
+  }
+  kafkaLoading.value = true;
+  error.value = "";
+  try {
+    kafkaTopics.value = await deleteKafkaTopic(name);
+    if (kafkaSelectedTopic.value === name) {
+      kafkaSelectedTopic.value = kafkaTopics.value[0]?.name ?? "";
+    }
+    notice.value = `主题 ${name} 已删除`;
+    kafkaOverview.value = await getKafkaOverview();
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    kafkaLoading.value = false;
+  }
+}
+
+async function publishKafka() {
+  if (
+    !kafkaSelectedTopic.value ||
+    kafkaPublishing.value ||
+    selectedService.value?.status !== "running"
+  ) {
+    return;
+  }
+  kafkaPublishing.value = true;
+  error.value = "";
+  try {
+    kafkaPublishResult.value = await publishKafkaMessage(
+      kafkaSelectedTopic.value,
+      kafkaMessageKey.value,
+      kafkaMessagePayload.value,
+    );
+    notice.value = `测试消息已发送到 ${kafkaSelectedTopic.value}`;
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    kafkaPublishing.value = false;
   }
 }
 
@@ -3533,6 +3668,28 @@ onUnmounted(() => {
           </div>
 
           <div
+            v-if="selectedKind === 'kafka' && kafkaOverview"
+            class="redis-stat-strip"
+          >
+            <div>
+              <span>兼容协议</span>
+              <strong>Kafka API</strong>
+            </div>
+            <div>
+              <span>主题数量</span>
+              <strong>{{ kafkaOverview.topicCount }}</strong>
+            </div>
+            <div>
+              <span>Broker</span>
+              <strong class="small-value">127.0.0.1:9092</strong>
+            </div>
+            <div>
+              <span>存储引擎</span>
+              <strong>{{ kafkaOverview.storageEngine }}</strong>
+            </div>
+          </div>
+
+          <div
             v-if="selectedKind === 'meilisearch' && meilisearchOverview"
             class="redis-stat-strip"
           >
@@ -4810,7 +4967,141 @@ S3_FORCE_PATH_STYLE=true</pre>
           </template>
         </section>
 
-        <section v-else-if="activeTab === 'messages'" class="nats-workbench">
+        <section
+          v-else-if="activeTab === 'messages' && selectedKind === 'kafka'"
+          class="nats-workbench"
+        >
+          <div
+            v-if="selectedService.status !== 'running'"
+            class="workbench-empty"
+          >
+            启动 Kafka Sandbox 后即可创建主题和发送测试消息
+          </div>
+          <template v-else>
+            <div class="nats-endpoint-strip">
+              <div>
+                <p>KAFKA BROKER</p>
+                <strong>127.0.0.1:9092</strong>
+              </div>
+              <div>
+                <p>RUNTIME</p>
+                <strong>Tansu {{ selectedService.version }}</strong>
+              </div>
+              <div>
+                <p>STORAGE</p>
+                <strong>SQLite · 本地持久化</strong>
+              </div>
+            </div>
+
+            <div class="kafka-console-grid">
+              <article class="panel kafka-topic-card">
+                <div class="panel-title">
+                  <div>
+                    <p>TOPICS</p>
+                    <h2>主题管理</h2>
+                  </div>
+                  <button type="button" :disabled="kafkaLoading" @click="loadKafkaTopics">
+                    {{ kafkaLoading ? "读取中" : "刷新" }}
+                  </button>
+                </div>
+                <div class="kafka-topic-create">
+                  <input v-model="kafkaTopicName" placeholder="orders.created" />
+                  <input
+                    v-model.number="kafkaPartitions"
+                    type="number"
+                    min="1"
+                    max="32"
+                    title="分区数"
+                  />
+                  <button
+                    class="primary"
+                    type="button"
+                    :disabled="kafkaLoading || !kafkaTopicName.trim()"
+                    @click="addKafkaTopic"
+                  >
+                    创建
+                  </button>
+                </div>
+                <div v-if="kafkaTopics.length" class="kafka-topic-list">
+                  <button
+                    v-for="topic in kafkaTopics"
+                    :key="topic.name"
+                    type="button"
+                    :class="{ active: kafkaSelectedTopic === topic.name }"
+                    @click="kafkaSelectedTopic = topic.name"
+                  >
+                    <span>{{ topic.name }}</span>
+                    <i
+                      title="删除主题"
+                      @click.stop="removeKafkaTopic(topic.name)"
+                    >×</i>
+                  </button>
+                </div>
+                <div v-else class="nats-message-empty">
+                  暂无主题，创建一个主题即可开始调试。
+                </div>
+              </article>
+
+              <article class="panel nats-console-card">
+                <div class="panel-title">
+                  <div>
+                    <p>PRODUCE</p>
+                    <h2>发送测试消息</h2>
+                  </div>
+                  <span v-if="kafkaPublishResult">
+                    {{ kafkaPublishResult.elapsedMs }} ms
+                  </span>
+                </div>
+                <label>
+                  <span>Topic</span>
+                  <select v-model="kafkaSelectedTopic">
+                    <option value="">请选择主题</option>
+                    <option
+                      v-for="topic in kafkaTopics"
+                      :key="topic.name"
+                      :value="topic.name"
+                    >
+                      {{ topic.name }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>Key（可选）</span>
+                  <input v-model="kafkaMessageKey" placeholder="order-1001" />
+                </label>
+                <label>
+                  <span>Payload</span>
+                  <textarea
+                    v-model="kafkaMessagePayload"
+                    spellcheck="false"
+                    placeholder='{"id": 1001}'
+                  ></textarea>
+                </label>
+                <button
+                  class="primary"
+                  type="button"
+                  :disabled="kafkaPublishing || !kafkaSelectedTopic"
+                  @click="publishKafka"
+                >
+                  <span v-if="kafkaPublishing" class="spinner"></span>
+                  {{ kafkaPublishing ? "发送中" : "发送消息" }}
+                </button>
+                <p v-if="kafkaPublishResult" class="nats-result-note">
+                  已发送 {{ kafkaPublishResult.payloadBytes }} 字节到
+                  <code>{{ kafkaPublishResult.topic }}</code>
+                </p>
+              </article>
+            </div>
+            <p class="console-note">
+              面向本地开发调试：兼容常用 Kafka 客户端，不包含集群、副本和生产运维能力。
+            </p>
+          </template>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'messages' && selectedKind === 'nats'"
+          class="nats-workbench"
+        >
           <div
             v-if="selectedService.status !== 'running'"
             class="workbench-empty"

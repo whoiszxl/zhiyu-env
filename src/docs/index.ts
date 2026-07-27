@@ -6,6 +6,7 @@ import { buildPostgresDocs } from "./postgresDocs";
 import { buildMongodbDocs } from "./mongodbDocs";
 import { buildMailpitDocs } from "./mailpitDocs";
 import { buildNatsDocs } from "./natsDocs";
+import { buildKafkaDocs } from "./kafkaDocs";
 import { buildMeilisearchDocs } from "./meilisearchDocs";
 import { buildMinioDocs } from "./minioDocs";
 import { buildRustfsDocs } from "./rustfsDocs";
@@ -23,6 +24,7 @@ const BUILDERS: Record<ServiceKind, (port: number) => DocChapter[]> = {
   mongodb: buildMongodbDocs,
   mailpit: buildMailpitDocs,
   nats: buildNatsDocs,
+  kafka: buildKafkaDocs,
   meilisearch: buildMeilisearchDocs,
   minio: buildMinioDocs,
   rustfs: buildRustfsDocs,
@@ -40,6 +42,7 @@ const TAGLINES: Record<ServiceKind, string> = {
   mongodb: "文档数据库 · 灵活结构与快速迭代",
   mailpit: "本地邮件沙箱 · 开发期收信调试",
   nats: "轻量消息服务器 · 发布订阅与 JetStream",
+  kafka: "Kafka API 兼容消息沙箱 · 无需 JVM",
   meilisearch: "全文搜索引擎 · 索引与搜索调试",
   minio: "S3 兼容对象存储 · 存量项目调试",
   rustfs: "Rust 对象存储 · S3 兼容开发调试",

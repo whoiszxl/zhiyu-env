@@ -1,19 +1,20 @@
 use devbox_core::{
     installer::{
         mysql_release, postgres_release, redis_release, MysqlRelease, PostgresRelease,
-        RedisRelease, CONSUL_SERIES, CONSUL_VERSION, ETCD_SERIES, ETCD_VERSION, MAILPIT_SERIES,
-        MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION,
-        MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION,
-        POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES,
-        REDIS_VERSION, RNACOS_SERIES, RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
+        RedisRelease, CONSUL_SERIES, CONSUL_VERSION, ETCD_SERIES, ETCD_VERSION, KAFKA_SERIES,
+        KAFKA_VERSION, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION,
+        MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES,
+        MYSQL_VERSION, NATS_SERIES, NATS_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION,
+        RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES,
+        RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
     },
     report_install_progress, with_install_reporter, ConfigManager, ConsulInstaller, ConsulService,
-    EtcdInstaller, EtcdService, InstallReporter, MailpitInstaller, MailpitService,
-    MeilisearchInstaller, MeilisearchService, MinioInstaller, MinioService, MongodbInstaller,
-    MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService, PostgresInstaller,
-    PostgresService, RabbitmqInstaller, RabbitmqService, RedisInstaller, RedisService,
-    RnacosInstaller, RnacosService, RustfsInstaller, RustfsService, ServiceConfig, ServiceKind,
-    ServiceManager, ServiceStatus,
+    EtcdInstaller, EtcdService, InstallReporter, KafkaInstaller, KafkaService, MailpitInstaller,
+    MailpitService, MeilisearchInstaller, MeilisearchService, MinioInstaller, MinioService,
+    MongodbInstaller, MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService,
+    PostgresInstaller, PostgresService, RabbitmqInstaller, RabbitmqService, RedisInstaller,
+    RedisService, RnacosInstaller, RnacosService, RustfsInstaller, RustfsService, ServiceConfig,
+    ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -118,6 +119,7 @@ pub enum ServiceKindInput {
     Mongodb,
     Mailpit,
     Nats,
+    Kafka,
     Meilisearch,
     Minio,
     Rustfs,
@@ -136,6 +138,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Mongodb => Self::Mongodb,
             ServiceKindInput::Mailpit => Self::Mailpit,
             ServiceKindInput::Nats => Self::Nats,
+            ServiceKindInput::Kafka => Self::Kafka,
             ServiceKindInput::Meilisearch => Self::Meilisearch,
             ServiceKindInput::Minio => Self::Minio,
             ServiceKindInput::Rustfs => Self::Rustfs,
@@ -396,6 +399,26 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
                 ],
             )
         }
+        ServiceKind::Kafka => {
+            let instance = root.join("instances/kafka/default");
+            (
+                "Kafka Sandbox",
+                KAFKA_VERSION,
+                9092,
+                root.join(format!("installations/kafka/{KAFKA_SERIES}/bin/tansu")),
+                vec![
+                    "broker".into(),
+                    "--cluster-id".into(),
+                    "zhiyu-local".into(),
+                    "--listener-url".into(),
+                    "tcp://127.0.0.1:9092".into(),
+                    "--advertised-listener-url".into(),
+                    "tcp://127.0.0.1:9092".into(),
+                    "--storage-engine".into(),
+                    format!("sqlite://{}", instance.join("data/tansu.db").display()),
+                ],
+            )
+        }
         ServiceKind::Meilisearch => {
             let instance = root.join("instances/meilisearch/default");
             (
@@ -552,6 +575,10 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
                 ("RABBITMQ_NODENAME".into(), "rabbit@localhost".into()),
             ])
         }
+        ServiceKind::Kafka => BTreeMap::from([
+            ("RUST_LOG".into(), "tansu=info".into()),
+            ("NO_COLOR".into(), "1".into()),
+        ]),
         _ => BTreeMap::new(),
     };
 
@@ -656,6 +683,7 @@ fn with_service<T>(
             operation(&MailpitService::new(config).map_err(stringify_error)?)
         }
         ServiceKindInput::Nats => operation(&NatsService::new(config).map_err(stringify_error)?),
+        ServiceKindInput::Kafka => operation(&KafkaService::new(config).map_err(stringify_error)?),
         ServiceKindInput::Meilisearch => {
             operation(&MeilisearchService::new(config).map_err(stringify_error)?)
         }
@@ -702,6 +730,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Mongodb => "MongoDB",
         ServiceKindInput::Mailpit => "Mailpit",
         ServiceKindInput::Nats => "NATS",
+        ServiceKindInput::Kafka => "Kafka Sandbox",
         ServiceKindInput::Meilisearch => "Meilisearch",
         ServiceKindInput::Minio => "MinIO",
         ServiceKindInput::Rustfs => "RustFS",
@@ -780,6 +809,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Mongodb,
         ServiceKindInput::Mailpit,
         ServiceKindInput::Nats,
+        ServiceKindInput::Kafka,
         ServiceKindInput::Meilisearch,
         ServiceKindInput::Minio,
         ServiceKindInput::Rustfs,
@@ -855,6 +885,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 NATS 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Kafka => {
+            KafkaInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 Kafka Sandbox 实例配置");
             run_action(kind, |service| service.install())
         }
         ServiceKindInput::Meilisearch => {
@@ -1157,6 +1194,7 @@ pub async fn service_stop_all() -> Result<Vec<ServiceInfo>, String> {
             ServiceKindInput::Mongodb,
             ServiceKindInput::Mailpit,
             ServiceKindInput::Nats,
+            ServiceKindInput::Kafka,
             ServiceKindInput::Meilisearch,
             ServiceKindInput::Minio,
             ServiceKindInput::Rustfs,
@@ -1265,6 +1303,7 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         | ServiceKind::Postgres
         | ServiceKind::Mailpit
         | ServiceKind::Nats
+        | ServiceKind::Kafka
         | ServiceKind::Meilisearch
         | ServiceKind::Minio => {}
         ServiceKind::Rustfs => {}
@@ -1296,6 +1335,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         | ServiceKind::Postgres
         | ServiceKind::Mailpit
         | ServiceKind::Nats
+        | ServiceKind::Kafka
         | ServiceKind::Meilisearch
         | ServiceKind::Minio => config.stdout_log_path(),
         ServiceKind::Rustfs => config.stdout_log_path(),
@@ -1314,6 +1354,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Mongodb => "mongod.conf",
         ServiceKind::Mailpit => "mailpit.env",
         ServiceKind::Nats => "nats.conf",
+        ServiceKind::Kafka => "kafka.conf",
         ServiceKind::Meilisearch => "meilisearch.toml",
         ServiceKind::Minio => "minio.env",
         ServiceKind::Rustfs => "rustfs.env",
@@ -1488,6 +1529,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Mongodb => "mongodb",
         ServiceKind::Mailpit => "mailpit",
         ServiceKind::Nats => "nats-server",
+        ServiceKind::Kafka => "tansu-",
         ServiceKind::Meilisearch => "meilisearch",
         ServiceKind::Minio => "minio.",
         ServiceKind::Rustfs => "rustfs-",
@@ -1738,6 +1780,7 @@ fn connection_target(kind: &ServiceKind) -> (String, u64) {
         ServiceKind::Mongodb => ("127.0.0.1:27017".into(), 5),
         ServiceKind::Mailpit => ("127.0.0.1:1025".into(), 3),
         ServiceKind::Nats => ("127.0.0.1:4222".into(), 3),
+        ServiceKind::Kafka => ("127.0.0.1:9092".into(), 3),
         ServiceKind::Meilisearch => ("127.0.0.1:7700".into(), 3),
         ServiceKind::Minio => ("127.0.0.1:9000".into(), 3),
         ServiceKind::Rustfs => ("127.0.0.1:9002".into(), 3),

@@ -315,6 +315,12 @@ const NATS_ARCHIVE: &str = "nats-server-v2.14.2-darwin-arm64.tar.gz";
 const NATS_URL: &str =
     "https://github.com/nats-io/nats-server/releases/download/v2.14.2/nats-server-v2.14.2-darwin-arm64.tar.gz";
 const NATS_SHA256: &str = "1027e634ef15c3be7befed6f6645c317cefea54a51d1ff3d312e220bac55ca21";
+pub const KAFKA_SERIES: &str = "0.6";
+pub const KAFKA_VERSION: &str = "0.6.0";
+const KAFKA_ARCHIVE: &str = "tansu-aarch64-apple-darwin.tar.gz";
+const KAFKA_URL: &str =
+    "https://github.com/tansu-io/tansu/releases/download/v0.6.0/tansu-aarch64-apple-darwin.tar.gz";
+const KAFKA_SHA256: &str = "1129783356e6712edd20b9e2d97cdfd9d9205113ad4f027a3aa3a3d6bcf40039";
 pub const MEILISEARCH_SERIES: &str = "1.50";
 pub const MEILISEARCH_VERSION: &str = "1.50.0";
 const MEILISEARCH_BINARY: &str = "meilisearch-macos-apple-silicon-1.50.0";
@@ -861,6 +867,11 @@ impl DuckdbInstaller {
 
 #[derive(Debug, Clone)]
 pub struct NatsInstaller {
+    devbox_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct KafkaInstaller {
     devbox_root: PathBuf,
 }
 
@@ -1599,6 +1610,120 @@ impl NatsInstaller {
             "official-binary",
         )?;
         report_install_progress(90, "完成安装", "NATS 安装完成");
+        replace_installation(&stage, installation_dir)
+    }
+}
+
+impl KafkaInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 Kafka Sandbox (Tansu {KAFKA_VERSION})"),
+        );
+        ensure_macos_arm64("Kafka Sandbox")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
+
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/tansu");
+        if binary_contains(&executable, &["--version"], KAFKA_VERSION) {
+            report_install_progress(90, "已安装", "Kafka Sandbox 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let temp_root = self.devbox_root.join("tmp");
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&temp_root)?;
+        fs::create_dir_all(
+            installation_dir
+                .parent()
+                .expect("Kafka installation has a parent"),
+        )?;
+
+        let archive = downloads_dir.join(KAFKA_ARCHIVE);
+        prepare_archive(&archive, KAFKA_ARCHIVE, KAFKA_URL, KAFKA_SHA256)?;
+        let work_dir = temp_root.join(format!(
+            "kafka-{KAFKA_VERSION}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&work_dir)?;
+        let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
+        let _ = fs::remove_dir_all(&work_dir);
+        result?;
+
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations")
+            .join("kafka")
+            .join(KAFKA_SERIES)
+    }
+
+    fn extract_and_commit(
+        &self,
+        archive: &Path,
+        work_dir: &Path,
+        installation_dir: &Path,
+    ) -> Result<()> {
+        report_install_progress(45, "解压程序", "正在解压 Tansu 官方二进制包");
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xzf"])
+                .arg(archive)
+                .arg("-C")
+                .arg(work_dir),
+            "tar",
+        )?;
+
+        let source = work_dir.join("bin/tansu");
+        if !source.is_file() {
+            return Err(DevBoxError::CommandFailed {
+                command: "tar".into(),
+                message: "安装包中未找到 bin/tansu".into(),
+            });
+        }
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        report_install_progress(75, "整理文件", "正在写入 Kafka Sandbox 版本目录");
+        fs::create_dir_all(&bin_dir)?;
+        fs::copy(source, bin_dir.join("tansu"))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(bin_dir.join("tansu"), fs::Permissions::from_mode(0o755))?;
+        }
+
+        if !binary_contains(&bin_dir.join("tansu"), &["--version"], KAFKA_VERSION) {
+            return Err(DevBoxError::CommandFailed {
+                command: "tansu --version".into(),
+                message: format!("downloaded binary is not Tansu {KAFKA_VERSION}"),
+            });
+        }
+        write_manifest(
+            &stage,
+            "kafka",
+            KAFKA_SERIES,
+            KAFKA_VERSION,
+            KAFKA_URL,
+            KAFKA_SHA256,
+            "tansu-official-binary",
+        )?;
+        report_install_progress(90, "完成安装", "Kafka Sandbox 安装完成");
         replace_installation(&stage, installation_dir)
     }
 }

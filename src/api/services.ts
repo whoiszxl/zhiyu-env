@@ -22,6 +22,9 @@ import type {
   NatsMessage,
   NatsOverview,
   NatsPublishResult,
+  KafkaOverview,
+  KafkaPublishResult,
+  KafkaTopic,
   PortListener,
   ServiceAction,
   ServiceDiskUsage,
@@ -339,6 +342,37 @@ export function publishNatsMessage(
 
 export function receiveNatsMessage(subject: string): Promise<NatsMessage> {
   return invoke<NatsMessage>("nats_receive", { subject });
+}
+
+export function getKafkaOverview(): Promise<KafkaOverview> {
+  return invoke<KafkaOverview>("kafka_overview");
+}
+
+export function listKafkaTopics(): Promise<KafkaTopic[]> {
+  return invoke<KafkaTopic[]>("kafka_topics");
+}
+
+export function createKafkaTopic(
+  name: string,
+  partitions: number,
+): Promise<KafkaTopic[]> {
+  return invoke<KafkaTopic[]>("kafka_topic_create", { name, partitions });
+}
+
+export function deleteKafkaTopic(name: string): Promise<KafkaTopic[]> {
+  return invoke<KafkaTopic[]>("kafka_topic_delete", { name });
+}
+
+export function publishKafkaMessage(
+  topic: string,
+  key: string,
+  payload: string,
+): Promise<KafkaPublishResult> {
+  return invoke<KafkaPublishResult>("kafka_publish", {
+    topic,
+    key: key || null,
+    payload,
+  });
 }
 
 export function getMeilisearchOverview(): Promise<MeilisearchOverview> {
