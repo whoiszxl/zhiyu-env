@@ -19,14 +19,27 @@ pub struct ClipboardSettings {
     pub max_items: u32,
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
+    #[serde(default = "default_false")]
+    pub auto_start_monitoring: bool,
 }
 
-fn default_max_items() -> u32 { DEFAULT_MAX_ITEMS }
-fn default_retention_days() -> u32 { DEFAULT_RETENTION_DAYS }
+fn default_max_items() -> u32 {
+    DEFAULT_MAX_ITEMS
+}
+fn default_retention_days() -> u32 {
+    DEFAULT_RETENTION_DAYS
+}
+fn default_false() -> bool {
+    false
+}
 
 impl Default for ClipboardSettings {
     fn default() -> Self {
-        Self { max_items: DEFAULT_MAX_ITEMS, retention_days: DEFAULT_RETENTION_DAYS }
+        Self {
+            max_items: DEFAULT_MAX_ITEMS,
+            retention_days: DEFAULT_RETENTION_DAYS,
+            auto_start_monitoring: false,
+        }
     }
 }
 
@@ -50,7 +63,7 @@ pub struct ClipboardStatus {
     pub item_count: u32,
     pub pinned_count: u32,
     pub db_size_bytes: u64,
-    pub monitoring: bool,
+    pub run_state: String,
 }
 
 pub(crate) struct ClipboardRepo {
@@ -131,23 +144,27 @@ impl ClipboardRepo {
             .map_err(|e| e.to_string())?;
 
         if updated > 0 {
-            let mut stmt = conn
-                .prepare("SELECT id FROM clipboard_items WHERE content_hash = ?1")
+            let item = conn
+                .query_row(
+                    "SELECT id, content, content_type, preview, char_count, copied_at_millis, last_used_at_millis, use_count, pinned
+                       FROM clipboard_items WHERE content_hash = ?1",
+                    params![content_hash],
+                    |row| {
+                        Ok(ClipboardItem {
+                            id: row.get(0)?,
+                            content: row.get(1)?,
+                            content_type: row.get(2)?,
+                            preview: row.get(3)?,
+                            char_count: row.get(4)?,
+                            copied_at_millis: row.get::<_, i64>(5)? as u64,
+                            last_used_at_millis: row.get::<_, i64>(6)? as u64,
+                            use_count: row.get(7)?,
+                            pinned: row.get(8)?,
+                        })
+                    },
+                )
                 .map_err(|e| e.to_string())?;
-            let id: i64 = stmt
-                .query_row(params![content_hash], |row| row.get(0))
-                .map_err(|e| e.to_string())?;
-            return Ok(Some(ClipboardItem {
-                id,
-                content,
-                content_type,
-                preview,
-                char_count,
-                copied_at_millis: now_ms,
-                last_used_at_millis: now_ms,
-                use_count: 0,
-                pinned: false,
-            }));
+            return Ok(Some(item));
         }
 
         conn.execute(
@@ -183,7 +200,9 @@ impl ClipboardRepo {
         offset: u32,
     ) -> Result<Vec<ClipboardItem>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(q) = search {
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(q) =
+            search
+        {
             let pattern = format!("%{}%", q.replace('%', "\\%").replace('_', "\\_"));
             (
                 "SELECT id, content, content_type, preview, char_count, copied_at_millis, last_used_at_millis, use_count, pinned
@@ -213,7 +232,8 @@ impl ClipboardRepo {
         };
 
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
                 Ok(ClipboardItem {
@@ -305,13 +325,16 @@ impl ClipboardRepo {
             .prepare("SELECT key, value FROM clipboard_config")
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|e| e.to_string())?;
         for row in rows {
             let (k, v) = row.map_err(|e| e.to_string())?;
             match k.as_str() {
                 "max_items" => s.max_items = v.parse().unwrap_or(DEFAULT_MAX_ITEMS),
                 "retention_days" => s.retention_days = v.parse().unwrap_or(DEFAULT_RETENTION_DAYS),
+                "auto_start_monitoring" => s.auto_start_monitoring = v == "1",
                 _ => {}
             }
         }
@@ -319,19 +342,31 @@ impl ClipboardRepo {
     }
 
     pub(crate) fn save_settings(&self, settings: &ClipboardSettings) -> Result<(), String> {
+        if !(100..=2000).contains(&settings.max_items) {
+            return Err("最大记录数必须在 100 到 2000 之间".into());
+        }
+        if !(1..=365).contains(&settings.retention_days) {
+            return Err("保留天数必须在 1 到 365 天之间".into());
+        }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT OR REPLACE INTO clipboard_config (key, value) VALUES ('max_items', ?1)",
             params![settings.max_items],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT OR REPLACE INTO clipboard_config (key, value) VALUES ('retention_days', ?1)",
             params![settings.retention_days],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO clipboard_config (key, value) VALUES ('auto_start_monitoring', ?1)",
+            params![if settings.auto_start_monitoring { "1" } else { "0" }],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    fn evict(&self) -> Result<(), String> {
+    pub(crate) fn evict(&self) -> Result<(), String> {
         let settings = self.load_settings()?;
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let cutoff_ms = (now_millis() as i64)
@@ -397,7 +432,7 @@ impl ClipboardRepo {
             item_count,
             pinned_count,
             db_size_bytes: (page_count * page_size) as u64,
-            monitoring: false,
+            run_state: "stopped".to_string(),
         })
     }
 }
@@ -417,7 +452,11 @@ fn classify(content: &str) -> String {
     }
     if trimmed.contains('\n') || trimmed.contains('\t') {
         let brief = trimmed.lines().take(2).collect::<Vec<_>>().join(" ");
-        if brief.contains("SELECT ") || brief.contains("function ") || brief.contains("def ") || brief.contains("import ") {
+        if brief.contains("SELECT ")
+            || brief.contains("function ")
+            || brief.contains("def ")
+            || brief.contains("import ")
+        {
             return "code".into();
         }
     }
@@ -453,7 +492,11 @@ mod tests {
 
     fn test_repo() -> ClipboardRepo {
         let id = TEST_ID.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("zhiyu-clipboard-test-{}-{}", std::process::id(), id));
+        let dir = std::env::temp_dir().join(format!(
+            "zhiyu-clipboard-test-{}-{}",
+            std::process::id(),
+            id
+        ));
         std::fs::create_dir_all(&dir).ok();
         ClipboardRepo::open(&dir.join("test.db")).unwrap()
     }
@@ -468,7 +511,55 @@ mod tests {
     }
 
     #[test]
-    fn dedup_same_content() {
+    fn normal_text_saved() {
+        let repo = test_repo();
+        let item = repo.insert("hello world".into()).unwrap().unwrap();
+        assert_eq!(item.content, "hello world");
+        assert_eq!(item.content_type, "text");
+        assert_eq!(item.use_count, 1);
+    }
+
+    #[test]
+    fn verification_codes_allowed() {
+        let repo = test_repo();
+        assert!(repo.insert("123456".into()).unwrap().is_some());
+        assert!(repo.insert("A1B2C3".into()).unwrap().is_some());
+        assert!(repo.insert("redis".into()).unwrap().is_some());
+    }
+
+    #[test]
+    fn private_key_blocked() {
+        let repo = test_repo();
+        assert!(repo
+            .insert("-----BEGIN PRIVATE KEY-----".into())
+            .unwrap()
+            .is_none());
+        assert!(repo
+            .insert("-----BEGIN RSA PRIVATE KEY-----".into())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn jwt_blocked() {
+        let repo = test_repo();
+        assert!(repo.insert(
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U".into()
+        ).unwrap().is_none());
+    }
+
+    #[test]
+    fn password_blocked() {
+        let repo = test_repo();
+        assert!(repo.insert("password: hunter2".into()).unwrap().is_none());
+        assert!(repo
+            .insert("PASSWORD=supersecret".into())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn dedup_same_content_no_duplicate() {
         let repo = test_repo();
         repo.insert("same content".into()).unwrap();
         repo.insert("same content".into()).unwrap();
@@ -477,10 +568,118 @@ mod tests {
     }
 
     #[test]
-    fn skips_sensitive() {
+    fn dedup_returns_accurate_use_count() {
         let repo = test_repo();
-        assert!(repo.insert("-----BEGIN PRIVATE KEY-----".into()).unwrap().is_none());
-        assert!(repo.insert("123456".into()).unwrap().is_none());
+        let first = repo.insert("accurate count".into()).unwrap().unwrap();
+        assert_eq!(first.use_count, 1);
+        let second = repo.insert("accurate count".into()).unwrap().unwrap();
+        assert_eq!(second.use_count, 2);
+        assert_eq!(second.id, first.id);
+    }
+
+    #[test]
+    fn pinned_stays_pinned_on_dedup() {
+        let repo = test_repo();
+        let item = repo.insert("pinned content".into()).unwrap().unwrap();
+        repo.toggle_pin(item.id).unwrap();
+        let after = repo.insert("pinned content".into()).unwrap().unwrap();
+        assert!(after.pinned, "置顶内容重复复制后应保持置顶");
+    }
+
+    #[test]
+    fn max_items_eviction() {
+        let repo = test_repo();
+        repo.save_settings(&ClipboardSettings {
+            max_items: 100,
+            retention_days: 365,
+            auto_start_monitoring: false,
+        })
+        .unwrap();
+        for i in 0..120 {
+            repo.insert(format!("item-{i}")).unwrap();
+        }
+        repo.evict().unwrap();
+        let items = repo.list(None, 200, 0).unwrap();
+        let unpinned: Vec<_> = items.iter().filter(|i| !i.pinned).collect();
+        assert!(unpinned.len() <= 100, "应不超过 max_items=100");
+    }
+
+    #[test]
+    fn retention_days_eviction() {
+        let repo = test_repo();
+        repo.save_settings(&ClipboardSettings {
+            max_items: 2000,
+            retention_days: 1,
+            auto_start_monitoring: false,
+        })
+        .unwrap();
+        repo.insert("old item".into()).unwrap();
+        // Simulate old timestamp by inserting directly with expired time
+        let conn = repo.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE clipboard_items SET copied_at_millis = 1 WHERE pinned = 0",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        repo.evict().unwrap();
+        let items = repo.list(None, 50, 0).unwrap();
+        let unpinned: Vec<_> = items.iter().filter(|i| !i.pinned).collect();
+        assert!(unpinned.is_empty(), "过期内容应被清理");
+    }
+
+    #[test]
+    fn pinned_not_evicted() {
+        let repo = test_repo();
+        repo.save_settings(&ClipboardSettings {
+            max_items: 100,
+            retention_days: 365,
+            auto_start_monitoring: false,
+        })
+        .unwrap();
+        let item = repo.insert("pinned safe".into()).unwrap().unwrap();
+        repo.toggle_pin(item.id).unwrap();
+        for i in 0..110 {
+            repo.insert(format!("unpinned-{i}")).unwrap();
+        }
+        repo.evict().unwrap();
+        assert!(repo.get_by_id(item.id).unwrap().is_some(), "置顶不应被清理");
+        let items = repo.list(None, 200, 0).unwrap();
+        let unpinned: Vec<_> = items.iter().filter(|i| !i.pinned).collect();
+        assert!(unpinned.len() <= 100, "非置顶应按上限清理");
+    }
+
+    #[test]
+    fn settings_validation_rejects_invalid() {
+        let repo = test_repo();
+        assert!(repo
+            .save_settings(&ClipboardSettings {
+                max_items: 50,
+                retention_days: 30,
+                auto_start_monitoring: false
+            })
+            .is_err());
+        assert!(repo
+            .save_settings(&ClipboardSettings {
+                max_items: 500,
+                retention_days: 0,
+                auto_start_monitoring: false
+            })
+            .is_err());
+        assert!(repo
+            .save_settings(&ClipboardSettings {
+                max_items: 500,
+                retention_days: 400,
+                auto_start_monitoring: false
+            })
+            .is_err());
+        assert!(repo
+            .save_settings(&ClipboardSettings {
+                max_items: 99999,
+                retention_days: 30,
+                auto_start_monitoring: false
+            })
+            .is_err());
     }
 
     #[test]
@@ -488,9 +687,6 @@ mod tests {
         assert_eq!(classify("http://localhost:8080"), "url");
         assert_eq!(classify("https://example.com"), "url");
         assert_eq!(classify("hello\nworld"), "text");
-        assert_eq!(
-            classify("SELECT *\nFROM users\nWHERE id = 1"),
-            "code"
-        );
+        assert_eq!(classify("SELECT *\nFROM users\nWHERE id = 1"), "code");
     }
 }

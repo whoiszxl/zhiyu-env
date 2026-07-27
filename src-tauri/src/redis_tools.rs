@@ -194,7 +194,9 @@ fn scan_keys(database: u8, cursor: String, pattern: String) -> Result<RedisScanR
                 .unwrap_or_default();
             Ok(RedisScanResult { next_cursor, keys })
         }
-        Err(error) if error.contains("Unrecognized option") || error.contains("bad number of args") => {
+        Err(error)
+            if error.contains("Unrecognized option") || error.contains("bad number of args") =>
+        {
             scan_keys_raw(database, &args)
         }
         Err(error) => Err(error),
@@ -206,10 +208,7 @@ fn scan_keys_raw(database: u8, args: &[String]) -> Result<RedisScanResult, Strin
     let mut lines = output.lines();
     let next_cursor = lines.next().unwrap_or("0").to_string();
     let keys: Vec<String> = lines.map(str::to_string).collect();
-    Ok(RedisScanResult {
-        next_cursor,
-        keys,
-    })
+    Ok(RedisScanResult { next_cursor, keys })
 }
 
 fn read_key_detail(database: u8, key: String) -> Result<RedisKeyDetail, String> {
@@ -377,7 +376,9 @@ fn run_json(database: u8, arguments: &[String]) -> Result<Value, String> {
 fn run_json_or_raw(database: u8, arguments: &[String]) -> Result<Value, String> {
     match run_json(database, arguments) {
         Ok(value) => Ok(value),
-        Err(error) if error.contains("Unrecognized option") || error.contains("bad number of args") => {
+        Err(error)
+            if error.contains("Unrecognized option") || error.contains("bad number of args") =>
+        {
             let output = run_raw(database, arguments)?;
             Ok(Value::String(output.trim().to_string()))
         }

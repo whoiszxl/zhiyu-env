@@ -179,31 +179,48 @@ fn spawn_clipboard_toggle(app: AppHandle) {
         let event = match app.try_state::<ClipboardState>() {
             Some(state) => match state.0.lock() {
                 Ok(guard) => match guard.as_ref() {
-                    Some(svc) if svc.is_monitoring() => {
-                        if svc.is_paused() {
-                            svc.resume();
-                            ServiceActionEvent { success: true, message: "已恢复剪贴板记录".into() }
-                        } else {
+                    Some(svc) => match svc.run_state() {
+                        "running" => {
                             svc.pause();
-                            ServiceActionEvent { success: true, message: "已暂停剪贴板记录".into() }
-                        }
-                    }
-                    Some(_) => {
-                        drop(guard);
-                        // Service exists but not monitoring yet — we need to start it
-                        // Re-acquire lock to access the service
-                        if let Ok(g) = state.0.lock() {
-                            if let Some(svc) = g.as_ref() {
-                                let _ = svc.start_watching(app.clone());
+                            ServiceActionEvent {
+                                success: true,
+                                message: "已暂停剪贴板记录".into(),
                             }
                         }
-                        ServiceActionEvent { success: true, message: "已开启剪贴板记录".into() }
-                    }
-                    None => ServiceActionEvent { success: false, message: "剪贴板服务未初始化".into() },
+                        "paused" => {
+                            svc.resume();
+                            ServiceActionEvent {
+                                success: true,
+                                message: "已恢复剪贴板记录".into(),
+                            }
+                        }
+                        _ => {
+                            drop(guard);
+                            if let Ok(g) = state.0.lock() {
+                                if let Some(svc) = g.as_ref() {
+                                    let _ = svc.start_watching(app.clone());
+                                }
+                            }
+                            ServiceActionEvent {
+                                success: true,
+                                message: "已开启剪贴板记录".into(),
+                            }
+                        }
+                    },
+                    None => ServiceActionEvent {
+                        success: false,
+                        message: "剪贴板服务未初始化".into(),
+                    },
                 },
-                Err(_) => ServiceActionEvent { success: false, message: "剪贴板服务忙".into() },
+                Err(_) => ServiceActionEvent {
+                    success: false,
+                    message: "剪贴板服务忙".into(),
+                },
             },
-            None => ServiceActionEvent { success: false, message: "剪贴板状态不可用".into() },
+            None => ServiceActionEvent {
+                success: false,
+                message: "剪贴板状态不可用".into(),
+            },
         };
         let _ = app.emit(ACTION_EVENT, event);
     });
@@ -211,7 +228,13 @@ fn spawn_clipboard_toggle(app: AppHandle) {
 
 fn open_clipboard_tool(app: &AppHandle) {
     show_main_window(app);
-    let _ = app.emit(NAVIGATE_EVENT, NavigationEvent { target: "clipboard", kind: None });
+    let _ = app.emit(
+        NAVIGATE_EVENT,
+        NavigationEvent {
+            target: "clipboard",
+            kind: None,
+        },
+    );
 }
 
 fn spawn_clipboard_clear(app: AppHandle) {
@@ -220,14 +243,29 @@ fn spawn_clipboard_clear(app: AppHandle) {
             Some(state) => match state.0.lock() {
                 Ok(guard) => match guard.as_ref() {
                     Some(svc) => match svc.clear() {
-                        Ok(n) => ServiceActionEvent { success: true, message: format!("已清空 {n} 条剪贴板记录") },
-                        Err(e) => ServiceActionEvent { success: false, message: e },
+                        Ok(n) => ServiceActionEvent {
+                            success: true,
+                            message: format!("已清空 {n} 条剪贴板记录"),
+                        },
+                        Err(e) => ServiceActionEvent {
+                            success: false,
+                            message: e,
+                        },
                     },
-                    None => ServiceActionEvent { success: false, message: "剪贴板服务未初始化".into() },
+                    None => ServiceActionEvent {
+                        success: false,
+                        message: "剪贴板服务未初始化".into(),
+                    },
                 },
-                Err(_) => ServiceActionEvent { success: false, message: "剪贴板服务忙".into() },
+                Err(_) => ServiceActionEvent {
+                    success: false,
+                    message: "剪贴板服务忙".into(),
+                },
             },
-            None => ServiceActionEvent { success: false, message: "剪贴板状态不可用".into() },
+            None => ServiceActionEvent {
+                success: false,
+                message: "剪贴板状态不可用".into(),
+            },
         };
         let _ = app.emit(ACTION_EVENT, event);
     });
@@ -373,12 +411,12 @@ fn build_menu(app: &AppHandle, snapshot: &TraySnapshot) -> tauri::Result<Menu<ta
     let clipboard_label = MenuItemBuilder::with_id("tray.clipboard.label", "剪贴板历史")
         .enabled(false)
         .build(app)?;
-    let clipboard_toggle = MenuItemBuilder::with_id("tray.clipboard.toggle", "开启 / 暂停记录")
-        .build(app)?;
-    let clipboard_open = MenuItemBuilder::with_id("tray.clipboard.open", "打开剪贴板历史")
-        .build(app)?;
-    let clipboard_clear = MenuItemBuilder::with_id("tray.clipboard.clear", "清空未置顶记录")
-        .build(app)?;
+    let clipboard_toggle =
+        MenuItemBuilder::with_id("tray.clipboard.toggle", "开启 / 暂停记录").build(app)?;
+    let clipboard_open =
+        MenuItemBuilder::with_id("tray.clipboard.open", "打开剪贴板历史").build(app)?;
+    let clipboard_clear =
+        MenuItemBuilder::with_id("tray.clipboard.clear", "清空未置顶记录").build(app)?;
     let autostart = CheckMenuItemBuilder::with_id("tray.toggle_autostart", "开机启动智屿")
         .checked(snapshot.launch_at_login)
         .build(app)?;

@@ -383,20 +383,20 @@ export function testServiceConnection(kind: ServiceKind): Promise<void> {
 
 import type { ClipboardItem, ClipboardStatus, ClipboardSettings } from "../types";
 
-export function clipboardStart(): Promise<void> {
-  return invoke<void>("clipboard_start");
+export function clipboardStart(): Promise<{ runState: string }> {
+  return invoke<{ runState: string }>("clipboard_start");
 }
 
 export function clipboardStop(): Promise<void> {
   return invoke<void>("clipboard_stop");
 }
 
-export function clipboardPause(): Promise<boolean> {
-  return invoke<boolean>("clipboard_pause");
+export function clipboardPause(): Promise<void> {
+  return invoke<void>("clipboard_pause");
 }
 
-export function clipboardResume(): Promise<boolean> {
-  return invoke<boolean>("clipboard_resume");
+export function clipboardResume(): Promise<void> {
+  return invoke<void>("clipboard_resume");
 }
 
 export function clipboardStatus(): Promise<ClipboardStatus> {
@@ -431,8 +431,8 @@ export function clipboardSettingsGet(): Promise<ClipboardSettings> {
   return invoke<ClipboardSettings>("clipboard_settings_get");
 }
 
-export function clipboardSettingsSave(settings: ClipboardSettings): Promise<void> {
-  return invoke<void>("clipboard_settings_save", { settings });
+export function clipboardSettingsSave(settings: ClipboardSettings): Promise<ClipboardStatus> {
+  return invoke<ClipboardStatus>("clipboard_settings_save", { settings });
 }
 
 export function installDuckdb(operationId: string): Promise<DuckdbStatus> {

@@ -479,10 +479,11 @@ export interface ClipboardStatus {
   itemCount: number;
   pinnedCount: number;
   dbSizeBytes: number;
-  monitoring: boolean;
+  runState: "stopped" | "running" | "paused";
 }
 
 export interface ClipboardSettings {
   maxItems: number;
   retentionDays: number;
+  autoStartMonitoring: boolean;
 }

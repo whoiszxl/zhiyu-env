@@ -1713,9 +1713,7 @@ mod tests {
 }
 
 #[tauri::command]
-pub async fn service_test_connection(
-    kind: ServiceKindInput,
-) -> Result<(), String> {
+pub async fn service_test_connection(kind: ServiceKindInput) -> Result<(), String> {
     let kind: ServiceKind = kind.into();
     let (addr, timeout_secs) = connection_target(&kind);
     tauri::async_runtime::spawn_blocking(move || {

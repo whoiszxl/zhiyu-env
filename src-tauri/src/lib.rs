@@ -22,7 +22,9 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .manage(clipboard::commands::ClipboardState(std::sync::Mutex::new(None)))
+        .manage(clipboard::commands::ClipboardState(std::sync::Mutex::new(
+            None,
+        )))
         .setup(|app| {
             let settings = settings::load_settings();
             let _ = settings::apply_log_retention(&settings);

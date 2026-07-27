@@ -20,11 +20,6 @@ pub(crate) fn is_sensitive(content: &str) -> bool {
         return true;
     }
 
-    // 单独复制的验证码（纯数字 / 字母数字，4~8 位）
-    if looks_like_verification_code(trimmed) {
-        return true;
-    }
-
     // 常见云服务 key / secret
     if lower.starts_with("ak-")
         || lower.starts_with("sk-")
@@ -56,28 +51,15 @@ pub(crate) fn is_sensitive(content: &str) -> bool {
 }
 
 fn looks_like_jwt(text: &str) -> bool {
-    // JWT 格式: header.payload.signature，三段 base64url，用 . 连接
     let parts: Vec<&str> = text.split('.').collect();
     if parts.len() != 3 {
         return false;
     }
-    parts
-        .iter()
-        .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-}
-
-fn looks_like_verification_code(text: &str) -> bool {
-    let len = text.chars().count();
-    if !(4..=8).contains(&len) {
-        return false;
-    }
-    // 纯数字验证码
-    if text.chars().all(|c| c.is_ascii_digit()) {
-        return true;
-    }
-    // 字母数字混合验证码
-    let alnum_count = text.chars().filter(|c| c.is_ascii_alphanumeric()).count();
-    alnum_count == len
+    parts.iter().all(|p| {
+        !p.is_empty()
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    })
 }
 
 #[cfg(test)]
@@ -100,12 +82,6 @@ mod tests {
     }
 
     #[test]
-    fn skips_verification_codes() {
-        assert!(is_sensitive("123456"));
-        assert!(is_sensitive("A1B2C3"));
-    }
-
-    #[test]
     fn skips_api_keys() {
         assert!(is_sensitive("sk-proj-abc123"));
         assert!(is_sensitive("Bearer eyJhbGciOi..."));
@@ -125,5 +101,16 @@ mod tests {
         assert!(!is_sensitive("SELECT * FROM users"));
         assert!(!is_sensitive("http://localhost:8080"));
         assert!(!is_sensitive("redis://127.0.0.1:6379"));
+    }
+
+    #[test]
+    fn allows_verification_codes() {
+        assert!(!is_sensitive("123456"));
+        assert!(!is_sensitive("1234"));
+        assert!(!is_sensitive("A1B2C3"));
+        assert!(!is_sensitive("redis"));
+        assert!(!is_sensitive("Docker"));
+        assert!(!is_sensitive("ABC123"));
+        assert!(!is_sensitive("12345678"));
     }
 }

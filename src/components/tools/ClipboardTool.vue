@@ -11,25 +11,31 @@ import type { ClipboardItem, ClipboardStatus, ClipboardSettings } from "../../ty
 import { formatBytes } from "../../utils/format";
 
 const items = ref<ClipboardItem[]>([]);
-const status = ref<ClipboardStatus>({ itemCount: 0, pinnedCount: 0, dbSizeBytes: 0, monitoring: false });
-const settings = ref<ClipboardSettings>({ maxItems: 500, retentionDays: 30 });
+const status = ref<ClipboardStatus>({ itemCount: 0, pinnedCount: 0, dbSizeBytes: 0, runState: "stopped" });
+const settings = ref<ClipboardSettings>({ maxItems: 500, retentionDays: 30, autoStartMonitoring: false });
 const search = ref("");
-const error = ref("");
+const notice = ref("");
 const loading = ref(false);
 const copiedId = ref(0);
 const settingsSaved = ref(false);
-let unlisten: UnlistenFn | null = null;
+const actionBusy = ref(false);
 
-const paused = ref(false);
+let unlisten: UnlistenFn | null = null;
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleRefreshList() {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => refreshList(), 250);
+}
 
 async function refreshList() {
   loading.value = true;
   try {
     const q = search.value.trim() || undefined;
     items.value = await clipboardList(q, 200, 0);
-    error.value = "";
+    notice.value = "";
   } catch (e: any) {
-    error.value = String(e);
+    notice.value = String(e);
   } finally {
     loading.value = false;
   }
@@ -42,39 +48,53 @@ async function refreshStatus() {
 }
 
 async function toggleMonitoring() {
+  if (actionBusy.value) return;
+  actionBusy.value = true;
   try {
-    if (status.value.monitoring) {
+    if (status.value.runState !== "stopped") {
       await clipboardStop();
     } else {
       await clipboardStart();
     }
     await refreshStatus();
+    if (status.value.runState !== "stopped") {
+      await refreshList();
+    }
+    notice.value = "";
   } catch (e: any) {
-    error.value = String(e);
+    notice.value = String(e);
+  } finally {
+    actionBusy.value = false;
   }
 }
 
 async function togglePause() {
+  if (actionBusy.value) return;
+  actionBusy.value = true;
   try {
-    if (paused.value) {
+    if (status.value.runState === "paused") {
       await clipboardResume();
     } else {
       await clipboardPause();
     }
-    paused.value = !paused.value;
     await refreshStatus();
+    notice.value = "";
   } catch (e: any) {
-    error.value = String(e);
+    notice.value = String(e);
+  } finally {
+    actionBusy.value = false;
   }
 }
 
 async function copyItem(item: ClipboardItem) {
+  if (copiedId.value === item.id) return;
   try {
     await clipboardCopy(item.id);
     copiedId.value = item.id;
     setTimeout(() => { copiedId.value = 0; }, 1200);
+    notice.value = "";
   } catch (e: any) {
-    error.value = String(e);
+    notice.value = String(e);
   }
 }
 
@@ -82,8 +102,9 @@ async function pinItem(id: number) {
   try {
     await clipboardPin(id);
     await refreshList();
+    notice.value = "";
   } catch (e: any) {
-    error.value = String(e);
+    notice.value = String(e);
   }
 }
 
@@ -92,8 +113,9 @@ async function deleteItem(id: number) {
     await clipboardDelete(id);
     await refreshList();
     await refreshStatus();
+    notice.value = "";
   } catch (e: any) {
-    error.value = String(e);
+    notice.value = String(e);
   }
 }
 
@@ -103,8 +125,9 @@ async function clearAll() {
     await clipboardClear();
     await refreshList();
     await refreshStatus();
+    notice.value = "";
   } catch (e: any) {
-    error.value = String(e);
+    notice.value = String(e);
   }
 }
 
@@ -114,11 +137,14 @@ async function loadSettings() {
 
 async function saveSettings() {
   try {
-    await clipboardSettingsSave(settings.value);
+    const result = await clipboardSettingsSave(settings.value);
+    status.value = result;
     settingsSaved.value = true;
     setTimeout(() => { settingsSaved.value = false; }, 1500);
+    await refreshList();
+    notice.value = "";
   } catch (e: any) {
-    error.value = String(e);
+    notice.value = String(e);
   }
 }
 
@@ -132,6 +158,8 @@ function timeAgo(ms: number): string {
 
 const typeBadge = (t: string) => ({ text: "T", code: "{}", url: "URL" } as Record<string, string>)[t] || "T";
 
+const runStateLabel = (s: string) => ({ running: "记录中", paused: "已暂停", stopped: "已关闭" } as Record<string, string>)[s] || "已关闭";
+
 onMounted(async () => {
   await loadSettings();
   await refreshStatus();
@@ -139,12 +167,15 @@ onMounted(async () => {
     refreshList();
     refreshStatus();
   });
-  if (status.value.monitoring) {
+  if (status.value.runState !== "stopped") {
     await refreshList();
   }
 });
 
-onUnmounted(() => { unlisten?.(); });
+onUnmounted(() => {
+  unlisten?.();
+  if (searchTimer) clearTimeout(searchTimer);
+});
 </script>
 
 <template>
@@ -159,7 +190,7 @@ onUnmounted(() => { unlisten?.(); });
         <p>
           <span
             class="status-dot"
-            :class="{ running: status.monitoring && !paused }"
+            :class="{ running: status.runState === 'running', paused: status.runState === 'paused' }"
           ></span>
           本地记录、搜索并快速复用最近复制的文本
         </p>
@@ -167,31 +198,33 @@ onUnmounted(() => { unlisten?.(); });
     </div>
     <div class="header-actions">
       <button
-        v-if="status.monitoring"
+        v-if="status.runState !== 'stopped'"
         type="button"
+        :disabled="actionBusy"
         @click="togglePause"
       >
-        {{ paused ? "继续记录" : "暂停记录" }}
+        {{ status.runState === "paused" ? "继续记录" : "暂停记录" }}
       </button>
       <button
         class="primary"
-        :class="{ danger: status.monitoring }"
+        :class="{ danger: status.runState !== 'stopped' }"
         type="button"
+        :disabled="actionBusy"
         @click="toggleMonitoring"
       >
         <span class="record-dot"></span>
-        {{ status.monitoring ? "关闭记录" : "开启记录" }}
+        {{ status.runState !== "stopped" ? "关闭记录" : "开启记录" }}
       </button>
     </div>
   </header>
 
-  <div v-if="error" class="notice danger">
-    <span>{{ error }}</span>
-    <button type="button" @click="error = ''">×</button>
+  <div v-if="notice" class="notice danger">
+    <span>{{ notice }}</span>
+    <button type="button" @click="notice = ''">×</button>
   </div>
 
   <section class="clipboard-page">
-    <template v-if="status.monitoring">
+    <template v-if="status.runState !== 'stopped'">
       <div class="clipboard-metrics">
         <article class="clipboard-metric">
           <p>HISTORY</p>
@@ -210,10 +243,13 @@ onUnmounted(() => { unlisten?.(); });
         </article>
         <article class="clipboard-metric">
           <p>MONITOR</p>
-          <strong class="monitor-state" :class="{ paused }">
-            {{ paused ? "已暂停" : "记录中" }}
+          <strong
+            class="monitor-state"
+            :class="{ paused: status.runState === 'paused' }"
+          >
+            {{ runStateLabel(status.runState) }}
           </strong>
-          <small>{{ paused ? "不会写入新的记录" : "仅监控文本内容" }}</small>
+          <small>{{ status.runState === "paused" ? "不会写入新的记录" : "仅监控文本内容" }}</small>
         </article>
       </div>
 
@@ -232,7 +268,7 @@ onUnmounted(() => { unlisten?.(); });
                   type="search"
                   placeholder="输入内容关键词"
                   spellcheck="false"
-                  @input="refreshList"
+                  @input="scheduleRefreshList"
                 />
               </label>
               <button
@@ -342,6 +378,10 @@ onUnmounted(() => { unlisten?.(); });
                 <em>天</em>
               </div>
             </label>
+            <label class="checkbox-label">
+              <input v-model="settings.autoStartMonitoring" type="checkbox" />
+              <span>启动时自动开启记录</span>
+            </label>
           </div>
           <button class="save-btn" type="button" @click="saveSettings">
             {{ settingsSaved ? "设置已保存" : "保存设置" }}
@@ -361,7 +401,7 @@ onUnmounted(() => { unlisten?.(); });
           智屿会在本机记录文本剪贴板，方便你搜索、置顶和再次复制。
           密码等敏感输入不会主动上传，所有数据仅保存在用户目录。
         </p>
-        <button class="onboarding-action" type="button" @click="toggleMonitoring">
+        <button class="onboarding-action" type="button" :disabled="actionBusy" @click="toggleMonitoring">
           开启剪贴板记录
         </button>
       </div>
@@ -393,6 +433,8 @@ onUnmounted(() => { unlisten?.(); });
 </template>
 
 <style scoped>
+/* --- identical to existing styles, unchanged --- */
+
 .clipboard-logo {
   background: #6b6659;
   font-family: "SFMono-Regular", Consolas, monospace;
@@ -406,6 +448,17 @@ onUnmounted(() => { unlisten?.(); });
   border-radius: 50%;
   background: currentColor;
 }
+
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: #c4c2ba;
+}
+.status-dot.running { background: #2f7950; }
+.status-dot.paused { background: #a46925; }
 
 .clipboard-page {
   padding: 26px 34px 34px;
@@ -772,6 +825,22 @@ onUnmounted(() => { unlisten?.(); });
   font-size: 9px;
 }
 
+.checkbox-label {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  color: #73766d;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #252920;
+}
+
 .number-field {
   display: flex;
   height: 34px;
@@ -879,8 +948,13 @@ onUnmounted(() => { unlisten?.(); });
   font-size: 9px;
 }
 
-.onboarding-action:hover {
+.onboarding-action:hover:not(:disabled) {
   background: #393d33;
+}
+
+.onboarding-action:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .onboarding-points {
