@@ -379,6 +379,54 @@ export function testServiceConnection(kind: ServiceKind): Promise<void> {
   return invoke<void>("service_test_connection", { kind });
 }
 
+// ── 剪贴板历史 ────────────────────────────────────────────
+
+import type { ClipboardItem, ClipboardStatus } from "../types";
+
+export function clipboardStart(): Promise<void> {
+  return invoke<void>("clipboard_start");
+}
+
+export function clipboardStop(): Promise<void> {
+  return invoke<void>("clipboard_stop");
+}
+
+export function clipboardPause(): Promise<boolean> {
+  return invoke<boolean>("clipboard_pause");
+}
+
+export function clipboardResume(): Promise<boolean> {
+  return invoke<boolean>("clipboard_resume");
+}
+
+export function clipboardStatus(): Promise<ClipboardStatus> {
+  return invoke<ClipboardStatus>("clipboard_status");
+}
+
+export function clipboardList(
+  search?: string,
+  limit?: number,
+  offset?: number,
+): Promise<ClipboardItem[]> {
+  return invoke<ClipboardItem[]>("clipboard_list", { search, limit, offset });
+}
+
+export function clipboardCopy(id: number): Promise<string> {
+  return invoke<string>("clipboard_copy", { id });
+}
+
+export function clipboardPin(id: number): Promise<void> {
+  return invoke<void>("clipboard_pin", { id });
+}
+
+export function clipboardDelete(id: number): Promise<void> {
+  return invoke<void>("clipboard_delete", { id });
+}
+
+export function clipboardClear(): Promise<number> {
+  return invoke<number>("clipboard_clear");
+}
+
 export function installDuckdb(operationId: string): Promise<DuckdbStatus> {
   return invoke<DuckdbStatus>("duckdb_install", { operationId });
 }

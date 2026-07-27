@@ -460,3 +460,24 @@ export interface JwkInspection {
   source: string;
   warnings: string[];
 }
+
+// ── 剪贴板历史 ────────────────────────────────────────────
+
+export interface ClipboardItem {
+  id: number;
+  content: string;
+  contentType: "text" | "url" | "code";
+  preview: string;
+  charCount: number;
+  copiedAtMillis: number;
+  lastUsedAtMillis: number;
+  useCount: number;
+  pinned: boolean;
+}
+
+export interface ClipboardStatus {
+  itemCount: number;
+  pinnedCount: number;
+  dbSizeBytes: number;
+  monitoring: boolean;
+}

@@ -2279,6 +2279,8 @@ onMounted(async () => {
           await openDashboard();
         } else if (event.payload.target === "settings") {
           await openSettings();
+        } else if (event.payload.target === "clipboard") {
+          selectTool("clipboard");
         } else if (event.payload.kind) {
           await selectService(event.payload.kind);
         }
