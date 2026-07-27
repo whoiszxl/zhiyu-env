@@ -57,6 +57,7 @@
 | etcd | 3.6.11 | 2379 / 2380 | 单节点服务协调、配置读取、内置 etcdctl |
 | Consul | 1.22.3 | 8500 / 8600 | 服务发现、健康检查、KV、官方 Web UI |
 | rnacos | 0.8.5 | 8848 / 9848 / 10848 | Nacos 兼容配置与服务发现、无需 Java |
+| RabbitMQ | 4.3.1 | 5672 / 15672 | AMQP、Management UI、内置独立 Erlang/OTP 27 |
 
 所有服务均支持：
 

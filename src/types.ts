@@ -10,7 +10,8 @@ export type ServiceKind =
   | "rustfs"
   | "etcd"
   | "consul"
-  | "rnacos";
+  | "rnacos"
+  | "rabbitmq";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =

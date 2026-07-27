@@ -351,6 +351,18 @@ const RNACOS_ARCHIVE: &str = "rnacos-aarch64-apple-darwin-v0.8.5.tar.gz";
 const RNACOS_URL: &str =
     "https://github.com/nacos-group/r-nacos/releases/download/v0.8.5/rnacos-aarch64-apple-darwin-v0.8.5.tar.gz";
 const RNACOS_SHA256: &str = "902a073fb9318d59cede8570377212dffec0b657b64c894c2e7d29ce6a0f25ef";
+pub const RABBITMQ_SERIES: &str = "4.3";
+pub const RABBITMQ_VERSION: &str = "4.3.1";
+const RABBITMQ_ARCHIVE: &str = "rabbitmq-server-generic-unix-4.3.1.tar.xz";
+const RABBITMQ_URL: &str =
+    "https://github.com/rabbitmq/rabbitmq-server/releases/download/v4.3.1/rabbitmq-server-generic-unix-4.3.1.tar.xz";
+const RABBITMQ_SHA256: &str = "fc65179276a5e929258caab98d5ad1f1b10b51ccc56a128c50a00ed06e518103";
+const RABBITMQ_OTP_VERSION: &str = "27.3.4.6";
+const RABBITMQ_OTP_ARCHIVE: &str = "otp-aarch64-apple-darwin-27.3.4.6.tar.gz";
+const RABBITMQ_OTP_URL: &str =
+    "https://github.com/erlef/otp_builds/releases/download/OTP-27.3.4.6/otp-aarch64-apple-darwin.tar.gz";
+const RABBITMQ_OTP_SHA256: &str =
+    "82b1aa23f4a40f391e6b42cb4e9607e1e360bc2fdcb88d032b040795bb6d349f";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -880,6 +892,114 @@ pub struct ConsulInstaller {
 #[derive(Debug, Clone)]
 pub struct RnacosInstaller {
     devbox_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct RabbitmqInstaller {
+    devbox_root: PathBuf,
+}
+
+impl RabbitmqInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 RabbitMQ {RABBITMQ_VERSION} 与 Erlang/OTP {RABBITMQ_OTP_VERSION}"),
+        );
+        ensure_macos_arm64("RabbitMQ")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("server/sbin/rabbitmq-server");
+        if executable.is_file() && installation_dir.join("otp/bin/erl").is_file() {
+            report_install_progress(90, "已安装", "RabbitMQ 与内置 Erlang 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let work_dir = self.devbox_root.join("tmp").join(format!(
+            "rabbitmq-{RABBITMQ_VERSION}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&work_dir)?;
+        let rabbit_archive = downloads_dir.join(RABBITMQ_ARCHIVE);
+        prepare_archive(
+            &rabbit_archive,
+            RABBITMQ_ARCHIVE,
+            RABBITMQ_URL,
+            RABBITMQ_SHA256,
+        )?;
+        let otp_archive = downloads_dir.join(RABBITMQ_OTP_ARCHIVE);
+        prepare_archive(
+            &otp_archive,
+            RABBITMQ_OTP_ARCHIVE,
+            RABBITMQ_OTP_URL,
+            RABBITMQ_OTP_SHA256,
+        )?;
+
+        let stage = work_dir.join("installation");
+        let otp_dir = stage.join("otp");
+        fs::create_dir_all(&otp_dir)?;
+        report_install_progress(55, "解压运行时", "正在解压本地 Erlang/OTP");
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xzf"])
+                .arg(&otp_archive)
+                .arg("-C")
+                .arg(&otp_dir),
+            "tar",
+        )?;
+        report_install_progress(72, "解压程序", "正在解压 RabbitMQ");
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xJf"])
+                .arg(&rabbit_archive)
+                .arg("-C")
+                .arg(&work_dir),
+            "tar",
+        )?;
+        let server_source = work_dir.join(format!("rabbitmq_server-{RABBITMQ_VERSION}"));
+        fs::rename(server_source, stage.join("server"))?;
+        if !stage.join("server/sbin/rabbitmq-server").is_file()
+            || !stage.join("otp/bin/erl").is_file()
+        {
+            let _ = fs::remove_dir_all(&work_dir);
+            return Err(DevBoxError::CommandFailed {
+                command: "verify RabbitMQ bundle".into(),
+                message: "RabbitMQ 或 Erlang/OTP 压缩包结构不符合预期".into(),
+            });
+        }
+        write_manifest(
+            &stage,
+            "rabbitmq",
+            RABBITMQ_SERIES,
+            RABBITMQ_VERSION,
+            RABBITMQ_URL,
+            RABBITMQ_SHA256,
+            "official-binary-with-erlef-otp",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        let _ = fs::remove_dir_all(&work_dir);
+        report_install_progress(90, "完成安装", "RabbitMQ 与本地 Erlang/OTP 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/rabbitmq")
+            .join(RABBITMQ_SERIES)
+    }
 }
 
 impl RnacosInstaller {

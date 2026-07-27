@@ -95,6 +95,7 @@ type DetailTab =
   | "search"
   | "objectStore"
   | "governance"
+  | "broker"
   | "backup"
   | "config"
   | "logs"
@@ -342,6 +343,16 @@ function recordInstallSuccess(operationId: string) {
   ) {
     return;
   }
+  if (selectedKind.value === "rabbitmq") {
+    return [
+      ["overview", "概览"],
+      ["broker", "连接与控制台"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["docs", "使用文档"],
+    ];
+  }
   task.status = "completed";
   task.percent = 100;
   task.stage = "安装完成";
@@ -510,6 +521,7 @@ const iconLetter: Record<ServiceKind, string> = {
   etcd: "E",
   consul: "C",
   rnacos: "R",
+  rabbitmq: "Q",
 };
 
 const governanceProfile = computed(() =>
@@ -3460,6 +3472,62 @@ onUnmounted(() => {
             <code>{{ selectedService.dataPath }}/mailpit.db</code>；
             HTML 不会直接渲染，避免测试邮件中的脚本或远程资源影响桌面端。
           </p>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'broker'"
+          class="object-store-panel"
+        >
+          <div class="object-store-hero">
+            <div>
+              <p>AMQP MESSAGE BROKER</p>
+              <h2>RabbitMQ 本地消息代理</h2>
+              <span>适合调试队列、交换机、路由键、确认和重试</span>
+            </div>
+            <span class="legacy-badge">内置 Erlang/OTP 27</span>
+          </div>
+          <div
+            v-if="selectedService.status !== 'running'"
+            class="workbench-empty"
+          >
+            启动 RabbitMQ 后可连接 AMQP 并访问 Management UI
+          </div>
+          <template v-else>
+            <div class="object-store-grid">
+              <article class="panel object-store-card">
+                <p>AMQP</p>
+                <strong>127.0.0.1:5672</strong>
+                <small>应用客户端连接</small>
+              </article>
+              <article class="panel object-store-card">
+                <p>MANAGEMENT UI</p>
+                <strong>http://127.0.0.1:15672</strong>
+                <small>队列、交换机和连接管理</small>
+              </article>
+              <article class="panel object-store-card">
+                <p>USERNAME</p>
+                <strong>zhiyu</strong>
+                <small>本地开发管理员</small>
+              </article>
+              <article class="panel object-store-card">
+                <p>PASSWORD</p>
+                <strong>zhiyu-local-rabbitmq-2026</strong>
+                <small>仅用于本机开发</small>
+              </article>
+            </div>
+            <article class="panel object-store-snippet">
+              <div class="panel-title">
+                <div>
+                  <p>CONNECTION URL</p>
+                  <h2>应用连接配置</h2>
+                </div>
+              </div>
+              <pre>AMQP_URL=amqp://zhiyu:zhiyu-local-rabbitmq-2026@127.0.0.1:5672/</pre>
+            </article>
+            <p class="console-note">
+              Erlang/OTP 与 RabbitMQ 都安装在 ~/.devbox，不读取或修改系统全局运行时。
+            </p>
+          </template>
         </section>
 
         <section

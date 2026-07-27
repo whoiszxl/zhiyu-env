@@ -2,8 +2,8 @@
 
 use devbox_core::{
     ConsulService, EtcdService, MailpitService, MeilisearchService, MinioService, MongodbService,
-    MysqlService, NatsService, PostgresService, RedisService, RnacosService, RustfsService,
-    ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    MysqlService, NatsService, PostgresService, RabbitmqService, RedisService, RnacosService,
+    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -144,6 +144,15 @@ fn rnacos_service_lifecycle() {
     let service = RnacosService::new(config(temp.path(), ServiceKind::Rnacos)).unwrap();
     assert_lifecycle(&service);
     assert!(temp.path().join("rnacos/conf/rnacos.env").is_file());
+}
+
+#[test]
+fn rabbitmq_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = RabbitmqService::new(config(temp.path(), ServiceKind::Rabbitmq)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("rabbitmq/conf/rabbitmq.conf").is_file());
+    assert!(temp.path().join("rabbitmq/conf/enabled_plugins").is_file());
 }
 
 #[test]

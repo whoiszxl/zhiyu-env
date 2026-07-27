@@ -4,15 +4,16 @@ use devbox_core::{
         RedisRelease, CONSUL_SERIES, CONSUL_VERSION, ETCD_SERIES, ETCD_VERSION, MAILPIT_SERIES,
         MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION,
         MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION,
-        POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES,
-        RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
+        POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES,
+        REDIS_VERSION, RNACOS_SERIES, RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
     },
     report_install_progress, with_install_reporter, ConfigManager, ConsulInstaller, ConsulService,
     EtcdInstaller, EtcdService, InstallReporter, MailpitInstaller, MailpitService,
     MeilisearchInstaller, MeilisearchService, MinioInstaller, MinioService, MongodbInstaller,
     MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService, PostgresInstaller,
-    PostgresService, RedisInstaller, RedisService, RnacosInstaller, RnacosService, RustfsInstaller,
-    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    PostgresService, RabbitmqInstaller, RabbitmqService, RedisInstaller, RedisService,
+    RnacosInstaller, RnacosService, RustfsInstaller, RustfsService, ServiceConfig, ServiceKind,
+    ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -121,6 +122,7 @@ pub enum ServiceKindInput {
     Etcd,
     Consul,
     Rnacos,
+    Rabbitmq,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -138,6 +140,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Etcd => Self::Etcd,
             ServiceKindInput::Consul => Self::Consul,
             ServiceKindInput::Rnacos => Self::Rnacos,
+            ServiceKindInput::Rabbitmq => Self::Rabbitmq,
         }
     }
 }
@@ -461,6 +464,15 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
                 ],
             )
         }
+        ServiceKind::Rabbitmq => (
+            "RabbitMQ",
+            RABBITMQ_VERSION,
+            5672,
+            root.join(format!(
+                "installations/rabbitmq/{RABBITMQ_SERIES}/server/sbin/rabbitmq-server"
+            )),
+            Vec::new(),
+        ),
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -485,6 +497,50 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
             ("RUSTFS_CONSOLE_ENABLE".into(), "true".into()),
             ("RUSTFS_CONSOLE_ADDRESS".into(), "127.0.0.1:7001".into()),
         ]),
+        ServiceKind::Rabbitmq => {
+            let installation = root.join("installations/rabbitmq").join(RABBITMQ_SERIES);
+            BTreeMap::from([
+                (
+                    "ERLANG_HOME".into(),
+                    installation.join("otp").display().to_string(),
+                ),
+                (
+                    "PATH".into(),
+                    format!("{}:/usr/bin:/bin", installation.join("otp/bin").display()),
+                ),
+                (
+                    "RABBITMQ_HOME".into(),
+                    installation.join("server").display().to_string(),
+                ),
+                (
+                    "RABBITMQ_CONFIG_FILE".into(),
+                    instance_dir.join("conf/rabbitmq").display().to_string(),
+                ),
+                (
+                    "RABBITMQ_ENABLED_PLUGINS_FILE".into(),
+                    instance_dir
+                        .join("conf/enabled_plugins")
+                        .display()
+                        .to_string(),
+                ),
+                (
+                    "RABBITMQ_MNESIA_BASE".into(),
+                    instance_dir.join("data").display().to_string(),
+                ),
+                (
+                    "RABBITMQ_LOG_BASE".into(),
+                    instance_dir.join("logs").display().to_string(),
+                ),
+                (
+                    "RABBITMQ_PID_FILE".into(),
+                    instance_dir
+                        .join("run/rabbitmq-node.pid")
+                        .display()
+                        .to_string(),
+                ),
+                ("RABBITMQ_NODENAME".into(), "rabbit@localhost".into()),
+            ])
+        }
         _ => BTreeMap::new(),
     };
 
@@ -602,6 +658,9 @@ fn with_service<T>(
         ServiceKindInput::Rnacos => {
             operation(&RnacosService::new(config).map_err(stringify_error)?)
         }
+        ServiceKindInput::Rabbitmq => {
+            operation(&RabbitmqService::new(config).map_err(stringify_error)?)
+        }
     }
     .map_err(stringify_error)
 }
@@ -636,6 +695,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Etcd => "etcd",
         ServiceKindInput::Consul => "Consul",
         ServiceKindInput::Rnacos => "rnacos",
+        ServiceKindInput::Rabbitmq => "RabbitMQ",
     };
     Ok(ServiceInfo {
         kind: kind.into(),
@@ -713,6 +773,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Etcd,
         ServiceKindInput::Consul,
         ServiceKindInput::Rnacos,
+        ServiceKindInput::Rabbitmq,
     ]
     .into_iter()
     .map(info)
@@ -823,6 +884,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 rnacos 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Rabbitmq => {
+            RabbitmqInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 RabbitMQ 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -1121,6 +1189,7 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         ServiceKind::Etcd => {}
         ServiceKind::Consul => {}
         ServiceKind::Rnacos => {}
+        ServiceKind::Rabbitmq => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -1151,6 +1220,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Etcd => config.stdout_log_path(),
         ServiceKind::Consul => config.stdout_log_path(),
         ServiceKind::Rnacos => config.stdout_log_path(),
+        ServiceKind::Rabbitmq => config.stdout_log_path(),
     }
 }
 
@@ -1168,6 +1238,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Etcd => "etcd.yaml",
         ServiceKind::Consul => "consul.hcl",
         ServiceKind::Rnacos => "rnacos.env",
+        ServiceKind::Rabbitmq => "rabbitmq.conf",
     };
     config.config_dir().join(name)
 }
@@ -1280,6 +1351,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Etcd => "etcd-",
         ServiceKind::Consul => "consul_",
         ServiceKind::Rnacos => "rnacos-",
+        ServiceKind::Rabbitmq => "rabbitmq-",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {
