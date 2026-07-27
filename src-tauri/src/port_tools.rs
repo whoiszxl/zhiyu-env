@@ -112,6 +112,7 @@ fn managed_service_pids() -> BTreeMap<u32, String> {
         ("nats", "NATS"),
         ("meilisearch", "Meilisearch"),
         ("minio", "MinIO"),
+        ("rustfs", "RustFS"),
     ]
     .into_iter()
     .filter_map(|(directory, name)| {
@@ -141,6 +142,8 @@ fn common_service(port: u16) -> Option<&'static str> {
         8222 => Some("NATS Monitoring"),
         9000 => Some("S3 Object Storage"),
         9001 => Some("Object Storage Console"),
+        9002 => Some("RustFS S3 API"),
+        7001 => Some("RustFS Console"),
         27017 => Some("MongoDB"),
         _ => None,
     }

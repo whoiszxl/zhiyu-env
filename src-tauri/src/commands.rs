@@ -4,13 +4,13 @@ use devbox_core::{
         RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION,
         MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES,
         MYSQL_VERSION, NATS_SERIES, NATS_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION,
-        REDIS_RELEASES, REDIS_VERSION,
+        REDIS_RELEASES, REDIS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
     },
     report_install_progress, with_install_reporter, ConfigManager, InstallReporter,
     MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService, MinioInstaller,
     MinioService, MongodbInstaller, MongodbService, MysqlInstaller, MysqlService, NatsInstaller,
-    NatsService, PostgresInstaller, PostgresService, RedisInstaller, RedisService, ServiceConfig,
-    ServiceKind, ServiceManager, ServiceStatus,
+    NatsService, PostgresInstaller, PostgresService, RedisInstaller, RedisService, RustfsInstaller,
+    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -115,6 +115,7 @@ pub enum ServiceKindInput {
     Nats,
     Meilisearch,
     Minio,
+    Rustfs,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -128,6 +129,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Nats => Self::Nats,
             ServiceKindInput::Meilisearch => Self::Meilisearch,
             ServiceKindInput::Minio => Self::Minio,
+            ServiceKindInput::Rustfs => Self::Rustfs,
         }
     }
 }
@@ -404,6 +406,13 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
                 ],
             )
         }
+        ServiceKind::Rustfs => (
+            "RustFS",
+            RUSTFS_VERSION,
+            9002,
+            root.join(format!("installations/rustfs/{RUSTFS_SERIES}/bin/rustfs")),
+            Vec::new(),
+        ),
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -416,6 +425,17 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
                 "zhiyu-local-minio-2026".into(),
             ),
             ("MINIO_BROWSER".into(), "on".into()),
+        ]),
+        ServiceKind::Rustfs => BTreeMap::from([
+            ("RUSTFS_ACCESS_KEY".into(), "zhiyuadmin".into()),
+            ("RUSTFS_SECRET_KEY".into(), "zhiyu-local-rustfs-2026".into()),
+            (
+                "RUSTFS_VOLUMES".into(),
+                instance_dir.join("data").display().to_string(),
+            ),
+            ("RUSTFS_ADDRESS".into(), "127.0.0.1:9002".into()),
+            ("RUSTFS_CONSOLE_ENABLE".into(), "true".into()),
+            ("RUSTFS_CONSOLE_ADDRESS".into(), "127.0.0.1:7001".into()),
         ]),
         _ => BTreeMap::new(),
     };
@@ -524,6 +544,9 @@ fn with_service<T>(
             operation(&MeilisearchService::new(config).map_err(stringify_error)?)
         }
         ServiceKindInput::Minio => operation(&MinioService::new(config).map_err(stringify_error)?),
+        ServiceKindInput::Rustfs => {
+            operation(&RustfsService::new(config).map_err(stringify_error)?)
+        }
     }
     .map_err(stringify_error)
 }
@@ -554,6 +577,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Nats => "NATS",
         ServiceKindInput::Meilisearch => "Meilisearch",
         ServiceKindInput::Minio => "MinIO",
+        ServiceKindInput::Rustfs => "RustFS",
     };
     Ok(ServiceInfo {
         kind: kind.into(),
@@ -627,6 +651,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Nats,
         ServiceKindInput::Meilisearch,
         ServiceKindInput::Minio,
+        ServiceKindInput::Rustfs,
     ]
     .into_iter()
     .map(info)
@@ -709,6 +734,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 MinIO 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Rustfs => {
+            RustfsInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 RustFS 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -1003,6 +1035,7 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         | ServiceKind::Nats
         | ServiceKind::Meilisearch
         | ServiceKind::Minio => {}
+        ServiceKind::Rustfs => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -1029,6 +1062,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         | ServiceKind::Nats
         | ServiceKind::Meilisearch
         | ServiceKind::Minio => config.stdout_log_path(),
+        ServiceKind::Rustfs => config.stdout_log_path(),
     }
 }
 
@@ -1042,6 +1076,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Nats => "nats.conf",
         ServiceKind::Meilisearch => "meilisearch.toml",
         ServiceKind::Minio => "minio.env",
+        ServiceKind::Rustfs => "rustfs.env",
     };
     config.config_dir().join(name)
 }
@@ -1150,6 +1185,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Nats => "nats-server",
         ServiceKind::Meilisearch => "meilisearch",
         ServiceKind::Minio => "minio.",
+        ServiceKind::Rustfs => "rustfs-",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {

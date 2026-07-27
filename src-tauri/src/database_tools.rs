@@ -99,6 +99,7 @@ impl TryFrom<ServiceKindInput> for DatabaseEngine {
             ServiceKindInput::Nats => Err("NATS 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Meilisearch => Err("Meilisearch 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Minio => Err("MinIO 不使用 SQL 数据库接口".into()),
+            ServiceKindInput::Rustfs => Err("RustFS 不使用 SQL 数据库接口".into()),
         }
     }
 }

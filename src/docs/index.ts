@@ -8,6 +8,7 @@ import { buildMailpitDocs } from "./mailpitDocs";
 import { buildNatsDocs } from "./natsDocs";
 import { buildMeilisearchDocs } from "./meilisearchDocs";
 import { buildMinioDocs } from "./minioDocs";
+import { buildRustfsDocs } from "./rustfsDocs";
 
 export type { DocBlock, DocChapter, DocCodeSample } from "./docTypes";
 
@@ -20,6 +21,7 @@ const BUILDERS: Record<ServiceKind, (port: number) => DocChapter[]> = {
   nats: buildNatsDocs,
   meilisearch: buildMeilisearchDocs,
   minio: buildMinioDocs,
+  rustfs: buildRustfsDocs,
 };
 
 /** 文档标题栏上展示的一句话定位。 */
@@ -32,6 +34,7 @@ const TAGLINES: Record<ServiceKind, string> = {
   nats: "轻量消息服务器 · 发布订阅与 JetStream",
   meilisearch: "全文搜索引擎 · 索引与搜索调试",
   minio: "S3 兼容对象存储 · 存量项目调试",
+  rustfs: "Rust 对象存储 · S3 兼容开发调试",
 };
 
 export function buildServiceDocs(kind: ServiceKind, port: number): DocChapter[] {

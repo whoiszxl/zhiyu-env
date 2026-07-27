@@ -7,6 +7,7 @@ mod mysql;
 mod nats;
 mod postgres;
 mod redis;
+mod rustfs;
 
 pub use mailpit::MailpitService;
 pub use meilisearch::MeilisearchService;
@@ -16,3 +17,4 @@ pub use mysql::MysqlService;
 pub use nats::NatsService;
 pub use postgres::PostgresService;
 pub use redis::RedisService;
+pub use rustfs::RustfsService;

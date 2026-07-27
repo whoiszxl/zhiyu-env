@@ -327,6 +327,12 @@ const MINIO_BINARY: &str = "minio.RELEASE.2025-09-07T16-13-09Z";
 const MINIO_URL: &str =
     "https://dl.min.io/server/minio/release/darwin-arm64/archive/minio.RELEASE.2025-09-07T16-13-09Z";
 const MINIO_SHA256: &str = "7c3b3039b76e55a1b80935848ed83998d5e8d317374f87851f46a019ff5c0aa4";
+pub const RUSTFS_SERIES: &str = "1.0";
+pub const RUSTFS_VERSION: &str = "1.0.0-beta.2";
+const RUSTFS_ARCHIVE: &str = "rustfs-macos-aarch64-v1.0.0-beta.2.zip";
+const RUSTFS_URL: &str =
+    "https://github.com/rustfs/rustfs/releases/download/1.0.0-beta.2/rustfs-macos-aarch64-v1.0.0-beta.2.zip";
+const RUSTFS_SHA256: &str = "f57cd513fa53048410f194b34d81260f76eb57305d9183159f3bdf28b4c84df5";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -836,6 +842,91 @@ pub struct MeilisearchInstaller {
 #[derive(Debug, Clone)]
 pub struct MinioInstaller {
     devbox_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct RustfsInstaller {
+    devbox_root: PathBuf,
+}
+
+impl RustfsInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 RustFS {RUSTFS_VERSION}"));
+        ensure_macos_arm64("RustFS")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/unzip"])?;
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/rustfs");
+        if binary_contains(&executable, &["--version"], RUSTFS_VERSION) {
+            report_install_progress(90, "已安装", "RustFS 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let work_dir = self.devbox_root.join("tmp").join(format!(
+            "rustfs-{RUSTFS_VERSION}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&work_dir)?;
+        let archive = downloads_dir.join(RUSTFS_ARCHIVE);
+        prepare_archive(&archive, RUSTFS_ARCHIVE, RUSTFS_URL, RUSTFS_SHA256)?;
+        run(
+            Command::new("/usr/bin/unzip")
+                .arg("-q")
+                .arg(&archive)
+                .arg("-d")
+                .arg(&work_dir),
+            "unzip",
+        )?;
+
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        fs::create_dir_all(&bin_dir)?;
+        report_install_progress(75, "整理文件", "正在写入 RustFS 版本目录");
+        fs::copy(work_dir.join("rustfs"), bin_dir.join("rustfs"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(bin_dir.join("rustfs"), fs::Permissions::from_mode(0o755))?;
+        }
+        if !binary_contains(&bin_dir.join("rustfs"), &["--version"], RUSTFS_VERSION) {
+            let _ = fs::remove_dir_all(&work_dir);
+            return Err(DevBoxError::CommandFailed {
+                command: "rustfs --version".into(),
+                message: "downloaded binary is not the expected RustFS release".into(),
+            });
+        }
+        write_manifest(
+            &stage,
+            "rustfs",
+            RUSTFS_SERIES,
+            RUSTFS_VERSION,
+            RUSTFS_URL,
+            RUSTFS_SHA256,
+            "official-binary",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        let _ = fs::remove_dir_all(&work_dir);
+        report_install_progress(90, "完成安装", "RustFS 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/rustfs")
+            .join(RUSTFS_SERIES)
+    }
 }
 
 impl MinioInstaller {

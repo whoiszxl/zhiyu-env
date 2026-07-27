@@ -455,7 +455,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
-  if (selectedKind.value === "minio") {
+  if (selectedKind.value === "minio" || selectedKind.value === "rustfs") {
     return [
       ["overview", "概览"],
       ["objectStore", "连接与控制台"],
@@ -491,7 +491,30 @@ const iconLetter: Record<ServiceKind, string> = {
   nats: "N",
   meilisearch: "M",
   minio: "M",
+  rustfs: "R",
 };
+
+const objectStoreProfile = computed(() =>
+  selectedKind.value === "rustfs"
+    ? {
+        name: "RustFS",
+        apiEndpoint: "http://127.0.0.1:9002",
+        consoleEndpoint: "http://127.0.0.1:7001",
+        accessKey: "zhiyuadmin",
+        secretKey: "zhiyu-local-rustfs-2026",
+        badge: "推荐尝鲜 · Beta",
+        note: "RustFS 当前仍处于 Beta 阶段，适合本地开发验证，不建议保存唯一副本或生产数据。",
+      }
+    : {
+        name: "MinIO",
+        apiEndpoint: "http://127.0.0.1:9000",
+        consoleEndpoint: "http://127.0.0.1:9001",
+        accessKey: "zhiyuadmin",
+        secretKey: "zhiyu-local-minio-2026",
+        badge: "存量兼容 · 官方仓库已归档",
+        note: "MinIO 社区仓库已归档，本模块用于兼容已有开发项目；新项目建议选择 RustFS。",
+      },
+);
 
 const actionLabel: Record<ServiceAction, string> = {
   install: "安装中",
@@ -3381,37 +3404,37 @@ onUnmounted(() => {
           <div class="object-store-hero">
             <div>
               <p>S3-COMPATIBLE OBJECT STORAGE</p>
-              <h2>MinIO 本地对象存储</h2>
+              <h2>{{ objectStoreProfile.name }} 本地对象存储</h2>
               <span>适合验证 S3 SDK、文件上传、Bucket 和预签名 URL</span>
             </div>
-            <span class="legacy-badge">存量兼容 · 官方仓库已归档</span>
+            <span class="legacy-badge">{{ objectStoreProfile.badge }}</span>
           </div>
           <div
             v-if="selectedService.status !== 'running'"
             class="workbench-empty"
           >
-            启动 MinIO 后可访问 S3 API 与 Web Console
+            启动 {{ objectStoreProfile.name }} 后可访问 S3 API 与 Web Console
           </div>
           <template v-else>
             <div class="object-store-grid">
               <article class="panel object-store-card">
                 <p>S3 API</p>
-                <strong>http://127.0.0.1:9000</strong>
+                <strong>{{ objectStoreProfile.apiEndpoint }}</strong>
                 <small>应用和 AWS SDK 使用</small>
               </article>
               <article class="panel object-store-card">
                 <p>WEB CONSOLE</p>
-                <strong>http://127.0.0.1:9001</strong>
+                <strong>{{ objectStoreProfile.consoleEndpoint }}</strong>
                 <small>在浏览器打开管理 Bucket 和对象</small>
               </article>
               <article class="panel object-store-card">
                 <p>ACCESS KEY</p>
-                <strong>zhiyuadmin</strong>
+                <strong>{{ objectStoreProfile.accessKey }}</strong>
                 <small>仅用于本机开发</small>
               </article>
               <article class="panel object-store-card">
                 <p>SECRET KEY</p>
-                <strong>zhiyu-local-minio-2026</strong>
+                <strong>{{ objectStoreProfile.secretKey }}</strong>
                 <small>可在配置文件中查看</small>
               </article>
             </div>
@@ -3422,14 +3445,14 @@ onUnmounted(() => {
                   <h2>应用连接配置</h2>
                 </div>
               </div>
-              <pre>S3_ENDPOINT=http://127.0.0.1:9000
-AWS_ACCESS_KEY_ID=zhiyuadmin
-AWS_SECRET_ACCESS_KEY=zhiyu-local-minio-2026
+              <pre>S3_ENDPOINT={{ objectStoreProfile.apiEndpoint }}
+AWS_ACCESS_KEY_ID={{ objectStoreProfile.accessKey }}
+AWS_SECRET_ACCESS_KEY={{ objectStoreProfile.secretKey }}
 AWS_REGION=us-east-1
 S3_FORCE_PATH_STYLE=true</pre>
             </article>
             <p class="console-note">
-              MinIO 社区仓库已归档，本模块用于兼容已有开发项目；新项目建议选择 RustFS。
+              {{ objectStoreProfile.note }}
             </p>
           </template>
         </section>

@@ -12,11 +12,12 @@ pub use installer::{
     report_install_progress, with_install_reporter, DuckdbInstaller, InstallOutcome,
     InstallReporter, InstallUpdate, MailpitInstaller, MeilisearchInstaller, MinioInstaller,
     MongodbInstaller, MysqlInstaller, NatsInstaller, PostgresInstaller, RedisInstaller,
+    RustfsInstaller,
 };
 pub use process::ProcessManager;
 pub use service::ServiceManager;
 pub use services::{
     MailpitService, MeilisearchService, MinioService, MongodbService, MysqlService, NatsService,
-    PostgresService, RedisService,
+    PostgresService, RedisService, RustfsService,
 };
 pub use status::ServiceStatus;

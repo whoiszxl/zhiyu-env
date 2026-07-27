@@ -53,6 +53,7 @@
 | NATS | 2.14.2 | 4222 / 8222 | JetStream、实时指标、消息发布与单次订阅 |
 | Meilisearch | 1.50.0 | 7700 | 索引监控、JSON 文档导入、全文搜索调试 |
 | MinIO | RELEASE.2025-09-07 | 9000 / 9001 | S3 API、Web Console、存量项目兼容调试 |
+| RustFS | 1.0.0-beta.2 | 9002 / 7001 | S3 API、Web Console、Rust 对象存储开发调试 |
 
 所有服务均支持：
 
