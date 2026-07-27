@@ -4,7 +4,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use time::OffsetDateTime;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -49,57 +49,26 @@ pub struct S3PresignedUrl {
 }
 
 fn now_iso() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    // epoch 基准: 1970-01-01 对应 days=719468
-    let total_days = (secs / 86400) + 719468;
-    let secs_of_day = secs % 86400;
-    let h = secs_of_day / 3600;
-    let m = (secs_of_day % 3600) / 60;
-    let s = secs_of_day % 60;
-    // YMD 转换 (proleptic Gregorian)
-    let (y, mo, d) = days_to_ymd(total_days as i64);
-    format!("{y:04}{mo:02}{d:02}T{h:02}{m:02}{s:02}Z")
+    let now = OffsetDateTime::now_utc();
+    format!(
+        "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second()
+    )
 }
 
 fn now_date() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let total_days = (secs / 86400) + 719468;
-    let (y, mo, d) = days_to_ymd(total_days as i64);
-    format!("{y:04}{mo:02}{d:02}")
-}
-
-fn days_to_ymd(days: i64) -> (i64, i64, i64) {
-    let mut d = days;
-    let mut y = (d as f64 / 365.2425) as i64;
-    loop {
-        let era_start = y * 365 + y / 4 - y / 100 + y / 400;
-        if era_start >= d {
-            y -= 1;
-        } else {
-            d -= era_start;
-            break;
-        }
-    }
-    let days_in_month = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut mo = 1;
-    for &dim in &days_in_month {
-        if d <= dim {
-            break;
-        }
-        d -= dim;
-        mo += 1;
-    }
-    (y, mo, d)
+    let now = OffsetDateTime::now_utc();
+    format!(
+        "{:04}{:02}{:02}",
+        now.year(),
+        u8::from(now.month()),
+        now.day()
+    )
 }
 
 fn sign(key: &[u8], msg: &str) -> Vec<u8> {
@@ -468,6 +437,9 @@ mod tests {
         assert_eq!(date.len(), 8); // YYYYMMDD
         assert!(iso.ends_with('Z'));
         assert!(date.chars().all(|c| c.is_ascii_digit()));
+        // Verify recognizable date range
+        let year: i32 = date[0..4].parse().unwrap();
+        assert!(year >= 2026, "date should be current or future");
     }
 
     #[test]
