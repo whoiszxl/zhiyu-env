@@ -213,6 +213,10 @@ fn is_cos_endpoint(host: &str) -> bool {
     host == "myqcloud.com" || host.ends_with(".myqcloud.com")
 }
 
+fn requires_virtual_host(host: &str) -> bool {
+    is_cos_endpoint(host) || host == "aliyuncs.com" || host.ends_with(".aliyuncs.com")
+}
+
 fn validate_config(config: &S3Config) -> Result<reqwest::Url, String> {
     if config.endpoint.trim().is_empty()
         || config.access_key.trim().is_empty()
@@ -249,7 +253,7 @@ fn request_target(
         .map(|port| format!(":{port}"))
         .unwrap_or_default();
     let base_authority = format!("{base_host}{port_suffix}");
-    let path_style = config.path_style && !is_cos_endpoint(base_host);
+    let path_style = config.path_style && !requires_virtual_host(base_host);
 
     let (host, raw_uri) = if path_style {
         (base_authority, format!("/{object_key}"))
@@ -275,7 +279,10 @@ fn request_target(
 }
 
 fn object_key(config: &S3Config, endpoint: &reqwest::Url, key: &str) -> String {
-    let path_style = config.path_style && !endpoint.host_str().is_some_and(is_cos_endpoint);
+    let path_style = config.path_style
+        && !endpoint
+            .host_str()
+            .is_some_and(requires_virtual_host);
     if path_style {
         format!("{}/{}", config.bucket, key)
     } else {
@@ -563,7 +570,9 @@ pub async fn s3_list_objects(
         if let Some(token) = continuation_token.filter(|token| !token.is_empty()) {
             query.push(("continuation-token".into(), token));
         }
-        let key = if config.path_style && !endpoint.host_str().is_some_and(is_cos_endpoint) {
+        let key = if config.path_style
+            && !endpoint.host_str().is_some_and(requires_virtual_host)
+        {
             config.bucket.clone()
         } else {
             String::new()
@@ -777,6 +786,7 @@ mod tests {
         assert!(auth.contains("q-url-param-list=delimiter;list-type;max-keys;prefix"));
         assert!(auth.contains("q-signature=769db06df8b07e5a74a9125b3ec0e8b8ad85bd33"));
         assert!(is_cos_endpoint("cos.ap-guangzhou.myqcloud.com"));
+        assert!(requires_virtual_host("oss-cn-shenzhen.aliyuncs.com"));
     }
 
     #[test]
@@ -785,7 +795,7 @@ mod tests {
                              host=demo-123.cos.ap-guangzhou.myqcloud.com\n";
         assert_eq!(
             sha1_hex(format_string),
-            "6b245b4c7b16047afa899a5226ee78c7320e0923"
+            "007c6f44fe87a10a5487f798e2fe8cc644598dd0"
         );
     }
 

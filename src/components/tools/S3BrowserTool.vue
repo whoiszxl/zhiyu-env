@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   s3DeleteObject,
@@ -50,6 +50,30 @@ const presignedResult = ref("");
 const isCos = computed(() =>
   config.value.endpoint.toLowerCase().includes(".myqcloud.com"),
 );
+const isVirtualHostOnly = computed(() => {
+  const endpoint = config.value.endpoint.toLowerCase();
+  return isCos.value || endpoint.includes(".aliyuncs.com");
+});
+
+function detectPathStyle(endpoint: string, fallback = true) {
+  const value = endpoint.toLowerCase();
+  if (value.includes(".myqcloud.com") || value.includes(".aliyuncs.com")) return false;
+  if (value.includes("amazonaws.com")) return false;
+  if (value.includes("qiniucs.com") || value.includes("127.0.0.1") || value.includes("localhost")) {
+    return true;
+  }
+  return fallback;
+}
+
+const addressingMode = computed(() =>
+  config.value.pathStyle ? "Path-Style" : "Virtual Host",
+);
+watch(
+  () => config.value.endpoint,
+  () => {
+    config.value.pathStyle = detectPathStyle(config.value.endpoint, config.value.pathStyle);
+  },
+);
 const previewKind = computed<
   "audio" | "video" | "image" | "pdf" | "text" | "download"
 >(() => {
@@ -91,6 +115,7 @@ onMounted(async () => {
     const saved = await s3ConfigGet();
     if (saved) {
       config.value = saved;
+      config.value.pathStyle = detectPathStyle(saved.endpoint, saved.pathStyle);
       const matchingPreset = presets.find(
         (preset) =>
           preset.endpoint === saved.endpoint &&
@@ -382,7 +407,7 @@ function disconnect() {
 }
 
 const presets = [
-  { label: "阿里云 OSS", endpoint: "https://oss-cn-hangzhou.aliyuncs.com", region: "oss-cn-hangzhou", pathStyle: true },
+  { label: "阿里云 OSS", endpoint: "https://oss-cn-hangzhou.aliyuncs.com", region: "oss-cn-hangzhou", pathStyle: false },
   { label: "腾讯云 COS", endpoint: "https://cos.ap-guangzhou.myqcloud.com", region: "ap-guangzhou", pathStyle: false },
   { label: "七牛云 Kodo", endpoint: "https://s3-cn-east-1.qiniucs.com", region: "cn-east-1", pathStyle: true },
   { label: "AWS S3", endpoint: "https://s3.amazonaws.com", region: "us-east-1", pathStyle: false },
@@ -436,19 +461,6 @@ function applyPreset(p: typeof presets[0]) {
             @click="applyPreset(p)"
           >{{ p.label }}</button>
         </div>
-        <div v-if="connectionHistory.length" class="s3-history">
-          <p>最近连接</p>
-          <button
-            v-for="item in connectionHistory"
-            :key="`${item.endpoint}-${item.bucket}-${item.lastUsedAt}`"
-            type="button"
-            class="s3-history-item"
-            @click="useConnectionHistory(item)"
-          >
-            <strong>{{ item.label }}</strong>
-            <small>{{ item.endpoint }}</small>
-          </button>
-        </div>
         <label>
           <span>Endpoint</span>
           <input v-model="config.endpoint" type="text" placeholder="https://..." spellcheck="false" />
@@ -466,18 +478,19 @@ function applyPreset(p: typeof presets[0]) {
           <input v-model="config.region" type="text" placeholder="oss-cn-hangzhou" spellcheck="false" />
         </label>
         <label>
-          <span>Bucket{{ isCos ? "（必填，包含 APPID）" : "（可选）" }}</span>
+          <span>Bucket{{ isVirtualHostOnly ? "（必填）" : "（可选）" }}</span>
           <input
             v-model="config.bucket"
             type="text"
-            :placeholder="isCos ? '请输入 Bucket' : '留空则先列出 Bucket'"
+            :placeholder="isVirtualHostOnly ? '请输入 Bucket' : '留空则先列出 Bucket'"
             spellcheck="false"
           />
         </label>
-        <label class="checkbox-label">
-          <input v-model="config.pathStyle" type="checkbox" :disabled="isCos" />
-          <span>{{ isCos ? "COS 使用虚拟主机域名" : "路径风格 (Path-Style)" }}</span>
-        </label>
+        <div class="s3-addressing-mode">
+          <span>地址模式</span>
+          <strong>{{ addressingMode }}</strong>
+          <small>根据 Endpoint 自动判断</small>
+        </div>
         <button
           v-if="!connected"
           class="primary connect-btn"
@@ -487,7 +500,7 @@ function applyPreset(p: typeof presets[0]) {
             !config.endpoint ||
             !config.accessKey ||
             !config.secretKey ||
-            (isCos && !config.bucket)
+            (isVirtualHostOnly && !config.bucket)
           "
           @click="connect"
         >
@@ -496,6 +509,19 @@ function applyPreset(p: typeof presets[0]) {
         <button v-else class="quiet-danger connect-btn" type="button" @click="disconnect">
           断开
         </button>
+        <div v-if="connectionHistory.length" class="s3-history">
+          <p>最近连接</p>
+          <button
+            v-for="item in connectionHistory"
+            :key="`${item.endpoint}-${item.bucket}-${item.lastUsedAt}`"
+            type="button"
+            class="s3-history-item"
+            @click="useConnectionHistory(item)"
+          >
+            <strong>{{ item.label }}</strong>
+            <small>{{ item.endpoint }}</small>
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -748,6 +774,25 @@ function applyPreset(p: typeof presets[0]) {
 .s3-sidebar-body label > span {
   color: #73766d;
   font-size: 9px;
+}
+
+.s3-addressing-mode {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  color: #73766d;
+  font-size: 9px;
+}
+
+.s3-addressing-mode strong {
+  color: #315c3a;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+}
+
+.s3-addressing-mode small {
+  color: #a0a299;
+  font-size: 8px;
 }
 
 .s3-sidebar-body input {

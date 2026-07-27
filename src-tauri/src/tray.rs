@@ -5,6 +5,7 @@ use serde::Serialize;
 use std::thread;
 use std::time::Duration;
 use tauri::{
+    image::Image,
     menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Emitter, Manager,
@@ -49,10 +50,13 @@ struct ServiceActionEvent {
 pub(crate) fn setup(app: &mut App) -> tauri::Result<()> {
     let snapshot = collect_snapshot();
     let menu = build_menu(app.handle(), &snapshot)?;
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
+    let icon = if cfg!(target_os = "macos") {
+        Image::new(include_bytes!("../icons/tray-template.rgba"), 44, 44)
+    } else {
+        app.default_window_icon()
+            .cloned()
+            .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?
+    };
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
