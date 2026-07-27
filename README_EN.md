@@ -71,6 +71,8 @@ Redis, MySQL, and PostgreSQL include a dedicated Version Manager page. Binaries 
 
 The unified Settings Center controls macOS login launch, service behavior on app exit, download mirrors and concurrency, the installation root, log and backup retention, update checks, and full installation-cache cleanup.
 
+The native macOS menu bar and Windows system tray menu shows running services and total memory, opens the global overview, starts, stops, or restarts services, stops all services, and opens Settings. Closing the main window keeps Zhiyu accessible from the tray.
+
 Zhiyu also includes lightweight tools with no resident process:
 
 - **TCP port checker** — identifies listening ports and their owning processes.

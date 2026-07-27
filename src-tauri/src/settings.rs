@@ -86,6 +86,27 @@ pub(crate) fn load_settings() -> AppSettings {
         .unwrap_or_default()
 }
 
+pub(crate) fn toggle_launch_at_login(app: &AppHandle) -> Result<bool, String> {
+    let mut settings = load_settings();
+    let enabled = app
+        .autolaunch()
+        .is_enabled()
+        .unwrap_or(settings.launch_at_login);
+    let next = !enabled;
+    if next {
+        app.autolaunch()
+            .enable()
+            .map_err(|error| format!("无法启用开机启动: {error}"))?;
+    } else {
+        app.autolaunch()
+            .disable()
+            .map_err(|error| format!("无法关闭开机启动: {error}"))?;
+    }
+    settings.launch_at_login = next;
+    persist(&settings)?;
+    Ok(next)
+}
+
 fn settings_path() -> Option<PathBuf> {
     dirs::config_dir().map(|directory| directory.join("zhiyu-env/settings.json"))
 }

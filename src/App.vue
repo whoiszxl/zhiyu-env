@@ -127,6 +127,14 @@ type ActivityRecord = {
   createdAt: number;
   message: string;
 };
+type TrayNavigationEvent = {
+  target: "overview" | "settings" | "service";
+  kind: ServiceKind | null;
+};
+type TrayServiceActionEvent = {
+  success: boolean;
+  message: string;
+};
 const ACTIVITY_STORAGE_KEY = "zhiyu.environment.activity.v1";
 type ConsoleEntry = {
   database: number;
@@ -311,7 +319,9 @@ let diskTimer: number | undefined;
 let portTimer: number | undefined;
 let unlistenInstallProgress: UnlistenFn | undefined;
 let unlistenCloseRequested: UnlistenFn | undefined;
-let closingWindow = false;
+let unlistenTrayNavigation: UnlistenFn | undefined;
+let unlistenTrayAction: UnlistenFn | undefined;
+let hidingWindow = false;
 
 const selectedService = computed(
   () => activeTool.value
@@ -2222,18 +2232,18 @@ onMounted(async () => {
   try {
     unlistenCloseRequested = await getCurrentWindow().onCloseRequested(
       async (event) => {
-        if (
-          closingWindow ||
-          appSettings.value.keepServicesRunningOnClose
-        ) {
+        event.preventDefault();
+        if (hidingWindow) {
           return;
         }
-        event.preventDefault();
-        closingWindow = true;
+        hidingWindow = true;
         try {
-          await stopAllManagedServices();
+          if (!appSettings.value.keepServicesRunningOnClose) {
+            await stopAllManagedServices();
+          }
         } finally {
-          await getCurrentWindow().destroy();
+          await getCurrentWindow().hide();
+          hidingWindow = false;
         }
       },
     );
@@ -2247,6 +2257,40 @@ onMounted(async () => {
     );
   } catch {
     // Service management remains usable if the event channel is unavailable.
+  }
+  try {
+    unlistenTrayNavigation = await listen<TrayNavigationEvent>(
+      "tray:navigate",
+      async (event) => {
+        if (event.payload.target === "overview") {
+          await openDashboard();
+        } else if (event.payload.target === "settings") {
+          await openSettings();
+        } else if (event.payload.kind) {
+          await selectService(event.payload.kind);
+        }
+      },
+    );
+    unlistenTrayAction = await listen<TrayServiceActionEvent>(
+      "tray:service-action",
+      async (event) => {
+        if (event.payload.success) {
+          notice.value = event.payload.message;
+          error.value = "";
+        } else {
+          error.value = event.payload.message;
+          notice.value = "";
+        }
+        await Promise.all([
+          refreshServices(true),
+          refreshEnvironmentMetrics(),
+          refreshPortListeners(),
+          loadAppSettings(),
+        ]);
+      },
+    );
+  } catch {
+    // Tray actions remain available even if the frontend event bridge is unavailable.
   }
   await refreshServices();
   await Promise.all([
@@ -2279,6 +2323,8 @@ onMounted(async () => {
 onUnmounted(() => {
   unlistenInstallProgress?.();
   unlistenCloseRequested?.();
+  unlistenTrayNavigation?.();
+  unlistenTrayAction?.();
   if (serviceTimer) window.clearInterval(serviceTimer);
   if (metricTimer) window.clearInterval(metricTimer);
   if (diskTimer) window.clearInterval(diskTimer);

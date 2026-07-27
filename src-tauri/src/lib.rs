@@ -11,6 +11,7 @@ mod settings;
 mod sqlite_tools;
 mod storage_tools;
 mod tools;
+mod tray;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,9 +21,10 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .setup(|_| {
+        .setup(|app| {
             let settings = settings::load_settings();
             let _ = settings::apply_log_retention(&settings);
+            tray::setup(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

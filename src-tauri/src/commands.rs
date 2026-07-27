@@ -148,12 +148,12 @@ impl From<ServiceKindInput> for ServiceKind {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceInfo {
-    kind: ServiceKind,
-    name: &'static str,
-    version: String,
-    port: u16,
-    status: &'static str,
-    pid: Option<u32>,
+    pub(crate) kind: ServiceKind,
+    pub(crate) name: &'static str,
+    pub(crate) version: String,
+    pub(crate) port: u16,
+    pub(crate) status: &'static str,
+    pub(crate) pid: Option<u32>,
     instance_dir: PathBuf,
     config_path: PathBuf,
     data_path: PathBuf,
@@ -186,9 +186,9 @@ pub struct ServiceDiskUsage {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentMetrics {
-    cpu_percent: f32,
-    memory_bytes: u64,
-    running_service_count: usize,
+    pub(crate) cpu_percent: f32,
+    pub(crate) memory_bytes: u64,
+    pub(crate) running_service_count: usize,
 }
 
 #[derive(Serialize)]
@@ -743,13 +743,13 @@ fn run_action(
 }
 
 #[derive(Clone, Copy)]
-enum LifecycleAction {
+pub(crate) enum LifecycleAction {
     Start,
     Stop,
     Restart,
 }
 
-fn lifecycle_action(
+pub(crate) fn lifecycle_action(
     kind: ServiceKindInput,
     action: LifecycleAction,
 ) -> Result<ServiceInfo, String> {
@@ -1371,14 +1371,20 @@ fn collect_metrics(kind: ServiceKindInput) -> Result<ServiceMetrics, String> {
     })
 }
 
-fn collect_environment_metrics() -> Result<EnvironmentMetrics, String> {
+pub(crate) fn collect_environment_metrics() -> Result<EnvironmentMetrics, String> {
     let services = service_list()?;
+    collect_environment_metrics_from(&services)
+}
+
+pub(crate) fn collect_environment_metrics_from(
+    services: &[ServiceInfo],
+) -> Result<EnvironmentMetrics, String> {
     let running_service_count = services
         .iter()
         .filter(|service| service.status == "running")
         .count();
     let mut pids = BTreeSet::from([std::process::id()]);
-    pids.extend(services.into_iter().filter_map(|service| {
+    pids.extend(services.iter().filter_map(|service| {
         (service.status == "running")
             .then_some(service.pid)
             .flatten()
