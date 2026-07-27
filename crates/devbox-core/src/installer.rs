@@ -345,6 +345,12 @@ const CONSUL_ARCHIVE: &str = "consul_1.22.3_darwin_arm64.zip";
 const CONSUL_URL: &str =
     "https://releases.hashicorp.com/consul/1.22.3/consul_1.22.3_darwin_arm64.zip";
 const CONSUL_SHA256: &str = "b2881e2f9c6704fdac53d54dfb3957bf0d280600541a8e8f61d807e96ea7efa0";
+pub const RNACOS_SERIES: &str = "0.8";
+pub const RNACOS_VERSION: &str = "0.8.5";
+const RNACOS_ARCHIVE: &str = "rnacos-aarch64-apple-darwin-v0.8.5.tar.gz";
+const RNACOS_URL: &str =
+    "https://github.com/nacos-group/r-nacos/releases/download/v0.8.5/rnacos-aarch64-apple-darwin-v0.8.5.tar.gz";
+const RNACOS_SHA256: &str = "902a073fb9318d59cede8570377212dffec0b657b64c894c2e7d29ce6a0f25ef";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -869,6 +875,91 @@ pub struct EtcdInstaller {
 #[derive(Debug, Clone)]
 pub struct ConsulInstaller {
     devbox_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct RnacosInstaller {
+    devbox_root: PathBuf,
+}
+
+impl RnacosInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 rnacos {RNACOS_VERSION}"));
+        ensure_macos_arm64("rnacos")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/rnacos");
+        if binary_contains(&executable, &["--version"], RNACOS_VERSION) {
+            report_install_progress(90, "已安装", "rnacos 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let work_dir = self.devbox_root.join("tmp").join(format!(
+            "rnacos-{RNACOS_VERSION}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&work_dir)?;
+        let archive = downloads_dir.join(RNACOS_ARCHIVE);
+        prepare_archive(&archive, RNACOS_ARCHIVE, RNACOS_URL, RNACOS_SHA256)?;
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xzf"])
+                .arg(&archive)
+                .arg("-C")
+                .arg(&work_dir),
+            "tar",
+        )?;
+
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        fs::create_dir_all(&bin_dir)?;
+        report_install_progress(75, "整理文件", "正在写入 rnacos 版本目录");
+        fs::copy(work_dir.join("rnacos"), bin_dir.join("rnacos"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(bin_dir.join("rnacos"), fs::Permissions::from_mode(0o755))?;
+        }
+        if !binary_contains(&bin_dir.join("rnacos"), &["--version"], RNACOS_VERSION) {
+            let _ = fs::remove_dir_all(&work_dir);
+            return Err(DevBoxError::CommandFailed {
+                command: "rnacos --version".into(),
+                message: "downloaded binary is not the expected rnacos release".into(),
+            });
+        }
+        write_manifest(
+            &stage,
+            "rnacos",
+            RNACOS_SERIES,
+            RNACOS_VERSION,
+            RNACOS_URL,
+            RNACOS_SHA256,
+            "official-binary",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        let _ = fs::remove_dir_all(&work_dir);
+        report_install_progress(90, "完成安装", "rnacos 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/rnacos")
+            .join(RNACOS_SERIES)
+    }
 }
 
 impl ConsulInstaller {

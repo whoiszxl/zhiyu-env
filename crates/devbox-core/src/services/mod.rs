@@ -9,6 +9,7 @@ mod mysql;
 mod nats;
 mod postgres;
 mod redis;
+mod rnacos;
 mod rustfs;
 
 pub use consul::ConsulService;
@@ -21,4 +22,5 @@ pub use mysql::MysqlService;
 pub use nats::NatsService;
 pub use postgres::PostgresService;
 pub use redis::RedisService;
+pub use rnacos::RnacosService;
 pub use rustfs::RustfsService;

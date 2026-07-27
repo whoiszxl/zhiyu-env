@@ -4,15 +4,15 @@ use devbox_core::{
         RedisRelease, CONSUL_SERIES, CONSUL_VERSION, ETCD_SERIES, ETCD_VERSION, MAILPIT_SERIES,
         MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION,
         MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION,
-        POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION, RUSTFS_SERIES,
-        RUSTFS_VERSION,
+        POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES,
+        RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
     },
     report_install_progress, with_install_reporter, ConfigManager, ConsulInstaller, ConsulService,
     EtcdInstaller, EtcdService, InstallReporter, MailpitInstaller, MailpitService,
     MeilisearchInstaller, MeilisearchService, MinioInstaller, MinioService, MongodbInstaller,
     MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService, PostgresInstaller,
-    PostgresService, RedisInstaller, RedisService, RustfsInstaller, RustfsService, ServiceConfig,
-    ServiceKind, ServiceManager, ServiceStatus,
+    PostgresService, RedisInstaller, RedisService, RnacosInstaller, RnacosService, RustfsInstaller,
+    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -120,6 +120,7 @@ pub enum ServiceKindInput {
     Rustfs,
     Etcd,
     Consul,
+    Rnacos,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -136,6 +137,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Rustfs => Self::Rustfs,
             ServiceKindInput::Etcd => Self::Etcd,
             ServiceKindInput::Consul => Self::Consul,
+            ServiceKindInput::Rnacos => Self::Rnacos,
         }
     }
 }
@@ -446,6 +448,19 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
                 ],
             )
         }
+        ServiceKind::Rnacos => {
+            let instance = root.join("instances/rnacos/default");
+            (
+                "rnacos",
+                RNACOS_VERSION,
+                8848,
+                root.join(format!("installations/rnacos/{RNACOS_SERIES}/bin/rnacos")),
+                vec![
+                    "-e".into(),
+                    instance.join("conf/rnacos.env").display().to_string(),
+                ],
+            )
+        }
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -584,6 +599,9 @@ fn with_service<T>(
         ServiceKindInput::Consul => {
             operation(&ConsulService::new(config).map_err(stringify_error)?)
         }
+        ServiceKindInput::Rnacos => {
+            operation(&RnacosService::new(config).map_err(stringify_error)?)
+        }
     }
     .map_err(stringify_error)
 }
@@ -617,6 +635,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Rustfs => "RustFS",
         ServiceKindInput::Etcd => "etcd",
         ServiceKindInput::Consul => "Consul",
+        ServiceKindInput::Rnacos => "rnacos",
     };
     Ok(ServiceInfo {
         kind: kind.into(),
@@ -693,6 +712,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Rustfs,
         ServiceKindInput::Etcd,
         ServiceKindInput::Consul,
+        ServiceKindInput::Rnacos,
     ]
     .into_iter()
     .map(info)
@@ -796,6 +816,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Consul 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Rnacos => {
+            RnacosInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 rnacos 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -1093,6 +1120,7 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         ServiceKind::Rustfs => {}
         ServiceKind::Etcd => {}
         ServiceKind::Consul => {}
+        ServiceKind::Rnacos => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -1122,6 +1150,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Rustfs => config.stdout_log_path(),
         ServiceKind::Etcd => config.stdout_log_path(),
         ServiceKind::Consul => config.stdout_log_path(),
+        ServiceKind::Rnacos => config.stdout_log_path(),
     }
 }
 
@@ -1138,6 +1167,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Rustfs => "rustfs.env",
         ServiceKind::Etcd => "etcd.yaml",
         ServiceKind::Consul => "consul.hcl",
+        ServiceKind::Rnacos => "rnacos.env",
     };
     config.config_dir().join(name)
 }
@@ -1249,6 +1279,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Rustfs => "rustfs-",
         ServiceKind::Etcd => "etcd-",
         ServiceKind::Consul => "consul_",
+        ServiceKind::Rnacos => "rnacos-",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {

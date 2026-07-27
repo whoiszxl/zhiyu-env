@@ -18,6 +18,7 @@ pub enum ServiceKind {
     Rustfs,
     Etcd,
     Consul,
+    Rnacos,
 }
 
 impl ServiceKind {
@@ -34,6 +35,7 @@ impl ServiceKind {
             Self::Rustfs => "rustfs",
             Self::Etcd => "etcd",
             Self::Consul => "consul",
+            Self::Rnacos => "rnacos",
         }
     }
 }

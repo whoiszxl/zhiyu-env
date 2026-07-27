@@ -466,7 +466,11 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
-  if (selectedKind.value === "etcd" || selectedKind.value === "consul") {
+  if (
+    selectedKind.value === "etcd" ||
+    selectedKind.value === "consul" ||
+    selectedKind.value === "rnacos"
+  ) {
     return [
       ["overview", "概览"],
       ["governance", "连接与调试"],
@@ -505,10 +509,26 @@ const iconLetter: Record<ServiceKind, string> = {
   rustfs: "R",
   etcd: "E",
   consul: "C",
+  rnacos: "R",
 };
 
 const governanceProfile = computed(() =>
-  selectedKind.value === "consul"
+  selectedKind.value === "rnacos"
+    ? {
+        name: "rnacos",
+        description: "无需 Java 的 Nacos 兼容配置中心与服务注册中心",
+        badge: "单节点 · 无需 Java",
+        primaryLabel: "NACOS HTTP",
+        primary: "http://127.0.0.1:8848",
+        primaryHint: "1.x OpenAPI 与客户端",
+        secondaryLabel: "WEB CONSOLE",
+        secondary: "http://127.0.0.1:10848/rnacos/",
+        secondaryHint: "默认 admin / admin",
+        command:
+          "curl 'http://127.0.0.1:8848/nacos/v1/cs/configs?dataId=demo&group=DEFAULT_GROUP'",
+        note: "OpenAPI 鉴权默认关闭，控制台使用开发账号 admin / admin；不要暴露到公网。",
+      }
+    : selectedKind.value === "consul"
     ? {
         name: "Consul",
         description: "适合服务注册、健康检查、KV 配置和 DNS 服务发现",

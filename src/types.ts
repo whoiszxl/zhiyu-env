@@ -9,7 +9,8 @@ export type ServiceKind =
   | "minio"
   | "rustfs"
   | "etcd"
-  | "consul";
+  | "consul"
+  | "rnacos";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =

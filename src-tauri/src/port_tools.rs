@@ -115,6 +115,7 @@ fn managed_service_pids() -> BTreeMap<u32, String> {
         ("rustfs", "RustFS"),
         ("etcd", "etcd"),
         ("consul", "Consul"),
+        ("rnacos", "rnacos"),
     ]
     .into_iter()
     .filter_map(|(directory, name)| {
@@ -150,6 +151,9 @@ fn common_service(port: u16) -> Option<&'static str> {
         8500 => Some("Consul HTTP / UI"),
         8502 => Some("Consul gRPC"),
         8600 => Some("Consul DNS"),
+        8848 => Some("Nacos HTTP"),
+        9848 => Some("Nacos gRPC"),
+        10848 => Some("rnacos Console"),
         9000 => Some("S3 Object Storage"),
         9001 => Some("Object Storage Console"),
         9002 => Some("RustFS S3 API"),

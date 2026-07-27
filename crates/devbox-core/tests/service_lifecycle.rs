@@ -2,8 +2,8 @@
 
 use devbox_core::{
     ConsulService, EtcdService, MailpitService, MeilisearchService, MinioService, MongodbService,
-    MysqlService, NatsService, PostgresService, RedisService, RustfsService, ServiceConfig,
-    ServiceKind, ServiceManager, ServiceStatus,
+    MysqlService, NatsService, PostgresService, RedisService, RnacosService, RustfsService,
+    ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -136,6 +136,14 @@ fn consul_service_lifecycle() {
     let service = ConsulService::new(config(temp.path(), ServiceKind::Consul)).unwrap();
     assert_lifecycle(&service);
     assert!(temp.path().join("consul/conf/consul.hcl").is_file());
+}
+
+#[test]
+fn rnacos_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = RnacosService::new(config(temp.path(), ServiceKind::Rnacos)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("rnacos/conf/rnacos.env").is_file());
 }
 
 #[test]
