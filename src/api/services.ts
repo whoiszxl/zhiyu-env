@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AppSettings,
   CacheCleanupResult,
   DatabaseInfo,
   DatabaseOverview,
@@ -40,6 +41,7 @@ import type {
   SqlServiceKind,
   TableDetail,
   TableInfo,
+  UpdateStatus,
 } from "../types";
 
 export function listServices(): Promise<ServiceInfo[]> {
@@ -75,6 +77,26 @@ export function getEnvironmentMetrics(): Promise<EnvironmentMetrics> {
 
 export function getEnvironmentDiskUsage(): Promise<number> {
   return invoke<number>("environment_disk_usage");
+}
+
+export function getAppSettings(): Promise<AppSettings> {
+  return invoke<AppSettings>("app_settings_get");
+}
+
+export function saveAppSettings(settings: AppSettings): Promise<AppSettings> {
+  return invoke<AppSettings>("app_settings_save", { settings });
+}
+
+export function checkAppUpdate(): Promise<UpdateStatus> {
+  return invoke<UpdateStatus>("app_update_check");
+}
+
+export function cleanAllInstallCache(): Promise<CacheCleanupResult> {
+  return invoke<CacheCleanupResult>("app_cache_clean_all");
+}
+
+export function stopAllManagedServices(): Promise<ServiceInfo[]> {
+  return invoke<ServiceInfo[]>("service_stop_all");
 }
 
 export function cleanServiceCache(

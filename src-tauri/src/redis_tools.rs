@@ -84,8 +84,12 @@ pub async fn redis_execute(
 }
 
 fn redis_cli() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or_else(|| "无法确定当前用户目录".to_string())?;
-    let executable = home.join(".devbox/installations/redis/7.2/bin/redis-cli");
+    let config = crate::commands::service_config(devbox_core::ServiceKind::Redis)?;
+    let executable = config
+        .executable
+        .parent()
+        .map(|directory| directory.join("redis-cli"))
+        .ok_or_else(|| "Redis 可执行程序路径无效".to_string())?;
     if !executable.is_file() {
         return Err(format!("redis-cli 不存在: {}", executable.display()));
     }

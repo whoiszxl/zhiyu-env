@@ -99,10 +99,10 @@ fn parse_address(value: &str) -> Option<(String, u16)> {
 }
 
 fn managed_service_pids() -> BTreeMap<u32, String> {
-    let Some(home) = dirs::home_dir() else {
+    let Ok(devbox_root) = crate::settings::devbox_root() else {
         return BTreeMap::new();
     };
-    let root = home.join(".devbox/instances");
+    let root = devbox_root.join("instances");
     [
         ("redis", "Redis"),
         ("mysql", "MySQL"),

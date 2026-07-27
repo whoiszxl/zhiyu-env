@@ -488,9 +488,7 @@ fn directory_size(path: &Path) -> Result<u64, String> {
 }
 
 fn devbox_root() -> Result<PathBuf, String> {
-    dirs::home_dir()
-        .map(|home| home.join(".devbox"))
-        .ok_or_else(|| "无法确定当前用户目录".to_string())
+    crate::settings::devbox_root()
 }
 
 fn unique_suffix() -> u128 {

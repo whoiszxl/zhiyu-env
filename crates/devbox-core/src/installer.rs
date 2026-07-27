@@ -1,5 +1,5 @@
 use crate::error::{DevBoxError, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::fmt;
@@ -7,7 +7,7 @@ use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2057,13 +2057,15 @@ fn prepare_archive(
         .parent()
         .and_then(Path::parent)
         .unwrap_or_else(|| Path::new(""));
-    let configured_mirror = configured_download_mirror(devbox_root);
+    let settings = installer_download_settings(devbox_root);
+    let configured_mirror = configured_download_mirror(devbox_root, &settings);
     let candidates = download_candidates(
         source_url,
         archive_name,
         configured_mirror.as_deref(),
-        std::env::var_os("ZHIYU_DISABLE_PUBLIC_MIRROR").is_none(),
+        settings.public_github_mirror && std::env::var_os("ZHIYU_DISABLE_PUBLIC_MIRROR").is_none(),
     );
+    let _download_permit = DownloadPermit::acquire(settings.download_concurrency);
     let mut failures = Vec::new();
 
     for (index, candidate) in candidates.iter().enumerate() {
@@ -2081,16 +2083,12 @@ fn prepare_archive(
         );
         let mut command = Command::new("/usr/bin/curl");
         command
-            .args([
-                "--fail",
-                "--location",
-                "--silent",
-                "--show-error",
-                "--connect-timeout",
-                "8",
-                "--retry",
-                "1",
-            ])
+            .args(["--fail", "--location", "--silent", "--show-error"])
+            .arg("--connect-timeout")
+            .arg(settings.download_timeout_seconds.min(15).to_string())
+            .arg("--max-time")
+            .arg(settings.download_timeout_seconds.to_string())
+            .args(["--retry", "1"])
             .arg("--output")
             .arg(&partial);
         if !candidate.official {
@@ -2139,12 +2137,74 @@ struct DownloadCandidate {
     official: bool,
 }
 
-fn configured_download_mirror(devbox_root: &Path) -> Option<String> {
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct InstallerDownloadSettings {
+    download_mirror: Option<String>,
+    public_github_mirror: bool,
+    download_concurrency: usize,
+    download_timeout_seconds: u64,
+}
+
+impl Default for InstallerDownloadSettings {
+    fn default() -> Self {
+        Self {
+            download_mirror: None,
+            public_github_mirror: true,
+            download_concurrency: 2,
+            download_timeout_seconds: 180,
+        }
+    }
+}
+
+fn installer_download_settings(devbox_root: &Path) -> InstallerDownloadSettings {
+    let mut settings: InstallerDownloadSettings =
+        fs::read(devbox_root.join("installer-settings.json"))
+            .ok()
+            .and_then(|contents| serde_json::from_slice(&contents).ok())
+            .unwrap_or_default();
+    settings.download_concurrency = settings.download_concurrency.clamp(1, 4);
+    settings.download_timeout_seconds = settings.download_timeout_seconds.clamp(15, 600);
+    settings
+}
+
+fn configured_download_mirror(
+    devbox_root: &Path,
+    settings: &InstallerDownloadSettings,
+) -> Option<String> {
     std::env::var("ZHIYU_DOWNLOAD_MIRROR")
         .ok()
+        .or_else(|| settings.download_mirror.clone())
         .or_else(|| fs::read_to_string(devbox_root.join("download-mirror.txt")).ok())
         .map(|value| value.trim().trim_end_matches('/').to_string())
         .filter(|value| value.starts_with("https://"))
+}
+
+static ACTIVE_DOWNLOADS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+struct DownloadPermit;
+
+impl DownloadPermit {
+    fn acquire(limit: usize) -> Self {
+        let (lock, ready) = &ACTIVE_DOWNLOADS;
+        let mut active = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        while *active >= limit {
+            active = ready
+                .wait(active)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        *active += 1;
+        Self
+    }
+}
+
+impl Drop for DownloadPermit {
+    fn drop(&mut self) {
+        let (lock, ready) = &ACTIVE_DOWNLOADS;
+        let mut active = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *active = active.saturating_sub(1);
+        ready.notify_one();
+    }
 }
 
 fn download_candidates(
@@ -2390,6 +2450,31 @@ mod tests {
         );
         assert_eq!(github.len(), 1);
         assert!(github[0].official);
+    }
+
+    #[test]
+    fn installer_download_settings_are_loaded_and_bounded() {
+        let temp = TempDir::new().unwrap();
+        fs::write(
+            temp.path().join("installer-settings.json"),
+            r#"{
+                "downloadMirror": "https://mirror.example.com/packages",
+                "publicGithubMirror": false,
+                "downloadConcurrency": 9,
+                "downloadTimeoutSeconds": 5
+            }"#,
+        )
+        .unwrap();
+
+        let settings = installer_download_settings(temp.path());
+
+        assert_eq!(
+            settings.download_mirror.as_deref(),
+            Some("https://mirror.example.com/packages")
+        );
+        assert!(!settings.public_github_mirror);
+        assert_eq!(settings.download_concurrency, 4);
+        assert_eq!(settings.download_timeout_seconds, 15);
     }
 
     #[test]

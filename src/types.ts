@@ -60,6 +60,27 @@ export interface EnvironmentMetrics {
   runningServiceCount: number;
 }
 
+export interface AppSettings {
+  launchAtLogin: boolean;
+  keepServicesRunningOnClose: boolean;
+  downloadMirror: string;
+  publicGithubMirror: boolean;
+  downloadConcurrency: number;
+  downloadTimeoutSeconds: number;
+  installRoot: string;
+  logRetentionDays: number;
+  backupRetentionCount: number;
+  autoCheckUpdates: boolean;
+}
+
+export interface UpdateStatus {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
+  message: string;
+}
+
 export interface CacheCleanupResult {
   removedItems: number;
   freedBytes: number;

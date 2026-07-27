@@ -228,9 +228,7 @@ pub struct PostgresVersionInfo {
 }
 
 fn devbox_root() -> Result<PathBuf, String> {
-    dirs::home_dir()
-        .map(|home| home.join(".devbox"))
-        .ok_or_else(|| "无法确定当前用户目录".to_string())
+    crate::settings::devbox_root()
 }
 
 fn selected_redis_release(root: &Path) -> &'static RedisRelease {
@@ -340,7 +338,7 @@ fn postgres_service_config(root: &Path, release: &PostgresRelease) -> ServiceCon
     }
 }
 
-fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
+pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
     let root = devbox_root()?;
     if kind == ServiceKind::Redis {
         return Ok(redis_service_config(&root, selected_redis_release(&root)));
@@ -1125,6 +1123,47 @@ pub async fn service_stop(kind: ServiceKindInput) -> Result<ServiceInfo, String>
 #[tauri::command]
 pub async fn service_restart(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
     run_lifecycle_task(kind, LifecycleAction::Restart).await
+}
+
+#[tauri::command]
+pub async fn service_stop_all() -> Result<Vec<ServiceInfo>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut failures = Vec::new();
+        for kind in [
+            ServiceKindInput::Redis,
+            ServiceKindInput::Mysql,
+            ServiceKindInput::Postgres,
+            ServiceKindInput::Mongodb,
+            ServiceKindInput::Mailpit,
+            ServiceKindInput::Nats,
+            ServiceKindInput::Meilisearch,
+            ServiceKindInput::Minio,
+            ServiceKindInput::Rustfs,
+            ServiceKindInput::Etcd,
+            ServiceKindInput::Consul,
+            ServiceKindInput::Rnacos,
+            ServiceKindInput::Rabbitmq,
+        ] {
+            match with_service(kind, |service| service.status()) {
+                Ok(ServiceStatus::Running { .. }) => {
+                    if let Err(error) = with_service(kind, |service| service.stop()) {
+                        failures.push(format!("{}: {error}", ServiceKind::from(kind).as_str()));
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    failures.push(format!("{}: {error}", ServiceKind::from(kind).as_str()))
+                }
+            }
+        }
+        if failures.is_empty() {
+            service_list()
+        } else {
+            Err(format!("部分服务停止失败：{}", failures.join("；")))
+        }
+    })
+    .await
+    .map_err(|error| format!("停止全部服务任务异常结束: {error}"))?
 }
 
 #[tauri::command]

@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open } from "@tauri-apps/plugin-dialog";
 import { computed, onMounted, onUnmounted, provide, ref } from "vue";
 import ServiceDocs from "./components/ServiceDocs.vue";
 import { findTool, TOOLS } from "./tools/registry";
 import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
 import { formatBytes } from "./utils/format";
 import {
+  checkAppUpdate,
+  cleanAllInstallCache,
   cleanServiceCache,
   addMeilisearchDocuments,
   createServiceBackup,
@@ -14,6 +18,7 @@ import {
   executeMongoCommand,
   getEnvironmentDiskUsage,
   getEnvironmentMetrics,
+  getAppSettings,
   getMailpitMessageDetail,
   getMailpitOverview,
   getMeilisearchOverview,
@@ -43,6 +48,7 @@ import {
   readServiceConfig,
   receiveNatsMessage,
   runServiceAction,
+  saveAppSettings,
   restoreServiceBackup,
   saveServiceConfig,
   scanRedisKeys,
@@ -50,9 +56,11 @@ import {
   selectRedisVersion,
   selectMysqlVersion,
   selectPostgresVersion,
+  stopAllManagedServices,
 } from "./api/services";
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
+  AppSettings,
   DatabaseInfo,
   DatabaseOverview,
   EnvironmentMetrics,
@@ -86,6 +94,7 @@ import type {
   SqlServiceKind,
   TableDetail,
   TableInfo,
+  UpdateStatus,
 } from "./types";
 
 type DetailTab =
@@ -165,6 +174,7 @@ const services = ref<ServiceInfo[]>([]);
 const selectedKind = ref<ServiceKind>("redis");
 const activeTool = ref<ToolId | null>(null);
 const dashboardActive = ref(true);
+const settingsActive = ref(false);
 const activeToolDefinition = computed(() => findTool(activeTool.value));
 const activeTab = ref<DetailTab>("overview");
 const loading = ref(true);
@@ -184,6 +194,23 @@ const environmentDiskBytes = ref(0);
 const portListeners = ref<PortListener[]>([]);
 const activityRecords = ref<ActivityRecord[]>(loadActivityRecords());
 const stoppingAll = ref(false);
+const appSettings = ref<AppSettings>({
+  launchAtLogin: false,
+  keepServicesRunningOnClose: true,
+  downloadMirror: "",
+  publicGithubMirror: true,
+  downloadConcurrency: 2,
+  downloadTimeoutSeconds: 180,
+  installRoot: "",
+  logRetentionDays: 14,
+  backupRetentionCount: 10,
+  autoCheckUpdates: true,
+});
+const settingsDraft = ref<AppSettings>({ ...appSettings.value });
+const settingsSaving = ref(false);
+const allCacheCleaning = ref(false);
+const updateChecking = ref(false);
+const updateStatus = ref<UpdateStatus | null>(null);
 const diskUsageByKind = ref<
   Partial<Record<ServiceKind, ServiceDiskUsage>>
 >({});
@@ -280,6 +307,8 @@ let metricTimer: number | undefined;
 let diskTimer: number | undefined;
 let portTimer: number | undefined;
 let unlistenInstallProgress: UnlistenFn | undefined;
+let unlistenCloseRequested: UnlistenFn | undefined;
+let closingWindow = false;
 
 const selectedService = computed(
   () => activeTool.value
@@ -872,6 +901,7 @@ async function refreshPortListeners() {
 
 async function openDashboard() {
   dashboardActive.value = true;
+  settingsActive.value = false;
   activeTool.value = null;
   notice.value = "";
   error.value = "";
@@ -883,6 +913,122 @@ async function openDashboard() {
     refreshDiskUsage(),
     refreshPortListeners(),
   ]);
+}
+
+async function loadAppSettings() {
+  try {
+    appSettings.value = await getAppSettings();
+    settingsDraft.value = { ...appSettings.value };
+  } catch (cause) {
+    error.value = String(cause);
+  }
+}
+
+async function openSettings() {
+  dashboardActive.value = false;
+  settingsActive.value = true;
+  activeTool.value = null;
+  notice.value = "";
+  error.value = "";
+  await loadAppSettings();
+  if (appSettings.value.autoCheckUpdates && !updateStatus.value) {
+    void checkForUpdates();
+  }
+}
+
+async function chooseInstallRoot() {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: settingsDraft.value.installRoot || undefined,
+    title: "选择智屿安装目录",
+  });
+  if (typeof selected === "string") {
+    settingsDraft.value.installRoot = selected;
+  }
+}
+
+async function saveSettings() {
+  if (settingsSaving.value) return;
+  const rootChanged =
+    settingsDraft.value.installRoot !== appSettings.value.installRoot;
+  if (rootChanged && runningServices.value.length > 0) {
+    error.value = `请先停止当前运行的 ${runningServices.value.length} 个服务，再更换安装目录`;
+    return;
+  }
+  if (
+    rootChanged &&
+    !window.confirm(
+      "更换安装目录后，智屿会切换到一个新的环境。旧目录中的服务和数据不会自动迁移，确定保存吗？",
+    )
+  ) {
+    return;
+  }
+  settingsSaving.value = true;
+  notice.value = "";
+  error.value = "";
+  try {
+    const saved = await saveAppSettings({ ...settingsDraft.value });
+    appSettings.value = saved;
+    settingsDraft.value = { ...saved };
+    notice.value = rootChanged
+      ? "设置已保存，已切换到新的安装目录"
+      : "设置已保存并生效";
+    if (rootChanged) {
+      diskUsageByKind.value = {};
+      await Promise.all([
+        refreshServices(true),
+        refreshEnvironmentDiskUsage(),
+        refreshDiskUsage(),
+        refreshPortListeners(),
+      ]);
+    }
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    settingsSaving.value = false;
+  }
+}
+
+async function cleanAllCaches() {
+  if (allCacheCleaning.value) return;
+  if (
+    !window.confirm(
+      "将删除所有服务的下载包和安装临时文件。已安装程序、配置、数据和备份不会被删除，确定继续吗？",
+    )
+  ) {
+    return;
+  }
+  allCacheCleaning.value = true;
+  notice.value = "";
+  error.value = "";
+  try {
+    const result = await cleanAllInstallCache();
+    await Promise.all([refreshDiskUsage(), refreshEnvironmentDiskUsage()]);
+    notice.value = `已清理 ${result.removedItems} 项缓存，释放 ${formatBytes(result.freedBytes)}`;
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    allCacheCleaning.value = false;
+  }
+}
+
+async function checkForUpdates() {
+  if (updateChecking.value) return;
+  updateChecking.value = true;
+  try {
+    updateStatus.value = await checkAppUpdate();
+  } catch (cause) {
+    updateStatus.value = {
+      currentVersion: "0.1.0",
+      latestVersion: null,
+      updateAvailable: false,
+      releaseUrl: null,
+      message: String(cause),
+    };
+  } finally {
+    updateChecking.value = false;
+  }
 }
 
 async function stopAllServices() {
@@ -1013,6 +1159,7 @@ async function restoreBackup(backup: ServiceBackup) {
 
 function selectTool(id: ToolId) {
   dashboardActive.value = false;
+  settingsActive.value = false;
   activeTool.value = id;
   notice.value = "";
   error.value = "";
@@ -1020,6 +1167,7 @@ function selectTool(id: ToolId) {
 
 async function selectService(kind: ServiceKind) {
   dashboardActive.value = false;
+  settingsActive.value = false;
   activeTool.value = null;
   selectedKind.value = kind;
   activeTab.value = "overview";
@@ -1994,6 +2142,28 @@ function chartPoints(values: number[], width = 560, height = 112) {
 }
 
 onMounted(async () => {
+  await loadAppSettings();
+  try {
+    unlistenCloseRequested = await getCurrentWindow().onCloseRequested(
+      async (event) => {
+        if (
+          closingWindow ||
+          appSettings.value.keepServicesRunningOnClose
+        ) {
+          return;
+        }
+        event.preventDefault();
+        closingWindow = true;
+        try {
+          await stopAllManagedServices();
+        } finally {
+          await getCurrentWindow().destroy();
+        }
+      },
+    );
+  } catch {
+    // Window closing still works when lifecycle interception is unavailable.
+  }
   try {
     unlistenInstallProgress = await listen<InstallProgressPayload>(
       "install-progress",
@@ -2025,10 +2195,14 @@ onMounted(async () => {
   portTimer = window.setInterval(() => {
     if (dashboardActive.value) void refreshPortListeners();
   }, 10_000);
+  if (appSettings.value.autoCheckUpdates) {
+    void checkForUpdates();
+  }
 });
 
 onUnmounted(() => {
   unlistenInstallProgress?.();
+  unlistenCloseRequested?.();
   if (serviceTimer) window.clearInterval(serviceTimer);
   if (metricTimer) window.clearInterval(metricTimer);
   if (diskTimer) window.clearInterval(diskTimer);
@@ -2051,7 +2225,7 @@ onUnmounted(() => {
               内存 {{ formatBytes(environmentMetrics.memoryBytes) }}
             </span>
             <span
-              title="智屿在 ~/.devbox 中保存的程序、数据、日志、备份与缓存总和"
+              :title="`智屿在 ${appSettings.installRoot || '~/.devbox'} 中保存的程序、数据、日志、备份与缓存总和`"
             >
               磁盘 {{ formatBytes(environmentDiskBytes) }}
             </span>
@@ -2083,6 +2257,7 @@ onUnmounted(() => {
           :class="{
             active:
               !dashboardActive &&
+              !settingsActive &&
               activeTool === null &&
               selectedKind === service.kind,
           }"
@@ -2111,7 +2286,12 @@ onUnmounted(() => {
           :key="tool.id"
           type="button"
           class="service-nav-item"
-          :class="{ active: !dashboardActive && activeTool === tool.id }"
+          :class="{
+            active:
+              !dashboardActive &&
+              !settingsActive &&
+              activeTool === tool.id,
+          }"
           @click="selectTool(tool.id)"
         >
           <span class="nav-icon" :class="tool.id">{{ tool.icon }}</span>
@@ -2123,6 +2303,20 @@ onUnmounted(() => {
 
         <button type="button" class="add-service" disabled>
           <span>＋</span> 扩展更多服务
+        </button>
+
+        <p class="nav-label tool-label">SYSTEM</p>
+        <button
+          type="button"
+          class="service-nav-item"
+          :class="{ active: settingsActive }"
+          @click="openSettings"
+        >
+          <span class="nav-icon settings">⚙</span>
+          <span class="nav-copy">
+            <strong>设置中心</strong>
+            <small>启动 · 下载 · 存储</small>
+          </span>
         </button>
       </nav>
 
@@ -2197,6 +2391,222 @@ onUnmounted(() => {
 
       <div v-if="loading" class="page-loading">正在读取服务状态…</div>
 
+      <section v-else-if="settingsActive" class="settings-page">
+        <header class="settings-header">
+          <div>
+            <span class="dashboard-eyebrow">PREFERENCES</span>
+            <h1>设置中心</h1>
+            <p>统一管理启动行为、下载安装、存储和维护策略</p>
+          </div>
+          <button
+            type="button"
+            class="settings-save"
+            :disabled="settingsSaving"
+            @click="saveSettings"
+          >
+            <span v-if="settingsSaving" class="spinner"></span>
+            {{ settingsSaving ? "保存中" : "保存设置" }}
+          </button>
+        </header>
+
+        <div v-if="notice" class="notice settings-notice">
+          <span>{{ notice }}</span>
+          <button type="button" @click="notice = ''">×</button>
+        </div>
+        <div v-if="error" class="notice danger settings-notice">
+          <span>{{ error }}</span>
+          <button type="button" @click="error = ''">×</button>
+        </div>
+
+        <div class="settings-body">
+          <section class="settings-section">
+            <div class="settings-section-title">
+              <div>
+                <h2>应用行为</h2>
+                <p>macOS 登录与窗口关闭行为</p>
+              </div>
+            </div>
+            <label class="settings-toggle-row">
+              <span>
+                <strong>登录时启动智屿</strong>
+                <small>使用 macOS LaunchAgent 自动启动桌面应用</small>
+              </span>
+              <input
+                v-model="settingsDraft.launchAtLogin"
+                type="checkbox"
+              />
+              <i></i>
+            </label>
+            <label class="settings-toggle-row">
+              <span>
+                <strong>关闭智屿后继续运行服务</strong>
+                <small>关闭时不停止 Redis、MySQL 等托管进程</small>
+              </span>
+              <input
+                v-model="settingsDraft.keepServicesRunningOnClose"
+                type="checkbox"
+              />
+              <i></i>
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-title">
+              <div>
+                <h2>下载安装</h2>
+                <p>镜像优先级、并发和失败超时</p>
+              </div>
+            </div>
+            <div class="settings-field">
+              <label for="download-mirror">自定义下载镜像</label>
+              <div>
+                <input
+                  id="download-mirror"
+                  v-model.trim="settingsDraft.downloadMirror"
+                  type="url"
+                  placeholder="https://your-cdn.example.com/zhiyu-packages"
+                />
+                <small>留空时跳过自定义镜像；镜像文件需保留原始文件名</small>
+              </div>
+            </div>
+            <label class="settings-toggle-row">
+              <span>
+                <strong>启用 GitHub 公共加速</strong>
+                <small>自定义镜像不可用时先尝试公共加速，再回退官方源</small>
+              </span>
+              <input
+                v-model="settingsDraft.publicGithubMirror"
+                type="checkbox"
+              />
+              <i></i>
+            </label>
+            <div class="settings-field-grid">
+              <label>
+                <span>最大并行下载</span>
+                <select v-model.number="settingsDraft.downloadConcurrency">
+                  <option :value="1">1 个</option>
+                  <option :value="2">2 个</option>
+                  <option :value="3">3 个</option>
+                  <option :value="4">4 个</option>
+                </select>
+              </label>
+              <label>
+                <span>单个下载超时</span>
+                <div class="settings-number">
+                  <input
+                    v-model.number="settingsDraft.downloadTimeoutSeconds"
+                    type="number"
+                    min="15"
+                    max="600"
+                  />
+                  <em>秒</em>
+                </div>
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-title">
+              <div>
+                <h2>存储与保留策略</h2>
+                <p>程序、数据、日志、备份和安装缓存</p>
+              </div>
+            </div>
+            <div class="settings-field">
+              <label>默认安装目录</label>
+              <div class="settings-path">
+                <input
+                  v-model="settingsDraft.installRoot"
+                  type="text"
+                  readonly
+                />
+                <button type="button" @click="chooseInstallRoot">选择</button>
+                <small>切换目录不会迁移原目录中的服务和数据</small>
+              </div>
+            </div>
+            <div class="settings-field-grid">
+              <label>
+                <span>日志保留</span>
+                <div class="settings-number">
+                  <input
+                    v-model.number="settingsDraft.logRetentionDays"
+                    type="number"
+                    min="1"
+                    max="365"
+                  />
+                  <em>天</em>
+                </div>
+              </label>
+              <label>
+                <span>每个服务保留备份</span>
+                <div class="settings-number">
+                  <input
+                    v-model.number="settingsDraft.backupRetentionCount"
+                    type="number"
+                    min="1"
+                    max="100"
+                  />
+                  <em>份</em>
+                </div>
+              </label>
+            </div>
+            <div class="settings-maintenance">
+              <span>
+                <strong>全部安装缓存</strong>
+                <small>删除下载包和失败安装留下的临时文件</small>
+              </span>
+              <button
+                type="button"
+                :disabled="allCacheCleaning"
+                @click="cleanAllCaches"
+              >
+                <span v-if="allCacheCleaning" class="spinner"></span>
+                {{ allCacheCleaning ? "清理中" : "立即清理" }}
+              </button>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-title">
+              <div>
+                <h2>应用更新</h2>
+                <p>检查智屿 GitHub Release</p>
+              </div>
+            </div>
+            <label class="settings-toggle-row">
+              <span>
+                <strong>启动时自动检查更新</strong>
+                <small>只检查并提示，不自动安装未签名程序</small>
+              </span>
+              <input
+                v-model="settingsDraft.autoCheckUpdates"
+                type="checkbox"
+              />
+              <i></i>
+            </label>
+            <div class="settings-update-row">
+              <span>
+                <strong>{{ updateStatus?.message ?? "尚未检查更新" }}</strong>
+                <small v-if="updateStatus">
+                  当前版本 {{ updateStatus.currentVersion }}
+                  <template v-if="updateStatus.latestVersion">
+                    · 最新版本 {{ updateStatus.latestVersion }}
+                  </template>
+                </small>
+              </span>
+              <button
+                type="button"
+                :disabled="updateChecking"
+                @click="checkForUpdates"
+              >
+                <span v-if="updateChecking" class="spinner"></span>
+                {{ updateChecking ? "检查中" : "检查更新" }}
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+
       <section v-else-if="dashboardActive" class="dashboard-page">
         <header class="dashboard-header">
           <div>
@@ -2248,7 +2658,7 @@ onUnmounted(() => {
             <article>
               <span>总磁盘</span>
               <strong>{{ formatBytes(environmentDiskBytes) }}</strong>
-              <small>~/.devbox</small>
+              <small>{{ appSettings.installRoot || "~/.devbox" }}</small>
             </article>
           </div>
 

@@ -36,6 +36,13 @@ pub async fn service_cache_clean(kind: ServiceKindInput) -> Result<CacheCleanupR
 }
 
 #[tauri::command]
+pub async fn app_cache_clean_all() -> Result<CacheCleanupResult, String> {
+    tauri::async_runtime::spawn_blocking(move || clean_all_cache_at_root(&devbox_root()?))
+        .await
+        .map_err(|error| format!("全部缓存清理任务异常结束: {error}"))?
+}
+
+#[tauri::command]
 pub async fn service_backup_list(kind: ServiceKindInput) -> Result<Vec<ServiceBackup>, String> {
     tauri::async_runtime::spawn_blocking(move || list_backups(&devbox_root()?, kind.into()))
         .await
@@ -46,7 +53,15 @@ pub async fn service_backup_list(kind: ServiceKindInput) -> Result<Vec<ServiceBa
 pub async fn service_backup_create(kind: ServiceKindInput) -> Result<ServiceBackup, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let instance = stopped_service_instance(kind)?;
-        create_backup(&devbox_root()?, kind.into(), &instance, false)
+        let root = devbox_root()?;
+        let service_kind: ServiceKind = kind.into();
+        let backup = create_backup(&root, service_kind, &instance, false)?;
+        prune_backups(
+            &root,
+            service_kind,
+            crate::settings::load_settings().backup_retention_count as usize,
+        )?;
+        Ok(backup)
     })
     .await
     .map_err(|error| format!("数据备份任务异常结束: {error}"))?
@@ -61,16 +76,20 @@ pub async fn service_backup_restore(
         let service_kind: ServiceKind = kind.into();
         let root = devbox_root()?;
         let instance = stopped_service_instance(kind)?;
-        restore_backup(&root, service_kind, &instance, &backup_id)
+        let result = restore_backup(&root, service_kind, &instance, &backup_id)?;
+        prune_backups(
+            &root,
+            service_kind,
+            crate::settings::load_settings().backup_retention_count as usize,
+        )?;
+        Ok(result)
     })
     .await
     .map_err(|error| format!("数据恢复任务异常结束: {error}"))?
 }
 
 fn devbox_root() -> Result<PathBuf, String> {
-    dirs::home_dir()
-        .map(|home| home.join(".devbox"))
-        .ok_or_else(|| "无法确定当前用户目录".to_string())
+    crate::settings::devbox_root()
 }
 
 fn service_prefix(kind: ServiceKind) -> &'static str {
@@ -112,6 +131,36 @@ fn clean_cache_at_root(root: &Path, kind: ServiceKind) -> Result<CacheCleanupRes
             {
                 continue;
             }
+            let path = entry.path();
+            let size = path_disk_size(&path)?;
+            let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                fs::remove_dir_all(&path)
+                    .map_err(|error| format!("无法删除 {}: {error}", path.display()))?;
+            } else {
+                fs::remove_file(&path)
+                    .map_err(|error| format!("无法删除 {}: {error}", path.display()))?;
+            }
+            result.removed_items += 1;
+            result.freed_bytes = result.freed_bytes.saturating_add(size);
+        }
+    }
+    Ok(result)
+}
+
+fn clean_all_cache_at_root(root: &Path) -> Result<CacheCleanupResult, String> {
+    let mut result = CacheCleanupResult {
+        removed_items: 0,
+        freed_bytes: 0,
+    };
+    for cache_dir in [root.join("downloads"), root.join("tmp")] {
+        if !cache_dir.exists() {
+            continue;
+        }
+        for entry in fs::read_dir(&cache_dir)
+            .map_err(|error| format!("无法读取 {}: {error}", cache_dir.display()))?
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
             let size = path_disk_size(&path)?;
             let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
@@ -171,6 +220,15 @@ fn list_backups(root: &Path, kind: ServiceKind) -> Result<Vec<ServiceBackup>, St
             .then_with(|| right.id.cmp(&left.id))
     });
     Ok(backups)
+}
+
+fn prune_backups(root: &Path, kind: ServiceKind, keep: usize) -> Result<(), String> {
+    for backup in list_backups(root, kind)?.into_iter().skip(keep) {
+        let path = backup_dir(root, kind).join(&backup.id);
+        fs::remove_file(&path)
+            .map_err(|error| format!("无法清理旧备份 {}: {error}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn create_backup(
@@ -404,6 +462,33 @@ mod tests {
         assert!(!root.join("downloads/redis-7.tar.gz").exists());
         assert!(!root.join("tmp/redis-build").exists());
         assert!(root.join("downloads/mysql-8.tar.gz").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn all_cache_cleanup_preserves_installations_and_data() {
+        let root =
+            std::env::temp_dir().join(format!("zhiyu-all-cache-clean-test-{}", std::process::id()));
+        fs::create_dir_all(root.join("downloads")).unwrap();
+        fs::create_dir_all(root.join("tmp/build")).unwrap();
+        fs::create_dir_all(root.join("installations/redis/7.2")).unwrap();
+        fs::create_dir_all(root.join("instances/redis/default/data")).unwrap();
+        fs::write(root.join("downloads/redis.tar.gz"), [1_u8; 16]).unwrap();
+        fs::write(root.join("tmp/build/object.o"), [1_u8; 8]).unwrap();
+        fs::write(root.join("installations/redis/7.2/manifest.json"), "{}").unwrap();
+        fs::write(
+            root.join("instances/redis/default/data/dump.rdb"),
+            [1_u8; 4],
+        )
+        .unwrap();
+
+        let result = clean_all_cache_at_root(&root).unwrap();
+
+        assert_eq!(result.removed_items, 2);
+        assert!(!root.join("downloads/redis.tar.gz").exists());
+        assert!(!root.join("tmp/build").exists());
+        assert!(root.join("installations/redis/7.2/manifest.json").exists());
+        assert!(root.join("instances/redis/default/data/dump.rdb").exists());
         fs::remove_dir_all(root).unwrap();
     }
 

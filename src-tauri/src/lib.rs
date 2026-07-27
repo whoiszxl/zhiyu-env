@@ -7,6 +7,7 @@ mod mongodb_tools;
 mod nats_tools;
 mod port_tools;
 mod redis_tools;
+mod settings;
 mod sqlite_tools;
 mod storage_tools;
 mod tools;
@@ -15,16 +16,29 @@ mod tools;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .setup(|_| {
+            let settings = settings::load_settings();
+            let _ = settings::apply_log_retention(&settings);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::service_list,
             commands::service_install,
             commands::service_start,
             commands::service_stop,
             commands::service_restart,
+            commands::service_stop_all,
             commands::service_metrics,
             commands::service_disk_usage,
             commands::environment_metrics,
             commands::environment_disk_usage,
+            settings::app_settings_get,
+            settings::app_settings_save,
+            settings::app_update_check,
             commands::service_config_read,
             commands::service_config_save,
             commands::service_logs,
@@ -35,6 +49,7 @@ pub fn run() {
             commands::postgres_versions,
             commands::postgres_version_select,
             storage_tools::service_cache_clean,
+            storage_tools::app_cache_clean_all,
             storage_tools::service_backup_list,
             storage_tools::service_backup_create,
             storage_tools::service_backup_restore,
