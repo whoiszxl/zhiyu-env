@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import {
   s3ListBuckets, s3ListObjects, s3GetObject,
   s3PutObject, s3DeleteObject, s3PresignedUrl,
@@ -33,6 +33,9 @@ const uploadData = ref("");
 const uploading = ref(false);
 
 const presignedResult = ref("");
+const isCos = computed(() =>
+  config.value.endpoint.toLowerCase().includes(".myqcloud.com"),
+);
 
 async function connect() {
   loading.value = true;
@@ -150,6 +153,7 @@ function applyPreset(p: typeof presets[0]) {
   config.value.endpoint = p.endpoint;
   config.value.region = p.region;
   config.value.pathStyle = p.pathStyle;
+  error.value = "";
 }
 </script>
 
@@ -206,18 +210,29 @@ function applyPreset(p: typeof presets[0]) {
           <input v-model="config.region" type="text" placeholder="oss-cn-hangzhou" spellcheck="false" />
         </label>
         <label>
-          <span>Bucket（可选）</span>
-          <input v-model="config.bucket" type="text" placeholder="留空则先列出 Bucket" spellcheck="false" />
+          <span>Bucket{{ isCos ? "（必填，包含 APPID）" : "（可选）" }}</span>
+          <input
+            v-model="config.bucket"
+            type="text"
+            :placeholder="isCos ? '例如 bucket-name-123456' : '留空则先列出 Bucket'"
+            spellcheck="false"
+          />
         </label>
         <label class="checkbox-label">
-          <input v-model="config.pathStyle" type="checkbox" />
-          <span>路径风格 (Path-Style)</span>
+          <input v-model="config.pathStyle" type="checkbox" :disabled="isCos" />
+          <span>{{ isCos ? "COS 使用虚拟主机域名" : "路径风格 (Path-Style)" }}</span>
         </label>
         <button
           v-if="!connected"
           class="primary connect-btn"
           type="button"
-          :disabled="loading || !config.endpoint || !config.accessKey || !config.secretKey"
+          :disabled="
+            loading ||
+            !config.endpoint ||
+            !config.accessKey ||
+            !config.secretKey ||
+            (isCos && !config.bucket)
+          "
           @click="connect"
         >
           {{ loading ? "连接中…" : "连接" }}

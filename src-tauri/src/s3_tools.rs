@@ -91,6 +91,45 @@ fn sha256_hex(data: &str) -> String {
     hex(&Sha256::digest(data.as_bytes()))
 }
 
+fn sha256_hex_bytes(data: &[u8]) -> String {
+    hex(&Sha256::digest(data))
+}
+
+fn aws_percent_encode(value: &str, encode_slash: bool) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'_' | b'.' | b'~')
+            || (!encode_slash && byte == b'/')
+        {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
+}
+
+fn canonical_query(query: &str) -> String {
+    let mut pairs = query
+        .split('&')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let (key, value) = part.split_once('=').unwrap_or((part, ""));
+            (
+                aws_percent_encode(key, true),
+                aws_percent_encode(value, true),
+            )
+        })
+        .collect::<Vec<_>>();
+    pairs.sort();
+    pairs
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
 fn sign_v4(
     secret_key: &str,
     date: &str,
@@ -139,37 +178,46 @@ fn s3_request(
     body: Option<&[u8]>,
 ) -> Result<String, String> {
     let client = Client::builder()
-        .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
 
-    let endpoint = config.endpoint.trim_end_matches('/');
-    let host = endpoint
-        .strip_prefix("https://")
-        .or_else(|| endpoint.strip_prefix("http://"))
-        .unwrap_or(endpoint);
+    validate_config(config)?;
+    let endpoint = reqwest::Url::parse(config.endpoint.trim_end_matches('/'))
+        .map_err(|error| format!("Endpoint 格式无效: {error}"))?;
+    let scheme = endpoint.scheme();
+    let base_host = endpoint
+        .host_str()
+        .ok_or_else(|| "Endpoint 缺少主机名".to_string())?;
+    let port_suffix = endpoint
+        .port()
+        .map(|port| format!(":{port}"))
+        .unwrap_or_default();
+    let endpoint_authority = format!("{base_host}{port_suffix}");
+    let use_path_style = config.path_style && !is_cos_endpoint(base_host);
 
     // Build URL and canonical URI based on addressing style
-    let (url, canonical_uri, host_header) = if config.path_style {
+    let (url_prefix, raw_canonical_uri, host_header) = if use_path_style {
         (
-            format!("{endpoint}/{object_key}"),
+            format!("{scheme}://{endpoint_authority}"),
             format!("/{object_key}"),
-            host.to_string(),
+            endpoint_authority,
         )
     } else if config.bucket.is_empty() {
-        // Virtual-hosted, no bucket yet: request endpoint root to list buckets
         (
-            endpoint.to_string(),
+            format!("{scheme}://{endpoint_authority}"),
             "/".to_string(),
-            host.to_string(),
+            endpoint_authority,
         )
     } else {
-        // Virtual-hosted with bucket: bucket is part of hostname
-        let bucket_host = format!("{}.{}", config.bucket, host);
+        let bucket_host = if base_host.starts_with(&format!("{}.", config.bucket)) {
+            endpoint_authority
+        } else {
+            format!("{}.{base_host}{port_suffix}", config.bucket)
+        };
         if object_key.is_empty() {
             (
-                format!("https://{bucket_host}/"),
+                format!("{scheme}://{bucket_host}"),
                 "/".to_string(),
                 bucket_host,
             )
@@ -178,17 +226,23 @@ fn s3_request(
                 .strip_prefix(&format!("{}/", config.bucket))
                 .unwrap_or(object_key);
             (
-                format!("https://{bucket_host}/{rest}"),
+                format!("{scheme}://{bucket_host}"),
                 format!("/{rest}"),
                 bucket_host,
             )
         }
     };
 
-    let query_str = if query.is_empty() { String::new() } else { format!("?{query}") };
-    let url = format!("{url}{query_str}");
+    let canonical_uri = aws_percent_encode(&raw_canonical_uri, false);
+    let canonical_query = canonical_query(query);
+    let query_str = if canonical_query.is_empty() {
+        String::new()
+    } else {
+        format!("?{canonical_query}")
+    };
+    let url = format!("{url_prefix}{canonical_uri}{query_str}");
     let payload = body.unwrap_or(b"");
-    let payload_hash = sha256_hex(std::str::from_utf8(payload).unwrap_or(""));
+    let payload_hash = sha256_hex_bytes(payload);
     let amz_date = now_iso();
     let date_stamp = now_date();
 
@@ -200,23 +254,37 @@ fn s3_request(
         headers.insert("content-type".into(), "application/octet-stream".into());
     }
 
-    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+    let signed_headers = headers.keys().cloned().collect::<Vec<_>>().join(";");
     let canonical_request = build_canonical_request(
         method,
         &canonical_uri,
-        query,
+        &canonical_query,
         &headers,
-        signed_headers,
+        &signed_headers,
         &payload_hash,
     );
     let scope = format!("{date_stamp}/{}/{}/aws4_request", config.region, "s3");
     let string_to_sign = format!(
         "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        amz_date, scope, sha256_hex(&canonical_request)
+        amz_date,
+        scope,
+        sha256_hex(&canonical_request)
     );
-    let signature = sign_v4(&config.secret_key, &date_stamp, &config.region, "s3", &string_to_sign);
+    let signature = sign_v4(
+        &config.secret_key,
+        &date_stamp,
+        &config.region,
+        "s3",
+        &string_to_sign,
+    );
+
     let auth = build_auth_header(
-        &config.access_key, &date_stamp, &config.region, "s3", signed_headers, &signature,
+        &config.access_key,
+        &date_stamp,
+        &config.region,
+        "s3",
+        &signed_headers,
+        &signature,
     );
     headers.insert("authorization".into(), auth);
 
@@ -241,6 +309,32 @@ fn s3_request(
         return Err(format!("HTTP {status}: {text}"));
     }
     Ok(text)
+}
+
+fn is_cos_endpoint(host: &str) -> bool {
+    host == "myqcloud.com" || host.ends_with(".myqcloud.com")
+}
+
+fn validate_config(config: &S3Config) -> Result<(), String> {
+    if config.endpoint.trim().is_empty()
+        || config.access_key.trim().is_empty()
+        || config.secret_key.is_empty()
+        || config.region.trim().is_empty()
+    {
+        return Err("Endpoint、Access Key、Secret Key 和 Region 均不能为空".into());
+    }
+    let endpoint = reqwest::Url::parse(config.endpoint.trim())
+        .map_err(|error| format!("Endpoint 格式无效: {error}"))?;
+    if endpoint.path() != "/" || endpoint.query().is_some() || endpoint.fragment().is_some() {
+        return Err("Endpoint 只能填写协议和域名，不能包含路径、查询参数或片段".into());
+    }
+    if endpoint.host_str().is_some_and(is_cos_endpoint) && config.bucket.trim().is_empty() {
+        return Err(
+            "腾讯云 COS 必须填写 Bucket（包含 APPID，例如 bucket-name-123456），并使用虚拟主机域名访问"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 fn parse_list_buckets(xml: &str) -> Vec<S3Bucket> {
@@ -330,7 +424,12 @@ pub async fn s3_list_objects(
             "list-type=2&prefix={}&max-keys=500",
             prefix.as_deref().unwrap_or("")
         );
-        let key = if config.path_style {
+        let key = if config.path_style
+            && !reqwest::Url::parse(&config.endpoint)
+                .ok()
+                .and_then(|url| url.host_str().map(is_cos_endpoint))
+                .unwrap_or(false)
+        {
             config.bucket.clone()
         } else {
             String::new()
@@ -343,7 +442,11 @@ pub async fn s3_list_objects(
 }
 
 fn obj_key(config: &S3Config, key: &str) -> String {
-    if config.path_style {
+    let cos = reqwest::Url::parse(&config.endpoint)
+        .ok()
+        .and_then(|url| url.host_str().map(is_cos_endpoint))
+        .unwrap_or(false);
+    if config.path_style && !cos {
         format!("{}/{}", config.bucket, key)
     } else {
         key.to_string()
@@ -394,44 +497,58 @@ pub async fn s3_presigned_url(
     key: String,
     expires: Option<u64>,
 ) -> Result<S3PresignedUrl, String> {
+    validate_config(&config)?;
     let expires = expires.unwrap_or(3600);
+    if !(1..=604_800).contains(&expires) {
+        return Err("预签名链接有效期必须在 1 秒到 7 天之间".into());
+    }
     let amz_date = now_iso();
     let date_stamp = now_date();
-    let endpoint = config.endpoint.trim_end_matches('/');
-    let bare_host = endpoint
-        .strip_prefix("https://")
-        .or_else(|| endpoint.strip_prefix("http://"))
-        .unwrap_or(endpoint);
+    let endpoint = reqwest::Url::parse(config.endpoint.trim_end_matches('/'))
+        .map_err(|error| format!("Endpoint 格式无效: {error}"))?;
+    let scheme = endpoint.scheme();
+    let base_host = endpoint
+        .host_str()
+        .ok_or_else(|| "Endpoint 缺少主机名".to_string())?;
+    let port_suffix = endpoint
+        .port()
+        .map(|port| format!(":{port}"))
+        .unwrap_or_default();
+    let endpoint_authority = format!("{base_host}{port_suffix}");
+    let use_path_style = config.path_style && !is_cos_endpoint(base_host);
 
-    let (req_host, req_url_prefix, canonical_uri) = if config.path_style {
+    let (req_host, req_url_prefix, raw_canonical_uri) = if use_path_style {
         (
-            bare_host.to_string(),
-            endpoint.to_string(),
+            endpoint_authority.clone(),
+            format!("{scheme}://{endpoint_authority}"),
             format!("/{}/{}", config.bucket, key),
         )
     } else {
-        let bucket_host = format!("{}.{}", config.bucket, bare_host);
+        let bucket_host = if base_host.starts_with(&format!("{}.", config.bucket)) {
+            endpoint_authority
+        } else {
+            format!("{}.{base_host}{port_suffix}", config.bucket)
+        };
         (
             bucket_host.clone(),
-            format!("https://{bucket_host}"),
+            format!("{scheme}://{bucket_host}"),
             format!("/{key}"),
         )
     };
+    let canonical_uri = aws_percent_encode(&raw_canonical_uri, false);
 
     let credential = format!(
         "{}/{}/{}/s3/aws4_request",
         config.access_key, date_stamp, config.region
     );
-    let query = format!(
+    let query = canonical_query(&format!(
         "X-Amz-Algorithm=AWS4-HMAC-SHA256&\
          X-Amz-Credential={}&\
          X-Amz-Date={}&\
          X-Amz-Expires={}&\
          X-Amz-SignedHeaders=host",
-        urlencoding(&credential),
-        amz_date,
-        expires,
-    );
+        credential, amz_date, expires,
+    ));
     let canonical_request = format!(
         "GET\n{}\n{}\nhost:{}\n\nhost\nUNSIGNED-PAYLOAD",
         canonical_uri, query, req_host
@@ -442,17 +559,17 @@ pub async fn s3_presigned_url(
         sha256_hex(&canonical_request)
     );
     let signature = sign_v4(
-        &config.secret_key, &date_stamp, &config.region, "s3", &string_to_sign,
+        &config.secret_key,
+        &date_stamp,
+        &config.region,
+        "s3",
+        &string_to_sign,
     );
     let url = format!(
         "{}{}?{}&X-Amz-Signature={}",
         req_url_prefix, canonical_uri, query, signature
     );
     Ok(S3PresignedUrl { url })
-}
-
-fn urlencoding(s: &str) -> String {
-    s.replace('/', "%2F")
 }
 
 #[cfg(test)]
@@ -481,5 +598,58 @@ mod tests {
             sig,
             "5d672d79c15b13162d9279b0855cfba6789a8edb4c82c400e06b5924a6f2b5d7"
         );
+    }
+
+    #[test]
+    fn canonical_query_is_encoded_and_sorted_for_cos_signature() {
+        assert_eq!(
+            canonical_query("list-type=2&prefix=&max-keys=500"),
+            "list-type=2&max-keys=500&prefix="
+        );
+        assert_eq!(
+            canonical_query("prefix=中文 files/&list-type=2"),
+            "list-type=2&prefix=%E4%B8%AD%E6%96%87%20files%2F"
+        );
+    }
+
+    #[test]
+    fn canonical_request_matches_cos_error_diagnostics() {
+        let payload_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let headers = BTreeMap::from([
+            (
+                "host".into(),
+                "bucket-name-123456.cos.ap-guangzhou.myqcloud.com".into(),
+            ),
+            ("x-amz-content-sha256".into(), payload_hash.into()),
+            ("x-amz-date".into(), "20260727T102717Z".into()),
+        ]);
+        let canonical = build_canonical_request(
+            "GET",
+            "/",
+            "list-type=2&max-keys=500&prefix=",
+            &headers,
+            "host;x-amz-content-sha256;x-amz-date",
+            payload_hash,
+        );
+        assert_eq!(
+            sha256_hex(&canonical),
+            "b4d25b52da9235d2e8edc52319d282b2432ce3a33d78de6f751ca12a356c43d6"
+        );
+    }
+
+    #[test]
+    fn cos_requires_bucket_and_ignores_path_style() {
+        let config = S3Config {
+            endpoint: "https://cos.ap-guangzhou.myqcloud.com".into(),
+            access_key: "id".into(),
+            secret_key: "key".into(),
+            region: "ap-guangzhou".into(),
+            bucket: String::new(),
+            path_style: true,
+        };
+        assert!(validate_config(&config)
+            .unwrap_err()
+            .contains("必须填写 Bucket"));
+        assert!(is_cos_endpoint("cos.ap-guangzhou.myqcloud.com"));
     }
 }
