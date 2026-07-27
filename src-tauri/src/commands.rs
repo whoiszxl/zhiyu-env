@@ -19,8 +19,10 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 pub(crate) const INSTALL_PROGRESS_EVENT: &str = "install-progress";
@@ -1707,5 +1709,43 @@ mod tests {
             ]
         );
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[tauri::command]
+pub async fn service_test_connection(
+    kind: ServiceKindInput,
+) -> Result<(), String> {
+    let kind: ServiceKind = kind.into();
+    let (addr, timeout_secs) = connection_target(&kind);
+    tauri::async_runtime::spawn_blocking(move || {
+        let socket = addr
+            .to_socket_addrs()
+            .map_err(|e| format!("地址解析失败: {e}"))?
+            .next()
+            .ok_or_else(|| "地址无可用 IP".to_string())?;
+        TcpStream::connect_timeout(&socket, Duration::from_secs(timeout_secs))
+            .map_err(|e| format!("无法连接 {addr}: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("连接测试异常: {e}"))?
+}
+
+fn connection_target(kind: &ServiceKind) -> (String, u64) {
+    match kind {
+        ServiceKind::Redis => ("127.0.0.1:6379".into(), 3),
+        ServiceKind::Mysql => ("127.0.0.1:3306".into(), 5),
+        ServiceKind::Postgres => ("127.0.0.1:5432".into(), 5),
+        ServiceKind::Mongodb => ("127.0.0.1:27017".into(), 5),
+        ServiceKind::Mailpit => ("127.0.0.1:1025".into(), 3),
+        ServiceKind::Nats => ("127.0.0.1:4222".into(), 3),
+        ServiceKind::Meilisearch => ("127.0.0.1:7700".into(), 3),
+        ServiceKind::Minio => ("127.0.0.1:9000".into(), 3),
+        ServiceKind::Rustfs => ("127.0.0.1:9002".into(), 3),
+        ServiceKind::Etcd => ("127.0.0.1:2379".into(), 3),
+        ServiceKind::Consul => ("127.0.0.1:8500".into(), 3),
+        ServiceKind::Rnacos => ("127.0.0.1:8848".into(), 3),
+        ServiceKind::Rabbitmq => ("127.0.0.1:5672".into(), 5),
     }
 }

@@ -375,6 +375,10 @@ export function getDuckdbStatus(): Promise<DuckdbStatus> {
   return invoke<DuckdbStatus>("duckdb_status");
 }
 
+export function testServiceConnection(kind: ServiceKind): Promise<void> {
+  return invoke<void>("service_test_connection", { kind });
+}
+
 export function installDuckdb(operationId: string): Promise<DuckdbStatus> {
   return invoke<DuckdbStatus>("duckdb_install", { operationId });
 }

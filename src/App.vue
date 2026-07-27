@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { computed, onMounted, onUnmounted, provide, ref } from "vue";
 import ServiceDocs from "./components/ServiceDocs.vue";
+import ServiceConnectPanel from "./components/ServiceConnectPanel.vue";
 import { findTool, TOOLS } from "./tools/registry";
 import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
 import { formatBytes } from "./utils/format";
@@ -112,6 +113,7 @@ type DetailTab =
   | "objectStore"
   | "governance"
   | "broker"
+  | "connect"
   | "backup"
   | "config"
   | "logs"
@@ -538,6 +540,7 @@ function recordInstallSuccess(operationId: string) {
     return [
       ["overview", "概览"],
       ["broker", "连接与控制台"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -586,6 +589,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["overview", "概览"],
       ["keys", "数据浏览"],
       ["console", "命令台"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -598,6 +602,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["overview", "概览"],
       ["data", "数据浏览"],
       ["sql", "SQL 命令台"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -610,6 +615,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["overview", "概览"],
       ["data", "数据浏览"],
       ["sql", "SQL 命令台"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -622,6 +628,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["overview", "概览"],
       ["data", "数据浏览"],
       ["mongoConsole", "JSON 命令台"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -632,6 +639,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     return [
       ["overview", "概览"],
       ["mail", "邮件收件箱"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -642,6 +650,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     return [
       ["overview", "概览"],
       ["messages", "消息调试"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -652,6 +661,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     return [
       ["overview", "概览"],
       ["search", "索引与搜索"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -662,6 +672,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     return [
       ["overview", "概览"],
       ["objectStore", "连接与控制台"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -676,6 +687,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     return [
       ["overview", "概览"],
       ["governance", "连接与调试"],
+      ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
@@ -686,6 +698,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     ["overview", "概览"],
     ["data", "数据浏览"],
     ["sql", "SQL 命令台"],
+    ["connect", "连接"],
     ["backup", "备份恢复"],
     ["config", "配置文件"],
     ["logs", "运行日志"],
@@ -4903,6 +4916,10 @@ S3_FORCE_PATH_STYLE=true</pre>
               消息只发送到智屿管理的本机 NATS；单条 Payload 限制为 1 MiB，等待订阅最多持续 8 秒。
             </p>
           </template>
+        </section>
+
+        <section v-else-if="activeTab === 'connect'" class="connect-panel-section">
+          <ServiceConnectPanel :kind="selectedKind" />
         </section>
 
         <section v-else-if="activeTab === 'backup'" class="backup-panel">

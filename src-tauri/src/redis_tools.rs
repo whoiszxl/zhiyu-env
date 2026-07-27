@@ -169,31 +169,47 @@ fn scan_keys(database: u8, cursor: String, pattern: String) -> Result<RedisScanR
     } else {
         pattern
     };
-    let value = run_json(
-        database,
-        &[
-            "SCAN".into(),
-            cursor,
-            "MATCH".into(),
-            pattern,
-            "COUNT".into(),
-            "100".into(),
-        ],
-    )?;
-    let values = value
-        .as_array()
-        .ok_or_else(|| "Redis 返回了无效的 SCAN 结果".to_string())?;
-    let next_cursor = values
-        .first()
-        .and_then(json_scalar)
-        .unwrap_or_else(|| "0".into());
-    let keys = values
-        .get(1)
-        .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(json_scalar).collect())
-        .unwrap_or_default();
+    let args = [
+        "SCAN".into(),
+        cursor.clone(),
+        "MATCH".into(),
+        pattern,
+        "COUNT".into(),
+        "100".into(),
+    ];
 
-    Ok(RedisScanResult { next_cursor, keys })
+    match run_json(database, &args) {
+        Ok(value) => {
+            let values = value
+                .as_array()
+                .ok_or_else(|| "Redis 返回了无效的 SCAN 结果".to_string())?;
+            let next_cursor = values
+                .first()
+                .and_then(json_scalar)
+                .unwrap_or_else(|| "0".into());
+            let keys = values
+                .get(1)
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(json_scalar).collect())
+                .unwrap_or_default();
+            Ok(RedisScanResult { next_cursor, keys })
+        }
+        Err(error) if error.contains("Unrecognized option") || error.contains("bad number of args") => {
+            scan_keys_raw(database, &args)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn scan_keys_raw(database: u8, args: &[String]) -> Result<RedisScanResult, String> {
+    let output = run_raw(database, args)?;
+    let mut lines = output.lines();
+    let next_cursor = lines.next().unwrap_or("0").to_string();
+    let keys: Vec<String> = lines.map(str::to_string).collect();
+    Ok(RedisScanResult {
+        next_cursor,
+        keys,
+    })
 }
 
 fn read_key_detail(database: u8, key: String) -> Result<RedisKeyDetail, String> {
@@ -277,7 +293,7 @@ fn read_key_detail(database: u8, key: String) -> Result<RedisKeyDetail, String> 
         ),
         _ => return Err(format!("暂不支持查看 {key_type} 类型")),
     };
-    let value = run_json(database, &arguments)?;
+    let value = run_json_or_raw(database, &arguments)?;
 
     Ok(RedisKeyDetail {
         key,
@@ -354,6 +370,19 @@ fn run_json(database: u8, arguments: &[String]) -> Result<Value, String> {
     let output = command.arg("--json").args(arguments).output();
     let text = parse_output(output)?;
     serde_json::from_str(text.trim()).map_err(|error| format!("Redis JSON 解析失败: {error}"))
+}
+
+/// Attempt run_json; if redis-cli does not support --json (Redis < 7.0),
+/// fall back to raw output wrapped as a JSON string.
+fn run_json_or_raw(database: u8, arguments: &[String]) -> Result<Value, String> {
+    match run_json(database, arguments) {
+        Ok(value) => Ok(value),
+        Err(error) if error.contains("Unrecognized option") || error.contains("bad number of args") => {
+            let output = run_raw(database, arguments)?;
+            Ok(Value::String(output.trim().to_string()))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn parse_output(output: std::io::Result<std::process::Output>) -> Result<String, String> {

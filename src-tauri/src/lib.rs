@@ -96,6 +96,7 @@ pub fn run() {
             tools::jwt::jwt_verify_hmac,
             tools::jwt::jwt_sign_hmac,
             tools::jwk::jwk_inspect,
+            commands::service_test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");
