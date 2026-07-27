@@ -5,6 +5,7 @@ import { buildMysqlDocs } from "./mysqlDocs";
 import { buildPostgresDocs } from "./postgresDocs";
 import { buildMongodbDocs } from "./mongodbDocs";
 import { buildMailpitDocs } from "./mailpitDocs";
+import { buildNatsDocs } from "./natsDocs";
 
 export type { DocBlock, DocChapter, DocCodeSample } from "./docTypes";
 
@@ -14,6 +15,7 @@ const BUILDERS: Record<ServiceKind, (port: number) => DocChapter[]> = {
   postgres: buildPostgresDocs,
   mongodb: buildMongodbDocs,
   mailpit: buildMailpitDocs,
+  nats: buildNatsDocs,
 };
 
 /** 文档标题栏上展示的一句话定位。 */
@@ -23,6 +25,7 @@ const TAGLINES: Record<ServiceKind, string> = {
   postgres: "关系型数据库 · 复杂查询与丰富类型",
   mongodb: "文档数据库 · 灵活结构与快速迭代",
   mailpit: "本地邮件沙箱 · 开发期收信调试",
+  nats: "轻量消息服务器 · 发布订阅与 JetStream",
 };
 
 export function buildServiceDocs(kind: ServiceKind, port: number): DocChapter[] {

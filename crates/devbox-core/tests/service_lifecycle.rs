@@ -1,8 +1,8 @@
 #![cfg(unix)]
 
 use devbox_core::{
-    MailpitService, MongodbService, MysqlService, PostgresService, RedisService, ServiceConfig,
-    ServiceKind, ServiceManager, ServiceStatus,
+    MailpitService, MongodbService, MysqlService, NatsService, PostgresService, RedisService,
+    ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -84,6 +84,14 @@ fn mailpit_service_lifecycle() {
     let service = MailpitService::new(config(temp.path(), ServiceKind::Mailpit)).unwrap();
     assert_lifecycle(&service);
     assert!(temp.path().join("mailpit/conf/mailpit.env").is_file());
+}
+
+#[test]
+fn nats_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = NatsService::new(config(temp.path(), ServiceKind::Nats)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("nats/conf/nats.conf").is_file());
 }
 
 #[test]

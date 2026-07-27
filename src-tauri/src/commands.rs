@@ -2,13 +2,13 @@ use devbox_core::{
     installer::{
         mysql_release, postgres_release, redis_release, MysqlRelease, PostgresRelease,
         RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION, MONGODB_SERIES, MONGODB_VERSION,
-        MYSQL_RELEASES, MYSQL_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES,
-        REDIS_VERSION,
+        MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION, POSTGRES_RELEASES,
+        POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION,
     },
     report_install_progress, with_install_reporter, ConfigManager, InstallReporter,
     MailpitInstaller, MailpitService, MongodbInstaller, MongodbService, MysqlInstaller,
-    MysqlService, PostgresInstaller, PostgresService, RedisInstaller, RedisService, ServiceConfig,
-    ServiceKind, ServiceManager, ServiceStatus,
+    MysqlService, NatsInstaller, NatsService, PostgresInstaller, PostgresService, RedisInstaller,
+    RedisService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -110,6 +110,7 @@ pub enum ServiceKindInput {
     Postgres,
     Mongodb,
     Mailpit,
+    Nats,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -120,6 +121,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Postgres => Self::Postgres,
             ServiceKindInput::Mongodb => Self::Mongodb,
             ServiceKindInput::Mailpit => Self::Mailpit,
+            ServiceKindInput::Nats => Self::Nats,
         }
     }
 }
@@ -351,6 +353,19 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
             )),
             Vec::new(),
         ),
+        ServiceKind::Nats => {
+            let instance = root.join("instances/nats/default");
+            (
+                "NATS",
+                NATS_VERSION,
+                4222,
+                root.join(format!("installations/nats/{NATS_SERIES}/bin/nats-server")),
+                vec![
+                    "-c".into(),
+                    instance.join("conf/nats.conf").display().to_string(),
+                ],
+            )
+        }
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -459,6 +474,7 @@ fn with_service<T>(
         ServiceKindInput::Mailpit => {
             operation(&MailpitService::new(config).map_err(stringify_error)?)
         }
+        ServiceKindInput::Nats => operation(&NatsService::new(config).map_err(stringify_error)?),
     }
     .map_err(stringify_error)
 }
@@ -486,6 +502,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Postgres => "PostgreSQL",
         ServiceKindInput::Mongodb => "MongoDB",
         ServiceKindInput::Mailpit => "Mailpit",
+        ServiceKindInput::Nats => "NATS",
     };
     Ok(ServiceInfo {
         kind: kind.into(),
@@ -556,6 +573,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Postgres,
         ServiceKindInput::Mongodb,
         ServiceKindInput::Mailpit,
+        ServiceKindInput::Nats,
     ]
     .into_iter()
     .map(info)
@@ -617,6 +635,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Mailpit 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Nats => {
+            NatsInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 NATS 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -905,7 +930,7 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         ServiceKind::Mongodb => {
             sources.push(("MONGODB", config.logs_dir().join("mongodb.log")));
         }
-        ServiceKind::Redis | ServiceKind::Postgres | ServiceKind::Mailpit => {}
+        ServiceKind::Redis | ServiceKind::Postgres | ServiceKind::Mailpit | ServiceKind::Nats => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -926,7 +951,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
     match config.kind {
         ServiceKind::Mysql => config.logs_dir().join("mysql-error.log"),
         ServiceKind::Mongodb => config.logs_dir().join("mongodb.log"),
-        ServiceKind::Redis | ServiceKind::Postgres | ServiceKind::Mailpit => {
+        ServiceKind::Redis | ServiceKind::Postgres | ServiceKind::Mailpit | ServiceKind::Nats => {
             config.stdout_log_path()
         }
     }
@@ -939,6 +964,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Postgres => "postgresql.conf",
         ServiceKind::Mongodb => "mongod.conf",
         ServiceKind::Mailpit => "mailpit.env",
+        ServiceKind::Nats => "nats.conf",
     };
     config.config_dir().join(name)
 }
@@ -1044,6 +1070,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Postgres => "postgres",
         ServiceKind::Mongodb => "mongodb",
         ServiceKind::Mailpit => "mailpit",
+        ServiceKind::Nats => "nats-server",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {

@@ -3,6 +3,7 @@ mod database_tools;
 mod duckdb_tools;
 mod mailpit_tools;
 mod mongodb_tools;
+mod nats_tools;
 mod port_tools;
 mod redis_tools;
 mod sqlite_tools;
@@ -51,6 +52,9 @@ pub fn run() {
             mailpit_tools::mailpit_overview,
             mailpit_tools::mailpit_messages,
             mailpit_tools::mailpit_message_detail,
+            nats_tools::nats_overview,
+            nats_tools::nats_publish,
+            nats_tools::nats_receive,
             port_tools::port_listeners,
             duckdb_tools::duckdb_status,
             duckdb_tools::duckdb_install,

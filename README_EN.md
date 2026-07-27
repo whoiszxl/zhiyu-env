@@ -50,6 +50,7 @@ Zhiyu focuses on making a usable local service available quickly. It is not desi
 | PostgreSQL | 14 / 15 / 16 / 17 / 18 | 5432 | Version switching, schema and table browser, column help, SQL console |
 | MongoDB | 8.0.26 | 27017 | Database and collection browser, field inference, JSON console |
 | Mailpit | 1.30.5 | 1025 / 8025 | Local email capture, message list, and body viewer |
+| NATS | 2.14.2 | 4222 / 8222 | JetStream, live metrics, publish, and one-message subscriptions |
 
 Every service supports:
 

@@ -13,6 +13,9 @@ import type {
   MongoCommandResult,
   MongoDatabaseInfo,
   MongoOverview,
+  NatsMessage,
+  NatsOverview,
+  NatsPublishResult,
   PortListener,
   ServiceAction,
   ServiceDiskUsage,
@@ -278,6 +281,21 @@ export function listMailpitMessages(): Promise<MailSummary[]> {
 
 export function getMailpitMessageDetail(id: string): Promise<MailDetail> {
   return invoke<MailDetail>("mailpit_message_detail", { id });
+}
+
+export function getNatsOverview(): Promise<NatsOverview> {
+  return invoke<NatsOverview>("nats_overview");
+}
+
+export function publishNatsMessage(
+  subject: string,
+  payload: string,
+): Promise<NatsPublishResult> {
+  return invoke<NatsPublishResult>("nats_publish", { subject, payload });
+}
+
+export function receiveNatsMessage(subject: string): Promise<NatsMessage> {
+  return invoke<NatsMessage>("nats_receive", { subject });
 }
 
 export function getDuckdbStatus(): Promise<DuckdbStatus> {

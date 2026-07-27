@@ -12,6 +12,7 @@ pub enum ServiceKind {
     Postgres,
     Mongodb,
     Mailpit,
+    Nats,
 }
 
 impl ServiceKind {
@@ -22,6 +23,7 @@ impl ServiceKind {
             Self::Postgres => "postgres",
             Self::Mongodb => "mongodb",
             Self::Mailpit => "mailpit",
+            Self::Nats => "nats",
         }
     }
 }

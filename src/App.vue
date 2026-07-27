@@ -16,6 +16,7 @@ import {
   getDatabaseOverview,
   getMongoCollectionDetail,
   getMongoOverview,
+  getNatsOverview,
   getRedisKeyDetail,
   getRedisOverview,
   getServiceLogs,
@@ -32,7 +33,9 @@ import {
   listRedisVersions,
   listServiceBackups,
   listServices,
+  publishNatsMessage,
   readServiceConfig,
+  receiveNatsMessage,
   runServiceAction,
   restoreServiceBackup,
   saveServiceConfig,
@@ -52,6 +55,9 @@ import type {
   MongoCollectionInfo,
   MongoDatabaseInfo,
   MongoOverview,
+  NatsMessage,
+  NatsOverview,
+  NatsPublishResult,
   MysqlVersionInfo,
   PostgresVersionInfo,
   RedisKeyDetail,
@@ -78,6 +84,7 @@ type DetailTab =
   | "sql"
   | "mongoConsole"
   | "mail"
+  | "messages"
   | "backup"
   | "config"
   | "logs"
@@ -193,6 +200,14 @@ const mongoCommandInput = ref('{"ping": 1}');
 const mongoCommandHistory = ref<MongoConsoleEntry[]>([]);
 const mongoCommandRunning = ref(false);
 const mailpitOverview = ref<MailpitOverview | null>(null);
+const natsOverview = ref<NatsOverview | null>(null);
+const natsPublishSubject = ref("dev.events");
+const natsPublishPayload = ref('{"message":"Hello NATS"}');
+const natsSubscribeSubject = ref("dev.>");
+const natsPublishResult = ref<NatsPublishResult | null>(null);
+const natsMessage = ref<NatsMessage | null>(null);
+const natsPublishing = ref(false);
+const natsReceiving = ref(false);
 const mailMessages = ref<MailSummary[]>([]);
 const selectedMailId = ref<string | null>(null);
 const mailDetail = ref<MailDetail | null>(null);
@@ -399,6 +414,16 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
+  if (selectedKind.value === "nats") {
+    return [
+      ["overview", "概览"],
+      ["messages", "消息调试"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["docs", "使用文档"],
+    ];
+  }
   return [
     ["overview", "概览"],
     ["data", "数据浏览"],
@@ -422,6 +447,7 @@ const iconLetter: Record<ServiceKind, string> = {
   postgres: "P",
   mongodb: "M",
   mailpit: "@",
+  nats: "N",
 };
 
 const actionLabel: Record<ServiceAction, string> = {
@@ -457,6 +483,7 @@ async function refreshMetrics() {
     databaseOverview.value = null;
     mongoOverview.value = null;
     mailpitOverview.value = null;
+    natsOverview.value = null;
     return;
   }
 
@@ -489,7 +516,16 @@ async function refreshMetrics() {
       } catch {
         mailpitOverview.value = null;
       }
-    } else if (!databaseOverview.value) {
+    } else if (service.kind === "nats") {
+      try {
+        natsOverview.value = await getNatsOverview();
+      } catch {
+        natsOverview.value = null;
+      }
+    } else if (
+      (service.kind === "mysql" || service.kind === "postgres") &&
+      !databaseOverview.value
+    ) {
       try {
         databaseOverview.value = await getDatabaseOverview(service.kind);
       } catch {
@@ -632,6 +668,7 @@ async function selectService(kind: ServiceKind) {
   databaseOverview.value = null;
   mongoOverview.value = null;
   mailpitOverview.value = null;
+  natsOverview.value = null;
   mailMessages.value = [];
   selectedMailId.value = null;
   mailDetail.value = null;
@@ -906,6 +943,7 @@ async function execute(action: ServiceAction) {
     databaseOverview.value = null;
     mongoOverview.value = null;
     mailpitOverview.value = null;
+    natsOverview.value = null;
     await Promise.all([
       refreshMetrics(),
       refreshDiskUsage(service.kind),
@@ -959,6 +997,53 @@ async function openTab(tab: DetailTab) {
     await loadMailMessages();
   }
   if (tab === "backup") await loadBackups();
+}
+
+async function publishNats() {
+  if (
+    selectedKind.value !== "nats" ||
+    selectedService.value?.status !== "running" ||
+    natsPublishing.value
+  ) {
+    return;
+  }
+  natsPublishing.value = true;
+  error.value = "";
+  try {
+    natsPublishResult.value = await publishNatsMessage(
+      natsPublishSubject.value,
+      natsPublishPayload.value,
+    );
+    notice.value = `消息已发布到 ${natsPublishResult.value.subject}`;
+    await refreshMetrics();
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    natsPublishing.value = false;
+  }
+}
+
+async function receiveNats() {
+  if (
+    selectedKind.value !== "nats" ||
+    selectedService.value?.status !== "running" ||
+    natsReceiving.value
+  ) {
+    return;
+  }
+  natsReceiving.value = true;
+  natsMessage.value = null;
+  notice.value = "正在等待一条匹配的 NATS 消息，最多等待 8 秒";
+  error.value = "";
+  try {
+    natsMessage.value = await receiveNatsMessage(natsSubscribeSubject.value);
+    notice.value = `已收到 ${natsMessage.value.subject}`;
+  } catch (cause) {
+    error.value = String(cause);
+    notice.value = "";
+  } finally {
+    natsReceiving.value = false;
+  }
 }
 
 async function loadMailMessages() {
@@ -2154,6 +2239,28 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <div
+            v-if="selectedKind === 'nats' && natsOverview"
+            class="redis-stat-strip"
+          >
+            <div>
+              <span>当前连接</span>
+              <strong>{{ natsOverview.connections }}</strong>
+            </div>
+            <div>
+              <span>订阅数量</span>
+              <strong>{{ natsOverview.subscriptions }}</strong>
+            </div>
+            <div>
+              <span>接收消息</span>
+              <strong>{{ natsOverview.inMessages }}</strong>
+            </div>
+            <div>
+              <span>发出消息</span>
+              <strong>{{ natsOverview.outMessages }}</strong>
+            </div>
+          </div>
+
           <div class="overview-columns">
             <article class="panel monitoring-panel">
               <div class="panel-title">
@@ -3123,6 +3230,116 @@ onUnmounted(() => {
             <code>{{ selectedService.dataPath }}/mailpit.db</code>；
             HTML 不会直接渲染，避免测试邮件中的脚本或远程资源影响桌面端。
           </p>
+        </section>
+
+        <section v-else-if="activeTab === 'messages'" class="nats-workbench">
+          <div
+            v-if="selectedService.status !== 'running'"
+            class="workbench-empty"
+          >
+            启动 NATS 后即可发布和订阅本地消息
+          </div>
+          <template v-else>
+            <div class="nats-endpoint-strip">
+              <div>
+                <p>CLIENT ENDPOINT</p>
+                <strong>nats://127.0.0.1:4222</strong>
+              </div>
+              <div>
+                <p>MONITORING</p>
+                <strong>http://127.0.0.1:8222</strong>
+              </div>
+              <div>
+                <p>JETSTREAM</p>
+                <strong>已启用 · 本地文件存储</strong>
+              </div>
+            </div>
+
+            <div class="nats-console-grid">
+              <article class="panel nats-console-card">
+                <div class="panel-title">
+                  <div>
+                    <p>PUBLISH</p>
+                    <h2>发布消息</h2>
+                  </div>
+                  <span v-if="natsPublishResult">
+                    {{ natsPublishResult.elapsedMs }} ms
+                  </span>
+                </div>
+                <label>
+                  <span>Subject</span>
+                  <input
+                    v-model="natsPublishSubject"
+                    placeholder="orders.created"
+                  />
+                </label>
+                <label>
+                  <span>Payload</span>
+                  <textarea
+                    v-model="natsPublishPayload"
+                    spellcheck="false"
+                    placeholder='{"id": 42}'
+                  ></textarea>
+                </label>
+                <button
+                  class="primary"
+                  type="button"
+                  :disabled="natsPublishing || !natsPublishSubject.trim()"
+                  @click="publishNats"
+                >
+                  <span v-if="natsPublishing" class="spinner"></span>
+                  {{ natsPublishing ? "发布中" : "发布消息" }}
+                </button>
+                <p v-if="natsPublishResult" class="nats-result-note">
+                  已发送 {{ natsPublishResult.payloadBytes }} 字节到
+                  <code>{{ natsPublishResult.subject }}</code>
+                </p>
+              </article>
+
+              <article class="panel nats-console-card">
+                <div class="panel-title">
+                  <div>
+                    <p>SUBSCRIBE ONCE</p>
+                    <h2>等待一条消息</h2>
+                  </div>
+                  <span>支持 * 和 &gt;</span>
+                </div>
+                <label>
+                  <span>Subject</span>
+                  <input
+                    v-model="natsSubscribeSubject"
+                    placeholder="orders.>"
+                  />
+                </label>
+                <button
+                  class="primary"
+                  type="button"
+                  :disabled="natsReceiving || !natsSubscribeSubject.trim()"
+                  @click="receiveNats"
+                >
+                  <span v-if="natsReceiving" class="spinner"></span>
+                  {{ natsReceiving ? "等待中…" : "开始等待" }}
+                </button>
+                <div v-if="natsMessage" class="nats-message-result">
+                  <header>
+                    <strong>{{ natsMessage.subject }}</strong>
+                    <span>
+                      {{ natsMessage.payloadBytes }} B ·
+                      {{ natsMessage.elapsedMs }} ms
+                    </span>
+                  </header>
+                  <pre>{{ natsMessage.payload }}</pre>
+                </div>
+                <div v-else class="nats-message-empty">
+                  先点击“开始等待”，再从应用或左侧发布面板发送消息。
+                </div>
+              </article>
+            </div>
+
+            <p class="console-note">
+              消息只发送到智屿管理的本机 NATS；单条 Payload 限制为 1 MiB，等待订阅最多持续 8 秒。
+            </p>
+          </template>
         </section>
 
         <section v-else-if="activeTab === 'backup'" class="backup-panel">

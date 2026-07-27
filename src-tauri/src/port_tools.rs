@@ -109,6 +109,7 @@ fn managed_service_pids() -> BTreeMap<u32, String> {
         ("postgres", "PostgreSQL"),
         ("mongodb", "MongoDB"),
         ("mailpit", "Mailpit"),
+        ("nats", "NATS"),
     ]
     .into_iter()
     .filter_map(|(directory, name)| {
@@ -135,6 +136,7 @@ fn common_service(port: u16) -> Option<&'static str> {
         7700 => Some("Meilisearch"),
         8000 | 8080 => Some("常用 HTTP 开发端口"),
         8025 => Some("Mailpit Web"),
+        8222 => Some("NATS Monitoring"),
         27017 => Some("MongoDB"),
         _ => None,
     }

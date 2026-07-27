@@ -3,7 +3,8 @@ export type ServiceKind =
   | "mysql"
   | "postgres"
   | "mongodb"
-  | "mailpit";
+  | "mailpit"
+  | "nats";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =
@@ -226,6 +227,30 @@ export interface MailpitOverview {
   unread: number;
   smtpAddress: string;
   webAddress: string;
+}
+
+export interface NatsOverview {
+  version: string;
+  connections: number;
+  subscriptions: number;
+  inMessages: number;
+  outMessages: number;
+  inBytes: number;
+  outBytes: number;
+  slowConsumers: number;
+}
+
+export interface NatsPublishResult {
+  subject: string;
+  payloadBytes: number;
+  elapsedMs: number;
+}
+
+export interface NatsMessage {
+  subject: string;
+  payload: string;
+  payloadBytes: number;
+  elapsedMs: number;
 }
 
 export interface MailSummary {

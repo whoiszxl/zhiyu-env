@@ -80,6 +80,7 @@ fn service_prefix(kind: ServiceKind) -> &'static str {
         ServiceKind::Postgres => "postgres",
         ServiceKind::Mongodb => "mongodb",
         ServiceKind::Mailpit => "mailpit",
+        ServiceKind::Nats => "nats",
     }
 }
 
