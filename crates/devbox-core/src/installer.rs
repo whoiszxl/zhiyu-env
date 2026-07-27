@@ -2201,6 +2201,9 @@ fn write_manifest(
 }
 
 fn replace_installation(stage: &Path, installation_dir: &Path) -> Result<()> {
+    if let Some(parent) = installation_dir.parent() {
+        fs::create_dir_all(parent)?;
+    }
     if installation_dir.exists() {
         fs::remove_dir_all(installation_dir)?;
     }
@@ -2303,6 +2306,7 @@ fn unique_suffix() -> u128 {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+    use tempfile::TempDir;
 
     #[test]
     fn install_reporter_preserves_progress_and_log_updates() {
@@ -2386,6 +2390,26 @@ mod tests {
         );
         assert_eq!(github.len(), 1);
         assert!(github[0].official);
+    }
+
+    #[test]
+    fn replacing_an_installation_creates_the_service_parent_directory() {
+        let temp = TempDir::new().unwrap();
+        let stage = temp.path().join("tmp/installation");
+        let executable = stage.join("bin/service");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, b"binary").unwrap();
+
+        let installation = temp.path().join("installations/service/1.0");
+        assert!(!installation.parent().unwrap().exists());
+
+        replace_installation(&stage, &installation).unwrap();
+
+        assert_eq!(
+            fs::read(installation.join("bin/service")).unwrap(),
+            b"binary"
+        );
+        assert!(!stage.exists());
     }
 
     #[test]
