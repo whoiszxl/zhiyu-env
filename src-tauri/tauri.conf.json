@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "智屿",
         "width": 1120,
         "height": 760,
@@ -20,6 +21,19 @@
         "resizable": true,
         "fullscreen": false,
         "center": true
+      },
+      {
+        "label": "clipboard",
+        "title": "剪贴板",
+        "url": "/clipboard-panel.html",
+        "width": 620,
+        "height": 460,
+        "resizable": false,
+        "decorations": false,
+        "center": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": true
       }
     ],
     "security": {

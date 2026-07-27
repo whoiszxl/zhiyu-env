@@ -22,6 +22,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(clipboard::commands::ClipboardState(std::sync::Mutex::new(
             None,
         )))
@@ -29,6 +30,41 @@ pub fn run() {
             let settings = settings::load_settings();
             let _ = settings::apply_log_retention(&settings);
             tray::setup(app)?;
+
+            // Register global shortcut for clipboard quick panel
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            {
+                use tauri::Manager;
+                use tauri_plugin_global_shortcut::{
+                    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+                };
+
+                let handle = app.handle().clone();
+                let _ = app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_handler(move |_app, _shortcut, event| {
+                            if event.state != ShortcutState::Pressed {
+                                return;
+                            }
+                            if let Some(win) = handle.get_webview_window("clipboard") {
+                                if win.is_visible().unwrap_or(false) {
+                                    let _ = win.hide();
+                                } else {
+                                    let _ = win.show();
+                                    let _ = win.set_focus();
+                                    let _ = win.center();
+                                }
+                            }
+                        })
+                        .build(),
+                );
+
+                let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV);
+                if let Err(e) = app.global_shortcut().register(shortcut) {
+                    eprintln!("全局快捷键注册失败（可能需要辅助功能权限）: {e}");
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
