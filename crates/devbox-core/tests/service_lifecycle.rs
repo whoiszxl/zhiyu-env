@@ -1,9 +1,9 @@
 #![cfg(unix)]
 
 use devbox_core::{
-    EtcdService, MailpitService, MeilisearchService, MinioService, MongodbService, MysqlService,
-    NatsService, PostgresService, RedisService, RustfsService, ServiceConfig, ServiceKind,
-    ServiceManager, ServiceStatus,
+    ConsulService, EtcdService, MailpitService, MeilisearchService, MinioService, MongodbService,
+    MysqlService, NatsService, PostgresService, RedisService, RustfsService, ServiceConfig,
+    ServiceKind, ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -128,6 +128,14 @@ fn etcd_service_lifecycle() {
     let service = EtcdService::new(config(temp.path(), ServiceKind::Etcd)).unwrap();
     assert_lifecycle(&service);
     assert!(temp.path().join("etcd/conf/etcd.yaml").is_file());
+}
+
+#[test]
+fn consul_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = ConsulService::new(config(temp.path(), ServiceKind::Consul)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("consul/conf/consul.hcl").is_file());
 }
 
 #[test]

@@ -85,6 +85,7 @@ fn service_prefix(kind: ServiceKind) -> &'static str {
         ServiceKind::Minio => "minio.",
         ServiceKind::Rustfs => "rustfs-",
         ServiceKind::Etcd => "etcd-",
+        ServiceKind::Consul => "consul_",
     }
 }
 

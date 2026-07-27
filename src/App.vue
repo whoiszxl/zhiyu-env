@@ -466,7 +466,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
-  if (selectedKind.value === "etcd") {
+  if (selectedKind.value === "etcd" || selectedKind.value === "consul") {
     return [
       ["overview", "概览"],
       ["governance", "连接与调试"],
@@ -504,7 +504,40 @@ const iconLetter: Record<ServiceKind, string> = {
   minio: "M",
   rustfs: "R",
   etcd: "E",
+  consul: "C",
 };
+
+const governanceProfile = computed(() =>
+  selectedKind.value === "consul"
+    ? {
+        name: "Consul",
+        description: "适合服务注册、健康检查、KV 配置和 DNS 服务发现",
+        badge: "单节点 Server · 仅本机",
+        primaryLabel: "HTTP API / WEB UI",
+        primary: "http://127.0.0.1:8500",
+        primaryHint: "API 与 /ui/ 管理界面",
+        secondaryLabel: "DNS",
+        secondary: "127.0.0.1:8600",
+        secondaryHint: "DNS 服务发现",
+        command:
+          "CONSUL_HTTP_ADDR=http://127.0.0.1:8500 \\\n  ~/.devbox/installations/consul/1.22/bin/consul members",
+        note: "智屿只运行本机单节点 Server Agent，不启用 ACL，也不模拟生产集群。",
+      }
+    : {
+        name: "etcd",
+        description: "适合配置读取、服务协调、分布式锁和客户端兼容调试",
+        badge: "单节点 · 仅本机",
+        primaryLabel: "CLIENT ENDPOINT",
+        primary: "http://127.0.0.1:2379",
+        primaryHint: "应用和 etcdctl 使用",
+        secondaryLabel: "PEER ENDPOINT",
+        secondary: "http://127.0.0.1:2380",
+        secondaryHint: "单节点内部通信",
+        command:
+          "ETCDCTL_API=3 ~/.devbox/installations/etcd/3.6/bin/etcdctl \\\n  --endpoints=http://127.0.0.1:2379 put hello zhiyu\n\nETCDCTL_API=3 ~/.devbox/installations/etcd/3.6/bin/etcdctl \\\n  --endpoints=http://127.0.0.1:2379 get hello",
+        note: "智屿只启用本机单节点模式，不开放远程监听，也不模拟生产集群。",
+      },
+);
 
 const objectStoreProfile = computed(() =>
   selectedKind.value === "rustfs"
@@ -3416,45 +3449,41 @@ onUnmounted(() => {
           <div class="object-store-hero">
             <div>
               <p>SERVICE COORDINATION</p>
-              <h2>etcd 本地单节点</h2>
-              <span>适合配置读取、服务协调、分布式锁和客户端兼容调试</span>
+              <h2>{{ governanceProfile.name }} 本地单节点</h2>
+              <span>{{ governanceProfile.description }}</span>
             </div>
-            <span class="legacy-badge">单节点 · 仅本机</span>
+            <span class="legacy-badge">{{ governanceProfile.badge }}</span>
           </div>
           <div
             v-if="selectedService.status !== 'running'"
             class="workbench-empty"
           >
-            启动 etcd 后可通过内置 etcdctl 或客户端 SDK 连接
+            启动 {{ governanceProfile.name }} 后可通过客户端或内置命令行连接
           </div>
           <template v-else>
             <div class="object-store-grid">
               <article class="panel object-store-card">
-                <p>CLIENT ENDPOINT</p>
-                <strong>http://127.0.0.1:2379</strong>
-                <small>应用和 etcdctl 使用</small>
+                <p>{{ governanceProfile.primaryLabel }}</p>
+                <strong>{{ governanceProfile.primary }}</strong>
+                <small>{{ governanceProfile.primaryHint }}</small>
               </article>
               <article class="panel object-store-card">
-                <p>PEER ENDPOINT</p>
-                <strong>http://127.0.0.1:2380</strong>
-                <small>单节点内部通信</small>
+                <p>{{ governanceProfile.secondaryLabel }}</p>
+                <strong>{{ governanceProfile.secondary }}</strong>
+                <small>{{ governanceProfile.secondaryHint }}</small>
               </article>
             </div>
             <article class="panel object-store-snippet">
               <div class="panel-title">
                 <div>
-                  <p>ETCDCTL</p>
+                  <p>CLI</p>
                   <h2>快速读写验证</h2>
                 </div>
               </div>
-              <pre>ETCDCTL_API=3 ~/.devbox/installations/etcd/3.6/bin/etcdctl \
-  --endpoints=http://127.0.0.1:2379 put hello zhiyu
-
-ETCDCTL_API=3 ~/.devbox/installations/etcd/3.6/bin/etcdctl \
-  --endpoints=http://127.0.0.1:2379 get hello</pre>
+              <pre>{{ governanceProfile.command }}</pre>
             </article>
             <p class="console-note">
-              智屿只启用本机单节点模式，不开放远程监听，也不模拟生产集群。
+              {{ governanceProfile.note }}
             </p>
           </template>
         </section>

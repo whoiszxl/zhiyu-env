@@ -17,6 +17,7 @@ pub enum ServiceKind {
     Minio,
     Rustfs,
     Etcd,
+    Consul,
 }
 
 impl ServiceKind {
@@ -32,6 +33,7 @@ impl ServiceKind {
             Self::Minio => "minio",
             Self::Rustfs => "rustfs",
             Self::Etcd => "etcd",
+            Self::Consul => "consul",
         }
     }
 }

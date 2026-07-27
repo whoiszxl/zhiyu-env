@@ -1,4 +1,5 @@
 mod common;
+mod consul;
 mod etcd;
 mod mailpit;
 mod meilisearch;
@@ -10,6 +11,7 @@ mod postgres;
 mod redis;
 mod rustfs;
 
+pub use consul::ConsulService;
 pub use etcd::EtcdService;
 pub use mailpit::MailpitService;
 pub use meilisearch::MeilisearchService;

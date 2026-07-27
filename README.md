@@ -55,6 +55,7 @@
 | MinIO | RELEASE.2025-09-07 | 9000 / 9001 | S3 API、Web Console、存量项目兼容调试 |
 | RustFS | 1.0.0-beta.2 | 9002 / 7001 | S3 API、Web Console、Rust 对象存储开发调试 |
 | etcd | 3.6.11 | 2379 / 2380 | 单节点服务协调、配置读取、内置 etcdctl |
+| Consul | 1.22.3 | 8500 / 8600 | 服务发现、健康检查、KV、官方 Web UI |
 
 所有服务均支持：
 

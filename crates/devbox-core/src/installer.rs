@@ -339,6 +339,12 @@ const ETCD_ARCHIVE: &str = "etcd-v3.6.11-darwin-arm64.zip";
 const ETCD_URL: &str =
     "https://github.com/etcd-io/etcd/releases/download/v3.6.11/etcd-v3.6.11-darwin-arm64.zip";
 const ETCD_SHA256: &str = "9617bf71a0772dd26f9d0d88e34c668d99fd11677d01593d6b365e9a0f8f3d7e";
+pub const CONSUL_SERIES: &str = "1.22";
+pub const CONSUL_VERSION: &str = "1.22.3";
+const CONSUL_ARCHIVE: &str = "consul_1.22.3_darwin_arm64.zip";
+const CONSUL_URL: &str =
+    "https://releases.hashicorp.com/consul/1.22.3/consul_1.22.3_darwin_arm64.zip";
+const CONSUL_SHA256: &str = "b2881e2f9c6704fdac53d54dfb3957bf0d280600541a8e8f61d807e96ea7efa0";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -858,6 +864,91 @@ pub struct RustfsInstaller {
 #[derive(Debug, Clone)]
 pub struct EtcdInstaller {
     devbox_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConsulInstaller {
+    devbox_root: PathBuf,
+}
+
+impl ConsulInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 Consul {CONSUL_VERSION}"));
+        ensure_macos_arm64("Consul")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/unzip"])?;
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/consul");
+        if binary_contains(&executable, &["version"], CONSUL_VERSION) {
+            report_install_progress(90, "已安装", "Consul 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let work_dir = self.devbox_root.join("tmp").join(format!(
+            "consul-{CONSUL_VERSION}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&work_dir)?;
+        let archive = downloads_dir.join(CONSUL_ARCHIVE);
+        prepare_archive(&archive, CONSUL_ARCHIVE, CONSUL_URL, CONSUL_SHA256)?;
+        run(
+            Command::new("/usr/bin/unzip")
+                .args(["-q", "-o"])
+                .arg(&archive)
+                .arg("-d")
+                .arg(&work_dir),
+            "unzip",
+        )?;
+
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        fs::create_dir_all(&bin_dir)?;
+        report_install_progress(75, "整理文件", "正在写入 Consul 版本目录");
+        fs::copy(work_dir.join("consul"), bin_dir.join("consul"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(bin_dir.join("consul"), fs::Permissions::from_mode(0o755))?;
+        }
+        if !binary_contains(&bin_dir.join("consul"), &["version"], CONSUL_VERSION) {
+            let _ = fs::remove_dir_all(&work_dir);
+            return Err(DevBoxError::CommandFailed {
+                command: "consul version".into(),
+                message: "downloaded binary is not the expected Consul release".into(),
+            });
+        }
+        write_manifest(
+            &stage,
+            "consul",
+            CONSUL_SERIES,
+            CONSUL_VERSION,
+            CONSUL_URL,
+            CONSUL_SHA256,
+            "official-binary",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        let _ = fs::remove_dir_all(&work_dir);
+        report_install_progress(90, "完成安装", "Consul 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/consul")
+            .join(CONSUL_SERIES)
+    }
 }
 
 impl EtcdInstaller {

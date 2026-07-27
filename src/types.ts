@@ -8,7 +8,8 @@ export type ServiceKind =
   | "meilisearch"
   | "minio"
   | "rustfs"
-  | "etcd";
+  | "etcd"
+  | "consul";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =
