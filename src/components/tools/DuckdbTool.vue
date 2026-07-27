@@ -168,8 +168,11 @@ onMounted(loadStatus);
         :disabled="installing || statusLoading"
         @click="install"
       >
-        <span v-if="installing" class="spinner"></span>
-        {{ installing ? "安装中" : "下载并安装" }}
+        <template v-if="installing">
+          <span class="spinner"></span>
+          <span>安装中</span>
+        </template>
+        <span v-else>下载并安装</span>
       </button>
       <button v-else class="primary" type="button" @click="chooseFile">
         选择本地文件
@@ -195,8 +198,11 @@ onMounted(loadStatus);
         <code>~/.devbox/</code>，不会修改系统 PATH。
       </p>
       <button type="button" :disabled="installing" @click="install">
-        <span v-if="installing" class="spinner"></span>
-        {{ installing ? "正在下载并校验…" : `安装 DuckDB ${FALLBACK_VERSION}` }}
+        <template v-if="installing">
+          <span class="spinner"></span>
+          <span>正在下载并校验…</span>
+        </template>
+        <span v-else>安装 DuckDB {{ FALLBACK_VERSION }}</span>
       </button>
     </div>
 

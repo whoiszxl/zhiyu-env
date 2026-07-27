@@ -1957,8 +1957,11 @@ onUnmounted(() => {
               :disabled="serviceControlBusy"
               @click="execute('install')"
             >
-              <span v-if="serviceControlBusy" class="spinner"></span>
-              {{ serviceControlBusy ? "安装中" : "下载并安装" }}
+              <template v-if="pendingAction === 'install'">
+                <span class="spinner"></span>
+                <span>安装中</span>
+              </template>
+              <span v-else>下载并安装</span>
             </button>
             <template v-else-if="selectedService.status === 'running'">
               <button
