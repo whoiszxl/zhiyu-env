@@ -1,4 +1,5 @@
 mod common;
+mod etcd;
 mod mailpit;
 mod meilisearch;
 mod minio;
@@ -9,6 +10,7 @@ mod postgres;
 mod redis;
 mod rustfs;
 
+pub use etcd::EtcdService;
 pub use mailpit::MailpitService;
 pub use meilisearch::MeilisearchService;
 pub use minio::MinioService;

@@ -113,6 +113,7 @@ fn managed_service_pids() -> BTreeMap<u32, String> {
         ("meilisearch", "Meilisearch"),
         ("minio", "MinIO"),
         ("rustfs", "RustFS"),
+        ("etcd", "etcd"),
     ]
     .into_iter()
     .filter_map(|(directory, name)| {
@@ -130,6 +131,8 @@ fn common_service(port: u16) -> Option<&'static str> {
         80 => Some("HTTP"),
         443 => Some("HTTPS"),
         1025 => Some("Mailpit SMTP"),
+        2379 => Some("etcd Client"),
+        2380 => Some("etcd Peer"),
         3000 => Some("常用前端开发端口"),
         3306 => Some("MySQL"),
         4222 => Some("NATS"),

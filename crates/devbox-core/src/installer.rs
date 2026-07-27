@@ -333,6 +333,12 @@ const RUSTFS_ARCHIVE: &str = "rustfs-macos-aarch64-v1.0.0-beta.2.zip";
 const RUSTFS_URL: &str =
     "https://github.com/rustfs/rustfs/releases/download/1.0.0-beta.2/rustfs-macos-aarch64-v1.0.0-beta.2.zip";
 const RUSTFS_SHA256: &str = "f57cd513fa53048410f194b34d81260f76eb57305d9183159f3bdf28b4c84df5";
+pub const ETCD_SERIES: &str = "3.6";
+pub const ETCD_VERSION: &str = "3.6.11";
+const ETCD_ARCHIVE: &str = "etcd-v3.6.11-darwin-arm64.zip";
+const ETCD_URL: &str =
+    "https://github.com/etcd-io/etcd/releases/download/v3.6.11/etcd-v3.6.11-darwin-arm64.zip";
+const ETCD_SHA256: &str = "9617bf71a0772dd26f9d0d88e34c668d99fd11677d01593d6b365e9a0f8f3d7e";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -847,6 +853,94 @@ pub struct MinioInstaller {
 #[derive(Debug, Clone)]
 pub struct RustfsInstaller {
     devbox_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct EtcdInstaller {
+    devbox_root: PathBuf,
+}
+
+impl EtcdInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 etcd {ETCD_VERSION}"));
+        ensure_macos_arm64("etcd")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/unzip"])?;
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/etcd");
+        if binary_contains(&executable, &["--version"], ETCD_VERSION) {
+            report_install_progress(90, "已安装", "etcd 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let work_dir = self.devbox_root.join("tmp").join(format!(
+            "etcd-{ETCD_VERSION}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&work_dir)?;
+        let archive = downloads_dir.join(ETCD_ARCHIVE);
+        prepare_archive(&archive, ETCD_ARCHIVE, ETCD_URL, ETCD_SHA256)?;
+        run(
+            Command::new("/usr/bin/unzip")
+                .args(["-q", "-o"])
+                .arg(&archive)
+                .arg("-d")
+                .arg(&work_dir),
+            "unzip",
+        )?;
+
+        let source = work_dir.join(format!("etcd-v{ETCD_VERSION}-darwin-arm64"));
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        fs::create_dir_all(&bin_dir)?;
+        report_install_progress(75, "整理文件", "正在写入 etcd 版本目录");
+        for binary in ["etcd", "etcdctl", "etcdutl"] {
+            fs::copy(source.join(binary), bin_dir.join(binary))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(bin_dir.join(binary), fs::Permissions::from_mode(0o755))?;
+            }
+        }
+        if !binary_contains(&bin_dir.join("etcd"), &["--version"], ETCD_VERSION) {
+            let _ = fs::remove_dir_all(&work_dir);
+            return Err(DevBoxError::CommandFailed {
+                command: "etcd --version".into(),
+                message: "downloaded binary is not the expected etcd release".into(),
+            });
+        }
+        write_manifest(
+            &stage,
+            "etcd",
+            ETCD_SERIES,
+            ETCD_VERSION,
+            ETCD_URL,
+            ETCD_SHA256,
+            "official-binary",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        let _ = fs::remove_dir_all(&work_dir);
+        report_install_progress(90, "完成安装", "etcd 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/etcd")
+            .join(ETCD_SERIES)
+    }
 }
 
 impl RustfsInstaller {

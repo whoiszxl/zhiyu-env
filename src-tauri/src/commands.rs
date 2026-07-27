@@ -1,16 +1,17 @@
 use devbox_core::{
     installer::{
         mysql_release, postgres_release, redis_release, MysqlRelease, PostgresRelease,
-        RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION,
-        MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES,
-        MYSQL_VERSION, NATS_SERIES, NATS_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION,
-        REDIS_RELEASES, REDIS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
+        RedisRelease, ETCD_SERIES, ETCD_VERSION, MAILPIT_SERIES, MAILPIT_VERSION,
+        MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES,
+        MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION,
+        POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION, RUSTFS_SERIES,
+        RUSTFS_VERSION,
     },
-    report_install_progress, with_install_reporter, ConfigManager, InstallReporter,
-    MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService, MinioInstaller,
-    MinioService, MongodbInstaller, MongodbService, MysqlInstaller, MysqlService, NatsInstaller,
-    NatsService, PostgresInstaller, PostgresService, RedisInstaller, RedisService, RustfsInstaller,
-    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    report_install_progress, with_install_reporter, ConfigManager, EtcdInstaller, EtcdService,
+    InstallReporter, MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService,
+    MinioInstaller, MinioService, MongodbInstaller, MongodbService, MysqlInstaller, MysqlService,
+    NatsInstaller, NatsService, PostgresInstaller, PostgresService, RedisInstaller, RedisService,
+    RustfsInstaller, RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -116,6 +117,7 @@ pub enum ServiceKindInput {
     Meilisearch,
     Minio,
     Rustfs,
+    Etcd,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -130,6 +132,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Meilisearch => Self::Meilisearch,
             ServiceKindInput::Minio => Self::Minio,
             ServiceKindInput::Rustfs => Self::Rustfs,
+            ServiceKindInput::Etcd => Self::Etcd,
         }
     }
 }
@@ -413,6 +416,19 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
             root.join(format!("installations/rustfs/{RUSTFS_SERIES}/bin/rustfs")),
             Vec::new(),
         ),
+        ServiceKind::Etcd => {
+            let instance = root.join("instances/etcd/default");
+            (
+                "etcd",
+                ETCD_VERSION,
+                2379,
+                root.join(format!("installations/etcd/{ETCD_SERIES}/bin/etcd")),
+                vec![
+                    "--config-file".into(),
+                    instance.join("conf/etcd.yaml").display().to_string(),
+                ],
+            )
+        }
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -547,6 +563,7 @@ fn with_service<T>(
         ServiceKindInput::Rustfs => {
             operation(&RustfsService::new(config).map_err(stringify_error)?)
         }
+        ServiceKindInput::Etcd => operation(&EtcdService::new(config).map_err(stringify_error)?),
     }
     .map_err(stringify_error)
 }
@@ -578,6 +595,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Meilisearch => "Meilisearch",
         ServiceKindInput::Minio => "MinIO",
         ServiceKindInput::Rustfs => "RustFS",
+        ServiceKindInput::Etcd => "etcd",
     };
     Ok(ServiceInfo {
         kind: kind.into(),
@@ -652,6 +670,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Meilisearch,
         ServiceKindInput::Minio,
         ServiceKindInput::Rustfs,
+        ServiceKindInput::Etcd,
     ]
     .into_iter()
     .map(info)
@@ -741,6 +760,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 RustFS 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Etcd => {
+            EtcdInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 etcd 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -1036,6 +1062,7 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         | ServiceKind::Meilisearch
         | ServiceKind::Minio => {}
         ServiceKind::Rustfs => {}
+        ServiceKind::Etcd => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -1063,6 +1090,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         | ServiceKind::Meilisearch
         | ServiceKind::Minio => config.stdout_log_path(),
         ServiceKind::Rustfs => config.stdout_log_path(),
+        ServiceKind::Etcd => config.stdout_log_path(),
     }
 }
 
@@ -1077,6 +1105,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Meilisearch => "meilisearch.toml",
         ServiceKind::Minio => "minio.env",
         ServiceKind::Rustfs => "rustfs.env",
+        ServiceKind::Etcd => "etcd.yaml",
     };
     config.config_dir().join(name)
 }
@@ -1186,6 +1215,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Meilisearch => "meilisearch",
         ServiceKind::Minio => "minio.",
         ServiceKind::Rustfs => "rustfs-",
+        ServiceKind::Etcd => "etcd-",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {

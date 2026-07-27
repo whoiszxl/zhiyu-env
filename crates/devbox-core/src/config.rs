@@ -16,6 +16,7 @@ pub enum ServiceKind {
     Meilisearch,
     Minio,
     Rustfs,
+    Etcd,
 }
 
 impl ServiceKind {
@@ -30,6 +31,7 @@ impl ServiceKind {
             Self::Meilisearch => "meilisearch",
             Self::Minio => "minio",
             Self::Rustfs => "rustfs",
+            Self::Etcd => "etcd",
         }
     }
 }

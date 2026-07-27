@@ -1,9 +1,9 @@
 #![cfg(unix)]
 
 use devbox_core::{
-    MailpitService, MeilisearchService, MinioService, MongodbService, MysqlService, NatsService,
-    PostgresService, RedisService, RustfsService, ServiceConfig, ServiceKind, ServiceManager,
-    ServiceStatus,
+    EtcdService, MailpitService, MeilisearchService, MinioService, MongodbService, MysqlService,
+    NatsService, PostgresService, RedisService, RustfsService, ServiceConfig, ServiceKind,
+    ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -120,6 +120,14 @@ fn rustfs_service_lifecycle() {
     let service = RustfsService::new(config(temp.path(), ServiceKind::Rustfs)).unwrap();
     assert_lifecycle(&service);
     assert!(temp.path().join("rustfs/conf/rustfs.env").is_file());
+}
+
+#[test]
+fn etcd_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = EtcdService::new(config(temp.path(), ServiceKind::Etcd)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("etcd/conf/etcd.yaml").is_file());
 }
 
 #[test]

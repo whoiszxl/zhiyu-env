@@ -94,6 +94,7 @@ type DetailTab =
   | "messages"
   | "search"
   | "objectStore"
+  | "governance"
   | "backup"
   | "config"
   | "logs"
@@ -465,6 +466,16 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
+  if (selectedKind.value === "etcd") {
+    return [
+      ["overview", "概览"],
+      ["governance", "连接与调试"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["docs", "使用文档"],
+    ];
+  }
   return [
     ["overview", "概览"],
     ["data", "数据浏览"],
@@ -492,6 +503,7 @@ const iconLetter: Record<ServiceKind, string> = {
   meilisearch: "M",
   minio: "M",
   rustfs: "R",
+  etcd: "E",
 };
 
 const objectStoreProfile = computed(() =>
@@ -3395,6 +3407,56 @@ onUnmounted(() => {
             <code>{{ selectedService.dataPath }}/mailpit.db</code>；
             HTML 不会直接渲染，避免测试邮件中的脚本或远程资源影响桌面端。
           </p>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'governance'"
+          class="object-store-panel"
+        >
+          <div class="object-store-hero">
+            <div>
+              <p>SERVICE COORDINATION</p>
+              <h2>etcd 本地单节点</h2>
+              <span>适合配置读取、服务协调、分布式锁和客户端兼容调试</span>
+            </div>
+            <span class="legacy-badge">单节点 · 仅本机</span>
+          </div>
+          <div
+            v-if="selectedService.status !== 'running'"
+            class="workbench-empty"
+          >
+            启动 etcd 后可通过内置 etcdctl 或客户端 SDK 连接
+          </div>
+          <template v-else>
+            <div class="object-store-grid">
+              <article class="panel object-store-card">
+                <p>CLIENT ENDPOINT</p>
+                <strong>http://127.0.0.1:2379</strong>
+                <small>应用和 etcdctl 使用</small>
+              </article>
+              <article class="panel object-store-card">
+                <p>PEER ENDPOINT</p>
+                <strong>http://127.0.0.1:2380</strong>
+                <small>单节点内部通信</small>
+              </article>
+            </div>
+            <article class="panel object-store-snippet">
+              <div class="panel-title">
+                <div>
+                  <p>ETCDCTL</p>
+                  <h2>快速读写验证</h2>
+                </div>
+              </div>
+              <pre>ETCDCTL_API=3 ~/.devbox/installations/etcd/3.6/bin/etcdctl \
+  --endpoints=http://127.0.0.1:2379 put hello zhiyu
+
+ETCDCTL_API=3 ~/.devbox/installations/etcd/3.6/bin/etcdctl \
+  --endpoints=http://127.0.0.1:2379 get hello</pre>
+            </article>
+            <p class="console-note">
+              智屿只启用本机单节点模式，不开放远程监听，也不模拟生产集群。
+            </p>
+          </template>
         </section>
 
         <section

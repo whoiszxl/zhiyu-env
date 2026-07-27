@@ -7,7 +7,8 @@ export type ServiceKind =
   | "nats"
   | "meilisearch"
   | "minio"
-  | "rustfs";
+  | "rustfs"
+  | "etcd";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =

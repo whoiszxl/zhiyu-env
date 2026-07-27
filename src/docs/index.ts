@@ -9,6 +9,7 @@ import { buildNatsDocs } from "./natsDocs";
 import { buildMeilisearchDocs } from "./meilisearchDocs";
 import { buildMinioDocs } from "./minioDocs";
 import { buildRustfsDocs } from "./rustfsDocs";
+import { buildEtcdDocs } from "./etcdDocs";
 
 export type { DocBlock, DocChapter, DocCodeSample } from "./docTypes";
 
@@ -22,6 +23,7 @@ const BUILDERS: Record<ServiceKind, (port: number) => DocChapter[]> = {
   meilisearch: buildMeilisearchDocs,
   minio: buildMinioDocs,
   rustfs: buildRustfsDocs,
+  etcd: buildEtcdDocs,
 };
 
 /** 文档标题栏上展示的一句话定位。 */
@@ -35,6 +37,7 @@ const TAGLINES: Record<ServiceKind, string> = {
   meilisearch: "全文搜索引擎 · 索引与搜索调试",
   minio: "S3 兼容对象存储 · 存量项目调试",
   rustfs: "Rust 对象存储 · S3 兼容开发调试",
+  etcd: "分布式键值存储 · 配置与服务协调",
 };
 
 export function buildServiceDocs(kind: ServiceKind, port: number): DocChapter[] {
