@@ -481,3 +481,8 @@ export interface ClipboardStatus {
   dbSizeBytes: number;
   monitoring: boolean;
 }
+
+export interface ClipboardSettings {
+  maxItems: number;
+  retentionDays: number;
+}

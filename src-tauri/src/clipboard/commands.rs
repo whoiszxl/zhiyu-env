@@ -117,3 +117,26 @@ pub async fn clipboard_clear(
         None => Err("剪贴板服务未启动".into()),
     }
 }
+
+#[tauri::command]
+pub async fn clipboard_settings_get(
+    state: State<'_, ClipboardState>,
+) -> Result<super::repository::ClipboardSettings, String> {
+    let guard = state.0.lock().map_err(|e| e.to_string())?;
+    match guard.as_ref() {
+        Some(svc) => svc.settings_get(),
+        None => Err("剪贴板服务未启动".into()),
+    }
+}
+
+#[tauri::command]
+pub async fn clipboard_settings_save(
+    state: State<'_, ClipboardState>,
+    settings: super::repository::ClipboardSettings,
+) -> Result<(), String> {
+    let guard = state.0.lock().map_err(|e| e.to_string())?;
+    match guard.as_ref() {
+        Some(svc) => svc.settings_save(settings),
+        None => Err("剪贴板服务未启动".into()),
+    }
+}

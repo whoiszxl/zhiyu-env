@@ -381,7 +381,7 @@ export function testServiceConnection(kind: ServiceKind): Promise<void> {
 
 // ── 剪贴板历史 ────────────────────────────────────────────
 
-import type { ClipboardItem, ClipboardStatus } from "../types";
+import type { ClipboardItem, ClipboardStatus, ClipboardSettings } from "../types";
 
 export function clipboardStart(): Promise<void> {
   return invoke<void>("clipboard_start");
@@ -425,6 +425,14 @@ export function clipboardDelete(id: number): Promise<void> {
 
 export function clipboardClear(): Promise<number> {
   return invoke<number>("clipboard_clear");
+}
+
+export function clipboardSettingsGet(): Promise<ClipboardSettings> {
+  return invoke<ClipboardSettings>("clipboard_settings_get");
+}
+
+export function clipboardSettingsSave(settings: ClipboardSettings): Promise<void> {
+  return invoke<void>("clipboard_settings_save", { settings });
 }
 
 export function installDuckdb(operationId: string): Promise<DuckdbStatus> {

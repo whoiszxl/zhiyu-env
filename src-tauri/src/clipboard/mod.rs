@@ -2,29 +2,10 @@ mod privacy;
 pub(crate) mod commands;
 pub(crate) mod repository;
 
-use repository::{ClipboardItem, ClipboardRepo};
-use serde::{Deserialize, Serialize};
+use repository::{ClipboardItem, ClipboardRepo, ClipboardSettings};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::AppHandle;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClipboardSettings {
-    pub enabled: bool,
-    pub max_items: u32,
-    pub retention_days: u32,
-}
-
-impl Default for ClipboardSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_items: 500,
-            retention_days: 30,
-        }
-    }
-}
 
 pub(crate) struct ClipboardService {
     repo: Arc<ClipboardRepo>,
@@ -116,6 +97,14 @@ impl ClipboardService {
         s.monitoring =
             self.monitoring.load(Ordering::SeqCst) && !self.paused.load(Ordering::SeqCst);
         Ok(s)
+    }
+
+    pub(crate) fn settings_get(&self) -> Result<ClipboardSettings, String> {
+        self.repo.load_settings()
+    }
+
+    pub(crate) fn settings_save(&self, settings: ClipboardSettings) -> Result<(), String> {
+        self.repo.save_settings(&settings)
     }
 }
 

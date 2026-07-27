@@ -1,5 +1,5 @@
 use rusqlite::{params, Connection};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -11,6 +11,24 @@ pub(crate) const DEFAULT_MAX_ITEMS: u32 = 500;
 pub(crate) const DEFAULT_RETENTION_DAYS: u32 = 30;
 const MAX_CONTENT_BYTES: usize = 256 * 1024;
 const MAX_DB_SIZE_BYTES: u64 = 20 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardSettings {
+    #[serde(default = "default_max_items")]
+    pub max_items: u32,
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
+}
+
+fn default_max_items() -> u32 { DEFAULT_MAX_ITEMS }
+fn default_retention_days() -> u32 { DEFAULT_RETENTION_DAYS }
+
+impl Default for ClipboardSettings {
+    fn default() -> Self {
+        Self { max_items: DEFAULT_MAX_ITEMS, retention_days: DEFAULT_RETENTION_DAYS }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,7 +92,11 @@ impl ClipboardRepo {
             CREATE INDEX IF NOT EXISTS idx_clipboard_pinned
                 ON clipboard_items(pinned);
             CREATE INDEX IF NOT EXISTS idx_clipboard_content_type
-                ON clipboard_items(content_type);",
+                ON clipboard_items(content_type);
+            CREATE TABLE IF NOT EXISTS clipboard_config (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );",
         )
         .map_err(|e| format!("剪贴板数据库迁移失败: {e}"))?;
         Ok(())
@@ -276,19 +298,51 @@ impl ClipboardRepo {
         Ok(deleted as u32)
     }
 
+    pub(crate) fn load_settings(&self) -> Result<ClipboardSettings, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut s = ClipboardSettings::default();
+        let mut stmt = conn
+            .prepare("SELECT key, value FROM clipboard_config")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (k, v) = row.map_err(|e| e.to_string())?;
+            match k.as_str() {
+                "max_items" => s.max_items = v.parse().unwrap_or(DEFAULT_MAX_ITEMS),
+                "retention_days" => s.retention_days = v.parse().unwrap_or(DEFAULT_RETENTION_DAYS),
+                _ => {}
+            }
+        }
+        Ok(s)
+    }
+
+    pub(crate) fn save_settings(&self, settings: &ClipboardSettings) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO clipboard_config (key, value) VALUES ('max_items', ?1)",
+            params![settings.max_items],
+        ).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO clipboard_config (key, value) VALUES ('retention_days', ?1)",
+            params![settings.retention_days],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     fn evict(&self) -> Result<(), String> {
+        let settings = self.load_settings()?;
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let cutoff_ms = (now_millis() as i64)
-            .saturating_sub((DEFAULT_RETENTION_DAYS as i64) * 24 * 60 * 60 * 1000);
+            .saturating_sub((settings.retention_days as i64) * 24 * 60 * 60 * 1000);
 
-        // 1. 删除过期记录（pinned 的不删）
         conn.execute(
             "DELETE FROM clipboard_items WHERE pinned = 0 AND copied_at_millis < ?1",
             params![cutoff_ms],
         )
         .map_err(|e| e.to_string())?;
 
-        // 2. 超出数量限制时，删除最旧的非置顶记录
         conn.execute(
             "DELETE FROM clipboard_items WHERE id IN (
                 SELECT id FROM clipboard_items
@@ -296,11 +350,10 @@ impl ClipboardRepo {
                  ORDER BY copied_at_millis ASC
                  LIMIT MAX(0, (SELECT COUNT(*) FROM clipboard_items WHERE pinned = 0) - ?1)
              )",
-            params![DEFAULT_MAX_ITEMS],
+            params![settings.max_items],
         )
         .map_err(|e| e.to_string())?;
 
-        // 3. 数据库文件超过上限时压缩
         drop(conn);
         self.vacuum_if_needed()?;
 

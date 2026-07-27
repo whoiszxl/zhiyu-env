@@ -109,6 +109,8 @@ pub fn run() {
             clipboard::commands::clipboard_pin,
             clipboard::commands::clipboard_delete,
             clipboard::commands::clipboard_clear,
+            clipboard::commands::clipboard_settings_get,
+            clipboard::commands::clipboard_settings_save,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");

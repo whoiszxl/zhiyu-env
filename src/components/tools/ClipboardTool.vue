@@ -5,16 +5,19 @@ import {
   clipboardStart, clipboardStop, clipboardPause, clipboardResume,
   clipboardStatus, clipboardList, clipboardCopy, clipboardPin,
   clipboardDelete, clipboardClear,
+  clipboardSettingsGet, clipboardSettingsSave,
 } from "../../api/services";
-import type { ClipboardItem, ClipboardStatus } from "../../types";
+import type { ClipboardItem, ClipboardStatus, ClipboardSettings } from "../../types";
 import { formatBytes } from "../../utils/format";
 
 const items = ref<ClipboardItem[]>([]);
 const status = ref<ClipboardStatus>({ itemCount: 0, pinnedCount: 0, dbSizeBytes: 0, monitoring: false });
+const settings = ref<ClipboardSettings>({ maxItems: 500, retentionDays: 30 });
 const search = ref("");
 const error = ref("");
 const loading = ref(false);
 const copiedId = ref(0);
+const settingsSaved = ref(false);
 let unlisten: UnlistenFn | null = null;
 
 const paused = ref(false);
@@ -105,6 +108,20 @@ async function clearAll() {
   }
 }
 
+async function loadSettings() {
+  try { settings.value = await clipboardSettingsGet(); } catch { /* defaults */ }
+}
+
+async function saveSettings() {
+  try {
+    await clipboardSettingsSave(settings.value);
+    settingsSaved.value = true;
+    setTimeout(() => { settingsSaved.value = false; }, 1500);
+  } catch (e: any) {
+    error.value = String(e);
+  }
+}
+
 function timeAgo(ms: number): string {
   const diff = Date.now() - ms;
   if (diff < 60_000) return "刚才";
@@ -116,6 +133,7 @@ function timeAgo(ms: number): string {
 const typeBadge = (t: string) => ({ text: "T", code: "{}", url: "URL" } as Record<string, string>)[t] || "T";
 
 onMounted(async () => {
+  await loadSettings();
   await refreshStatus();
   unlisten = await listen<ClipboardItem>("clipboard:changed", () => {
     refreshList();
@@ -230,6 +248,24 @@ onUnmounted(() => { unlisten?.(); });
 
     <!-- loading -->
     <p v-if="loading" class="loading">加载中…</p>
+
+    <!-- settings -->
+    <div class="settings-section">
+      <h4>记录设置</h4>
+      <div class="settings-grid">
+        <label>
+          <span>最大记录数</span>
+          <input v-model.number="settings.maxItems" type="number" min="100" max="2000" step="50" />
+        </label>
+        <label>
+          <span>保留天数</span>
+          <input v-model.number="settings.retentionDays" type="number" min="1" max="365" />
+        </label>
+      </div>
+      <button class="save-btn" @click="saveSettings">
+        {{ settingsSaved ? "已保存" : "保存设置" }}
+      </button>
+    </div>
 
     <!-- disabled state -->
     <div class="disabled-state" v-if="!status.monitoring">
@@ -439,4 +475,54 @@ onUnmounted(() => { unlisten?.(); });
   color: var(--text-secondary, #787f8e);
   font-size: 13px;
 }
+
+.settings-section {
+  border-top: 1px solid var(--border, #2d3240);
+  padding-top: 12px;
+}
+
+.settings-section h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #e1e4eb);
+}
+
+.settings-grid {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #787f8e);
+}
+
+.settings-grid input {
+  width: 100px;
+  padding: 5px 8px;
+  background: var(--input-bg, #10141b);
+  border: 1px solid var(--border, #2d3240);
+  border-radius: 6px;
+  color: var(--text-primary, #e1e4eb);
+  font-size: 14px;
+  outline: none;
+}
+.settings-grid input:focus { border-color: var(--accent-border, #2e4275); }
+
+.save-btn {
+  padding: 5px 16px;
+  background: var(--accent-bg, #1f2b4d);
+  color: var(--accent, #5b8dee);
+  border: 1px solid var(--accent-border, #2e4275);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.save-btn:hover { background: #25345c; }
 </style>
