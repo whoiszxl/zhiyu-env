@@ -93,6 +93,7 @@ type DetailTab =
   | "mail"
   | "messages"
   | "search"
+  | "objectStore"
   | "backup"
   | "config"
   | "logs"
@@ -454,6 +455,16 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
+  if (selectedKind.value === "minio") {
+    return [
+      ["overview", "概览"],
+      ["objectStore", "连接与控制台"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["docs", "使用文档"],
+    ];
+  }
   return [
     ["overview", "概览"],
     ["data", "数据浏览"],
@@ -479,6 +490,7 @@ const iconLetter: Record<ServiceKind, string> = {
   mailpit: "@",
   nats: "N",
   meilisearch: "M",
+  minio: "M",
 };
 
 const actionLabel: Record<ServiceAction, string> = {
@@ -3360,6 +3372,66 @@ onUnmounted(() => {
             <code>{{ selectedService.dataPath }}/mailpit.db</code>；
             HTML 不会直接渲染，避免测试邮件中的脚本或远程资源影响桌面端。
           </p>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'objectStore'"
+          class="object-store-panel"
+        >
+          <div class="object-store-hero">
+            <div>
+              <p>S3-COMPATIBLE OBJECT STORAGE</p>
+              <h2>MinIO 本地对象存储</h2>
+              <span>适合验证 S3 SDK、文件上传、Bucket 和预签名 URL</span>
+            </div>
+            <span class="legacy-badge">存量兼容 · 官方仓库已归档</span>
+          </div>
+          <div
+            v-if="selectedService.status !== 'running'"
+            class="workbench-empty"
+          >
+            启动 MinIO 后可访问 S3 API 与 Web Console
+          </div>
+          <template v-else>
+            <div class="object-store-grid">
+              <article class="panel object-store-card">
+                <p>S3 API</p>
+                <strong>http://127.0.0.1:9000</strong>
+                <small>应用和 AWS SDK 使用</small>
+              </article>
+              <article class="panel object-store-card">
+                <p>WEB CONSOLE</p>
+                <strong>http://127.0.0.1:9001</strong>
+                <small>在浏览器打开管理 Bucket 和对象</small>
+              </article>
+              <article class="panel object-store-card">
+                <p>ACCESS KEY</p>
+                <strong>zhiyuadmin</strong>
+                <small>仅用于本机开发</small>
+              </article>
+              <article class="panel object-store-card">
+                <p>SECRET KEY</p>
+                <strong>zhiyu-local-minio-2026</strong>
+                <small>可在配置文件中查看</small>
+              </article>
+            </div>
+            <article class="panel object-store-snippet">
+              <div class="panel-title">
+                <div>
+                  <p>ENVIRONMENT</p>
+                  <h2>应用连接配置</h2>
+                </div>
+              </div>
+              <pre>S3_ENDPOINT=http://127.0.0.1:9000
+AWS_ACCESS_KEY_ID=zhiyuadmin
+AWS_SECRET_ACCESS_KEY=zhiyu-local-minio-2026
+AWS_REGION=us-east-1
+S3_FORCE_PATH_STYLE=true</pre>
+            </article>
+            <p class="console-note">
+              MinIO 社区仓库已归档，本模块用于兼容已有开发项目；新项目建议选择 RustFS。
+            </p>
+          </template>
         </section>
 
         <section

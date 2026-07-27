@@ -5,7 +5,8 @@ export type ServiceKind =
   | "mongodb"
   | "mailpit"
   | "nats"
-  | "meilisearch";
+  | "meilisearch"
+  | "minio";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =

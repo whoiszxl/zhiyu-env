@@ -14,6 +14,7 @@ pub enum ServiceKind {
     Mailpit,
     Nats,
     Meilisearch,
+    Minio,
 }
 
 impl ServiceKind {
@@ -26,6 +27,7 @@ impl ServiceKind {
             Self::Mailpit => "mailpit",
             Self::Nats => "nats",
             Self::Meilisearch => "meilisearch",
+            Self::Minio => "minio",
         }
     }
 }

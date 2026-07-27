@@ -111,6 +111,7 @@ fn managed_service_pids() -> BTreeMap<u32, String> {
         ("mailpit", "Mailpit"),
         ("nats", "NATS"),
         ("meilisearch", "Meilisearch"),
+        ("minio", "MinIO"),
     ]
     .into_iter()
     .filter_map(|(directory, name)| {
@@ -138,6 +139,8 @@ fn common_service(port: u16) -> Option<&'static str> {
         8000 | 8080 => Some("常用 HTTP 开发端口"),
         8025 => Some("Mailpit Web"),
         8222 => Some("NATS Monitoring"),
+        9000 => Some("S3 Object Storage"),
+        9001 => Some("Object Storage Console"),
         27017 => Some("MongoDB"),
         _ => None,
     }

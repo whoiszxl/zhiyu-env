@@ -82,6 +82,7 @@ fn service_prefix(kind: ServiceKind) -> &'static str {
         ServiceKind::Mailpit => "mailpit",
         ServiceKind::Nats => "nats",
         ServiceKind::Meilisearch => "meilisearch",
+        ServiceKind::Minio => "minio.",
     }
 }
 

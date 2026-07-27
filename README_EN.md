@@ -52,6 +52,7 @@ Zhiyu focuses on making a usable local service available quickly. It is not desi
 | Mailpit | 1.30.5 | 1025 / 8025 | Local email capture, message list, and body viewer |
 | NATS | 2.14.2 | 4222 / 8222 | JetStream, live metrics, publish, and one-message subscriptions |
 | Meilisearch | 1.50.0 | 7700 | Index metrics, JSON document import, and full-text search |
+| MinIO | RELEASE.2025-09-07 | 9000 / 9001 | S3 API, Web Console, and legacy-project compatibility |
 
 Every service supports:
 

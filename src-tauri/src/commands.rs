@@ -2,14 +2,15 @@ use devbox_core::{
     installer::{
         mysql_release, postgres_release, redis_release, MysqlRelease, PostgresRelease,
         RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION,
-        MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION,
-        POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION,
+        MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES,
+        MYSQL_VERSION, NATS_SERIES, NATS_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION,
+        REDIS_RELEASES, REDIS_VERSION,
     },
     report_install_progress, with_install_reporter, ConfigManager, InstallReporter,
-    MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService, MongodbInstaller,
-    MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService, PostgresInstaller,
-    PostgresService, RedisInstaller, RedisService, ServiceConfig, ServiceKind, ServiceManager,
-    ServiceStatus,
+    MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService, MinioInstaller,
+    MinioService, MongodbInstaller, MongodbService, MysqlInstaller, MysqlService, NatsInstaller,
+    NatsService, PostgresInstaller, PostgresService, RedisInstaller, RedisService, ServiceConfig,
+    ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -113,6 +114,7 @@ pub enum ServiceKindInput {
     Mailpit,
     Nats,
     Meilisearch,
+    Minio,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -125,6 +127,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Mailpit => Self::Mailpit,
             ServiceKindInput::Nats => Self::Nats,
             ServiceKindInput::Meilisearch => Self::Meilisearch,
+            ServiceKindInput::Minio => Self::Minio,
         }
     }
 }
@@ -384,13 +387,37 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
                 ],
             )
         }
+        ServiceKind::Minio => {
+            let instance = root.join("instances/minio/default");
+            (
+                "MinIO",
+                MINIO_VERSION,
+                9000,
+                root.join(format!("installations/minio/{MINIO_SERIES}/bin/minio")),
+                vec![
+                    "server".into(),
+                    instance.join("data").display().to_string(),
+                    "--address".into(),
+                    "127.0.0.1:9000".into(),
+                    "--console-address".into(),
+                    "127.0.0.1:9001".into(),
+                ],
+            )
+        }
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
-    let environment = if kind == ServiceKind::Mailpit {
-        mailpit_environment(&instance_dir)
-    } else {
-        BTreeMap::new()
+    let environment = match kind {
+        ServiceKind::Mailpit => mailpit_environment(&instance_dir),
+        ServiceKind::Minio => BTreeMap::from([
+            ("MINIO_ROOT_USER".into(), "zhiyuadmin".into()),
+            (
+                "MINIO_ROOT_PASSWORD".into(),
+                "zhiyu-local-minio-2026".into(),
+            ),
+            ("MINIO_BROWSER".into(), "on".into()),
+        ]),
+        _ => BTreeMap::new(),
     };
 
     Ok(ServiceConfig {
@@ -496,6 +523,7 @@ fn with_service<T>(
         ServiceKindInput::Meilisearch => {
             operation(&MeilisearchService::new(config).map_err(stringify_error)?)
         }
+        ServiceKindInput::Minio => operation(&MinioService::new(config).map_err(stringify_error)?),
     }
     .map_err(stringify_error)
 }
@@ -525,6 +553,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Mailpit => "Mailpit",
         ServiceKindInput::Nats => "NATS",
         ServiceKindInput::Meilisearch => "Meilisearch",
+        ServiceKindInput::Minio => "MinIO",
     };
     Ok(ServiceInfo {
         kind: kind.into(),
@@ -597,6 +626,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Mailpit,
         ServiceKindInput::Nats,
         ServiceKindInput::Meilisearch,
+        ServiceKindInput::Minio,
     ]
     .into_iter()
     .map(info)
@@ -672,6 +702,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Meilisearch 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Minio => {
+            MinioInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 MinIO 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -964,7 +1001,8 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         | ServiceKind::Postgres
         | ServiceKind::Mailpit
         | ServiceKind::Nats
-        | ServiceKind::Meilisearch => {}
+        | ServiceKind::Meilisearch
+        | ServiceKind::Minio => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -989,7 +1027,8 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         | ServiceKind::Postgres
         | ServiceKind::Mailpit
         | ServiceKind::Nats
-        | ServiceKind::Meilisearch => config.stdout_log_path(),
+        | ServiceKind::Meilisearch
+        | ServiceKind::Minio => config.stdout_log_path(),
     }
 }
 
@@ -1002,6 +1041,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Mailpit => "mailpit.env",
         ServiceKind::Nats => "nats.conf",
         ServiceKind::Meilisearch => "meilisearch.toml",
+        ServiceKind::Minio => "minio.env",
     };
     config.config_dir().join(name)
 }
@@ -1109,6 +1149,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Mailpit => "mailpit",
         ServiceKind::Nats => "nats-server",
         ServiceKind::Meilisearch => "meilisearch",
+        ServiceKind::Minio => "minio.",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {

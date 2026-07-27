@@ -321,6 +321,12 @@ const MEILISEARCH_BINARY: &str = "meilisearch-macos-apple-silicon-1.50.0";
 const MEILISEARCH_URL: &str =
     "https://github.com/meilisearch/meilisearch/releases/download/v1.50.0/meilisearch-macos-apple-silicon";
 const MEILISEARCH_SHA256: &str = "deccb8a992e8d24c3e67118fd1166a37ef11e5b092cb1e269f2ae8a7ac8d65c8";
+pub const MINIO_SERIES: &str = "2025";
+pub const MINIO_VERSION: &str = "2025-09-07";
+const MINIO_BINARY: &str = "minio.RELEASE.2025-09-07T16-13-09Z";
+const MINIO_URL: &str =
+    "https://dl.min.io/server/minio/release/darwin-arm64/archive/minio.RELEASE.2025-09-07T16-13-09Z";
+const MINIO_SHA256: &str = "7c3b3039b76e55a1b80935848ed83998d5e8d317374f87851f46a019ff5c0aa4";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -825,6 +831,82 @@ pub struct NatsInstaller {
 #[derive(Debug, Clone)]
 pub struct MeilisearchInstaller {
     devbox_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct MinioInstaller {
+    devbox_root: PathBuf,
+}
+
+impl MinioInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 MinIO {MINIO_VERSION}"));
+        ensure_macos_arm64("MinIO")?;
+        ensure_tools(&["/usr/bin/curl"])?;
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/minio");
+        if binary_contains(&executable, &["--version"], "RELEASE.2025-09-07") {
+            report_install_progress(90, "已安装", "MinIO 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let work_dir = self.devbox_root.join("tmp").join(format!(
+            "minio-{MINIO_VERSION}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&work_dir)?;
+        let download = downloads_dir.join(MINIO_BINARY);
+        prepare_archive(&download, MINIO_BINARY, MINIO_URL, MINIO_SHA256)?;
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        fs::create_dir_all(&bin_dir)?;
+        report_install_progress(75, "整理文件", "正在写入 MinIO 版本目录");
+        fs::copy(download, bin_dir.join("minio"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(bin_dir.join("minio"), fs::Permissions::from_mode(0o755))?;
+        }
+        if !binary_contains(&bin_dir.join("minio"), &["--version"], "RELEASE.2025-09-07") {
+            let _ = fs::remove_dir_all(&work_dir);
+            return Err(DevBoxError::CommandFailed {
+                command: "minio --version".into(),
+                message: "downloaded binary is not the expected MinIO release".into(),
+            });
+        }
+        write_manifest(
+            &stage,
+            "minio",
+            MINIO_SERIES,
+            MINIO_VERSION,
+            MINIO_URL,
+            MINIO_SHA256,
+            "official-binary",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        let _ = fs::remove_dir_all(&work_dir);
+        report_install_progress(90, "完成安装", "MinIO 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/minio")
+            .join(MINIO_SERIES)
+    }
 }
 
 impl MeilisearchInstaller {

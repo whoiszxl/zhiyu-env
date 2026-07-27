@@ -1,8 +1,8 @@
 #![cfg(unix)]
 
 use devbox_core::{
-    MailpitService, MeilisearchService, MongodbService, MysqlService, NatsService, PostgresService,
-    RedisService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    MailpitService, MeilisearchService, MinioService, MongodbService, MysqlService, NatsService,
+    PostgresService, RedisService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -103,6 +103,14 @@ fn meilisearch_service_lifecycle() {
         .path()
         .join("meilisearch/conf/meilisearch.toml")
         .is_file());
+}
+
+#[test]
+fn minio_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = MinioService::new(config(temp.path(), ServiceKind::Minio)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("minio/conf/minio.env").is_file());
 }
 
 #[test]
