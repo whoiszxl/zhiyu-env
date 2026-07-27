@@ -35,6 +35,7 @@ import {
   listMeilisearchIndexes,
   listMysqlVersions,
   listPostgresVersions,
+  listPortListeners,
   listRedisVersions,
   listServiceBackups,
   listServices,
@@ -70,6 +71,7 @@ import type {
   NatsPublishResult,
   MysqlVersionInfo,
   PostgresVersionInfo,
+  PortListener,
   RedisKeyDetail,
   RedisOverview,
   RedisVersionInfo,
@@ -105,6 +107,16 @@ type DetailTab =
   | "versions"
   | "docs";
 type MetricPoint = { cpu: number; memory: number };
+type ActivityRecord = {
+  id: string;
+  kind: ServiceKind;
+  service: string;
+  action: string;
+  success: boolean;
+  createdAt: number;
+  message: string;
+};
+const ACTIVITY_STORAGE_KEY = "zhiyu.environment.activity.v1";
 type ConsoleEntry = {
   database: number;
   command: string;
@@ -152,6 +164,7 @@ type InstallTask = {
 const services = ref<ServiceInfo[]>([]);
 const selectedKind = ref<ServiceKind>("redis");
 const activeTool = ref<ToolId | null>(null);
+const dashboardActive = ref(true);
 const activeToolDefinition = computed(() => findTool(activeTool.value));
 const activeTab = ref<DetailTab>("overview");
 const loading = ref(true);
@@ -163,10 +176,14 @@ const metrics = ref<ServiceMetrics>({
   uptime: null,
 });
 const environmentMetrics = ref<EnvironmentMetrics>({
+  cpuPercent: 0,
   memoryBytes: 0,
   runningServiceCount: 0,
 });
 const environmentDiskBytes = ref(0);
+const portListeners = ref<PortListener[]>([]);
+const activityRecords = ref<ActivityRecord[]>(loadActivityRecords());
+const stoppingAll = ref(false);
 const diskUsageByKind = ref<
   Partial<Record<ServiceKind, ServiceDiskUsage>>
 >({});
@@ -261,6 +278,7 @@ const installLogExpanded = ref(true);
 let serviceTimer: number | undefined;
 let metricTimer: number | undefined;
 let diskTimer: number | undefined;
+let portTimer: number | undefined;
 let unlistenInstallProgress: UnlistenFn | undefined;
 
 const selectedService = computed(
@@ -306,6 +324,122 @@ const serviceControlBusy = computed(
 const latestInstallLog = computed(
   () => installTask.value?.logs.at(-1) ?? null,
 );
+const runningServices = computed(() =>
+  services.value.filter((service) => service.status === "running"),
+);
+const dashboardDiskRanking = computed(() =>
+  services.value
+    .map((service) => ({
+      service,
+      bytes: diskUsageByKind.value[service.kind]?.totalBytes ?? 0,
+    }))
+    .filter((item) => item.bytes > 0)
+    .sort((left, right) => right.bytes - left.bytes)
+    .slice(0, 6),
+);
+const dashboardPortListeners = computed(() => {
+  const servicePorts = new Set(services.value.map((service) => service.port));
+  return portListeners.value
+    .filter(
+      (listener) =>
+        listener.managedService !== null || servicePorts.has(listener.port),
+    )
+    .slice(0, 8);
+});
+const dashboardAlerts = computed(() => {
+  const alerts: Array<{ level: "warning" | "danger"; message: string }> = [];
+  for (const service of services.value) {
+    if (service.status === "stale_pid") {
+      alerts.push({
+        level: "danger",
+        message: `${service.name} 的 PID 记录已经失效，请重新启动服务`,
+      });
+      continue;
+    }
+    if (service.status !== "running") {
+      const occupied = portListeners.value.find(
+        (listener) =>
+          listener.port === service.port && listener.managedService === null,
+      );
+      if (occupied) {
+        alerts.push({
+          level: "warning",
+          message: `${service.name} 默认端口 ${service.port} 已被 ${occupied.process}（PID ${occupied.pid}）占用`,
+        });
+      }
+    }
+  }
+  const latestFailure =
+    activityRecords.value[0] && !activityRecords.value[0].success
+      ? activityRecords.value[0]
+      : null;
+  if (latestFailure) {
+    alerts.push({
+      level: "danger",
+      message: `最近一次失败：${latestFailure.service} ${latestFailure.action}，${latestFailure.message}`,
+    });
+  }
+  return alerts.slice(0, 6);
+});
+
+function loadActivityRecords(): ActivityRecord[] {
+  try {
+    const parsed = JSON.parse(
+      globalThis.localStorage?.getItem(ACTIVITY_STORAGE_KEY) ?? "[]",
+    );
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item) =>
+          item &&
+          typeof item.id === "string" &&
+          typeof item.service === "string" &&
+          typeof item.action === "string" &&
+          typeof item.createdAt === "number",
+      )
+      .slice(0, 30) as ActivityRecord[];
+  } catch {
+    return [];
+  }
+}
+
+function recordActivity(
+  service: ServiceInfo,
+  action: string,
+  success: boolean,
+  message: string,
+) {
+  activityRecords.value = [
+    {
+      id: newOperationId(),
+      kind: service.kind,
+      service: service.name,
+      action,
+      success,
+      createdAt: Date.now(),
+      message,
+    },
+    ...activityRecords.value,
+  ].slice(0, 30);
+  try {
+    globalThis.localStorage?.setItem(
+      ACTIVITY_STORAGE_KEY,
+      JSON.stringify(activityRecords.value),
+    );
+  } catch {
+    // Activity history remains available for the current session.
+  }
+}
+
+function formatActivityTime(value: number) {
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
 
 function newOperationId() {
   return globalThis.crypto?.randomUUID?.() ??
@@ -621,7 +755,7 @@ async function refreshServices(silent = false) {
 }
 
 async function refreshMetrics() {
-  if (activeTool.value) return;
+  if (activeTool.value || dashboardActive.value) return;
   const service = selectedService.value;
   if (!service || service.status !== "running") {
     metrics.value = {
@@ -728,6 +862,66 @@ async function refreshEnvironmentDiskUsage() {
   }
 }
 
+async function refreshPortListeners() {
+  try {
+    portListeners.value = await listPortListeners();
+  } catch {
+    // Port inspection is best-effort on the global dashboard.
+  }
+}
+
+async function openDashboard() {
+  dashboardActive.value = true;
+  activeTool.value = null;
+  notice.value = "";
+  error.value = "";
+  await Promise.all([
+    refreshServices(true),
+    refreshEnvironmentMetrics(),
+    refreshEnvironmentDiskUsage(),
+    refreshPortListeners(),
+    refreshDiskUsage(),
+    refreshPortListeners(),
+  ]);
+}
+
+async function stopAllServices() {
+  const targets = runningServices.value;
+  if (targets.length === 0 || stoppingAll.value) return;
+  if (
+    !window.confirm(
+      `确定停止当前运行的 ${targets.length} 个服务吗？服务数据不会被删除。`,
+    )
+  ) {
+    return;
+  }
+
+  stoppingAll.value = true;
+  notice.value = "";
+  error.value = "";
+  let failed = 0;
+  for (const service of targets) {
+    try {
+      await runServiceAction("stop", service.kind);
+      recordActivity(service, "停止", true, "已通过全局概览停止");
+    } catch (cause) {
+      failed += 1;
+      recordActivity(service, "停止", false, String(cause));
+    }
+  }
+  await Promise.all([
+    refreshServices(true),
+    refreshEnvironmentMetrics(),
+    refreshPortListeners(),
+  ]);
+  stoppingAll.value = false;
+  if (failed > 0) {
+    error.value = `${targets.length - failed} 个服务已停止，${failed} 个服务停止失败`;
+  } else {
+    notice.value = `已停止 ${targets.length} 个服务`;
+  }
+}
+
 async function clearInstallCache() {
   const service = selectedService.value;
   if (!service || cacheCleaning.value) return;
@@ -818,12 +1012,14 @@ async function restoreBackup(backup: ServiceBackup) {
 }
 
 function selectTool(id: ToolId) {
+  dashboardActive.value = false;
   activeTool.value = id;
   notice.value = "";
   error.value = "";
 }
 
 async function selectService(kind: ServiceKind) {
+  dashboardActive.value = false;
   activeTool.value = null;
   selectedKind.value = kind;
   activeTab.value = "overview";
@@ -928,8 +1124,15 @@ async function changeRedisVersion() {
     notice.value = wasInstalled
       ? `已切换到 Redis ${target.version}`
       : `Redis ${target.version} 安装并切换成功`;
+    recordActivity(
+      updated,
+      wasInstalled ? "切换版本" : "安装版本",
+      true,
+      notice.value,
+    );
   } catch (cause) {
     recordInstallFailure(operationId, cause);
+    recordActivity(service, "切换版本", false, String(cause));
     error.value = String(cause);
   } finally {
     redisVersionChanging.value = false;
@@ -1003,8 +1206,15 @@ async function changeMysqlVersion() {
     notice.value = wasInstalled
       ? `已切换到 MySQL ${target.version}`
       : `MySQL ${target.version} 安装并切换成功`;
+    recordActivity(
+      updated,
+      wasInstalled ? "切换版本" : "安装版本",
+      true,
+      notice.value,
+    );
   } catch (cause) {
     recordInstallFailure(operationId, cause);
+    recordActivity(service, "切换版本", false, String(cause));
     error.value = String(cause);
   } finally {
     mysqlVersionChanging.value = false;
@@ -1081,8 +1291,15 @@ async function changePostgresVersion() {
     notice.value = wasInstalled
       ? `已切换到 PostgreSQL ${target.version}`
       : `PostgreSQL ${target.version} 编译安装并切换成功`;
+    recordActivity(
+      updated,
+      wasInstalled ? "切换版本" : "安装版本",
+      true,
+      notice.value,
+    );
   } catch (cause) {
     recordInstallFailure(operationId, cause);
+    recordActivity(service, "切换版本", false, String(cause));
     error.value = String(cause);
   } finally {
     postgresVersionChanging.value = false;
@@ -1100,6 +1317,12 @@ async function execute(action: ServiceAction) {
     action === "install"
       ? startInstallTask(service.kind, service.name)
       : undefined;
+  const activityAction = {
+    install: "安装",
+    start: "启动",
+    stop: "停止",
+    restart: "重启",
+  }[action];
   try {
     const updated = await runServiceAction(
       action,
@@ -1111,11 +1334,8 @@ async function execute(action: ServiceAction) {
       (item) => item.kind === updated.kind,
     );
     if (index >= 0) services.value[index] = updated;
-    notice.value = `${service.name} ${
-      { install: "安装", start: "启动", stop: "停止", restart: "重启" }[
-        action
-      ]
-    }成功`;
+    notice.value = `${service.name} ${activityAction}成功`;
+    recordActivity(updated, activityAction, true, notice.value);
     databaseOverview.value = null;
     mongoOverview.value = null;
     mailpitOverview.value = null;
@@ -1134,6 +1354,7 @@ async function execute(action: ServiceAction) {
     ]);
   } catch (cause) {
     if (operationId) recordInstallFailure(operationId, cause);
+    recordActivity(service, activityAction, false, String(cause));
     error.value = String(cause);
   } finally {
     pendingAction.value = null;
@@ -1793,7 +2014,7 @@ onMounted(async () => {
     void refreshEnvironmentMetrics();
   }, 3000);
   metricTimer = window.setInterval(async () => {
-    if (activeTool.value) return;
+    if (activeTool.value || dashboardActive.value) return;
     await refreshMetrics();
     if (activeTab.value === "logs") await loadLogs();
   }, 2000);
@@ -1801,6 +2022,9 @@ onMounted(async () => {
     void refreshDiskUsage();
     void refreshEnvironmentDiskUsage();
   }, 60_000);
+  portTimer = window.setInterval(() => {
+    if (dashboardActive.value) void refreshPortListeners();
+  }, 10_000);
 });
 
 onUnmounted(() => {
@@ -1808,6 +2032,7 @@ onUnmounted(() => {
   if (serviceTimer) window.clearInterval(serviceTimer);
   if (metricTimer) window.clearInterval(metricTimer);
   if (diskTimer) window.clearInterval(diskTimer);
+  if (portTimer) window.clearInterval(portTimer);
 });
 </script>
 
@@ -1835,6 +2060,20 @@ onUnmounted(() => {
       </div>
 
       <nav class="service-nav">
+        <p class="nav-label">OVERVIEW</p>
+        <button
+          type="button"
+          class="service-nav-item dashboard-nav-item"
+          :class="{ active: dashboardActive }"
+          @click="openDashboard"
+        >
+          <span class="nav-icon dashboard">⌂</span>
+          <span class="nav-copy">
+            <strong>全局概览</strong>
+            <small>资源 · 状态 · 端口</small>
+          </span>
+        </button>
+
         <p class="nav-label">SERVICES</p>
         <button
           v-for="service in services"
@@ -1842,7 +2081,10 @@ onUnmounted(() => {
           type="button"
           class="service-nav-item"
           :class="{
-            active: activeTool === null && selectedKind === service.kind,
+            active:
+              !dashboardActive &&
+              activeTool === null &&
+              selectedKind === service.kind,
           }"
           @click="selectService(service.kind)"
         >
@@ -1869,7 +2111,7 @@ onUnmounted(() => {
           :key="tool.id"
           type="button"
           class="service-nav-item"
-          :class="{ active: activeTool === tool.id }"
+          :class="{ active: !dashboardActive && activeTool === tool.id }"
           @click="selectTool(tool.id)"
         >
           <span class="nav-icon" :class="tool.id">{{ tool.icon }}</span>
@@ -1954,6 +2196,212 @@ onUnmounted(() => {
       </section>
 
       <div v-if="loading" class="page-loading">正在读取服务状态…</div>
+
+      <section v-else-if="dashboardActive" class="dashboard-page">
+        <header class="dashboard-header">
+          <div>
+            <span class="dashboard-eyebrow">LOCAL ENVIRONMENT</span>
+            <h1>全局概览</h1>
+            <p>集中查看智屿管理的本地服务、资源和端口状态</p>
+          </div>
+          <button
+            type="button"
+            class="dashboard-stop-all"
+            :disabled="runningServices.length === 0 || stoppingAll"
+            @click="stopAllServices"
+          >
+            <span v-if="stoppingAll" class="spinner"></span>
+            {{
+              stoppingAll
+                ? "正在停止"
+                : `停止全部${runningServices.length ? ` (${runningServices.length})` : ""}`
+            }}
+          </button>
+        </header>
+
+        <div v-if="notice" class="notice dashboard-notice">
+          <span>{{ notice }}</span>
+          <button type="button" @click="notice = ''">×</button>
+        </div>
+        <div v-if="error" class="notice danger dashboard-notice">
+          <span>{{ error }}</span>
+          <button type="button" @click="error = ''">×</button>
+        </div>
+
+        <div class="dashboard-body">
+          <div class="dashboard-metrics">
+            <article>
+              <span>运行服务</span>
+              <strong>{{ runningServices.length }}</strong>
+              <small>共 {{ services.length }} 个服务</small>
+            </article>
+            <article>
+              <span>总 CPU</span>
+              <strong>{{ environmentMetrics.cpuPercent.toFixed(1) }}%</strong>
+              <small>智屿与运行服务</small>
+            </article>
+            <article>
+              <span>总内存</span>
+              <strong>{{ formatBytes(environmentMetrics.memoryBytes) }}</strong>
+              <small>常驻内存合计</small>
+            </article>
+            <article>
+              <span>总磁盘</span>
+              <strong>{{ formatBytes(environmentDiskBytes) }}</strong>
+              <small>~/.devbox</small>
+            </article>
+          </div>
+
+          <section
+            class="dashboard-panel dashboard-alerts"
+            :class="{ clear: dashboardAlerts.length === 0 }"
+          >
+            <div class="dashboard-panel-title">
+              <div>
+                <h2>异常提醒</h2>
+                <p>PID、端口和最近操作</p>
+              </div>
+              <span>{{ dashboardAlerts.length }}</span>
+            </div>
+            <p v-if="dashboardAlerts.length === 0" class="dashboard-empty">
+              当前没有发现异常
+            </p>
+            <ul v-else>
+              <li
+                v-for="alert in dashboardAlerts"
+                :key="alert.message"
+                :class="alert.level"
+              >
+                <i></i>
+                <span>{{ alert.message }}</span>
+              </li>
+            </ul>
+          </section>
+
+          <div class="dashboard-grid">
+            <section class="dashboard-panel service-status-panel">
+              <div class="dashboard-panel-title">
+                <div>
+                  <h2>服务状态</h2>
+                  <p>点击进入服务详情</p>
+                </div>
+              </div>
+              <button
+                v-for="service in services"
+                :key="service.kind"
+                type="button"
+                class="dashboard-service-row"
+                @click="selectService(service.kind)"
+              >
+                <span class="nav-icon" :class="service.kind">
+                  {{ iconLetter[service.kind] }}
+                </span>
+                <span>
+                  <strong>{{ service.name }}</strong>
+                  <small>v{{ service.version }} · {{ service.port }}</small>
+                </span>
+                <em :class="service.status">
+                  {{ statusLabel[service.status] }}
+                </em>
+              </button>
+            </section>
+
+            <section class="dashboard-panel">
+              <div class="dashboard-panel-title">
+                <div>
+                  <h2>端口占用</h2>
+                  <p>智屿服务与默认端口</p>
+                </div>
+                <span>{{ dashboardPortListeners.length }}</span>
+              </div>
+              <p
+                v-if="dashboardPortListeners.length === 0"
+                class="dashboard-empty"
+              >
+                暂无相关监听端口
+              </p>
+              <div v-else class="dashboard-port-list">
+                <div
+                  v-for="listener in dashboardPortListeners"
+                  :key="`${listener.pid}-${listener.address}-${listener.port}`"
+                >
+                  <code>{{ listener.port }}</code>
+                  <span>
+                    <strong>{{
+                      listener.managedService ?? listener.process
+                    }}</strong>
+                    <small>{{ listener.address }} · PID {{ listener.pid }}</small>
+                  </span>
+                  <em :class="{ managed: listener.managedService }">
+                    {{ listener.managedService ? "智屿" : "占用" }}
+                  </em>
+                </div>
+              </div>
+            </section>
+
+            <section class="dashboard-panel">
+              <div class="dashboard-panel-title">
+                <div>
+                  <h2>磁盘占用排行</h2>
+                  <p>程序、数据、日志与缓存</p>
+                </div>
+              </div>
+              <p
+                v-if="dashboardDiskRanking.length === 0"
+                class="dashboard-empty"
+              >
+                暂无磁盘数据
+              </p>
+              <div v-else class="dashboard-disk-list">
+                <div
+                  v-for="item in dashboardDiskRanking"
+                  :key="item.service.kind"
+                >
+                  <span>
+                    <strong>{{ item.service.name }}</strong>
+                    <em>{{ formatBytes(item.bytes) }}</em>
+                  </span>
+                  <i>
+                    <b
+                      :style="{
+                        width: `${Math.max(
+                          4,
+                          (item.bytes / dashboardDiskRanking[0].bytes) * 100,
+                        )}%`,
+                      }"
+                    ></b>
+                  </i>
+                </div>
+              </div>
+            </section>
+
+            <section class="dashboard-panel">
+              <div class="dashboard-panel-title">
+                <div>
+                  <h2>最近操作</h2>
+                  <p>安装与生命周期记录</p>
+                </div>
+              </div>
+              <p v-if="activityRecords.length === 0" class="dashboard-empty">
+                暂无操作记录
+              </p>
+              <div v-else class="dashboard-activity-list">
+                <div
+                  v-for="record in activityRecords.slice(0, 8)"
+                  :key="record.id"
+                >
+                  <i :class="{ failed: !record.success }"></i>
+                  <span>
+                    <strong>{{ record.service }} · {{ record.action }}</strong>
+                    <small>{{ record.message }}</small>
+                  </span>
+                  <time>{{ formatActivityTime(record.createdAt) }}</time>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
 
       <component
         :is="activeToolDefinition.component"

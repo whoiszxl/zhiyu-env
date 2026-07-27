@@ -186,6 +186,7 @@ pub struct ServiceDiskUsage {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentMetrics {
+    cpu_percent: f32,
     memory_bytes: u64,
     running_service_count: usize,
 }
@@ -1330,25 +1331,38 @@ fn collect_environment_metrics() -> Result<EnvironmentMetrics, String> {
         .collect::<Vec<_>>()
         .join(",");
     let output = Command::new("/bin/ps")
-        .args(["-p", &pid_list, "-o", "rss="])
+        .args(["-p", &pid_list, "-o", "rss=", "-o", "%cpu="])
         .output()
         .map_err(|error| format!("无法读取智屿进程指标: {error}"))?;
     if !output.status.success() {
         return Err("无法读取智屿进程指标".into());
     }
 
+    let (memory_bytes, cpu_percent) = sum_process_metrics(&String::from_utf8_lossy(&output.stdout));
     Ok(EnvironmentMetrics {
-        memory_bytes: sum_rss_bytes(&String::from_utf8_lossy(&output.stdout)),
+        cpu_percent,
+        memory_bytes,
         running_service_count,
     })
 }
 
-fn sum_rss_bytes(output: &str) -> u64 {
+fn sum_process_metrics(output: &str) -> (u64, f32) {
     output
-        .split_whitespace()
-        .filter_map(|value| value.parse::<u64>().ok())
-        .fold(0_u64, |total, rss_kib| {
-            total.saturating_add(rss_kib.saturating_mul(1024))
+        .lines()
+        .fold((0_u64, 0_f32), |(memory_bytes, cpu_percent), line| {
+            let mut values = line.split_whitespace();
+            let rss_kib = values
+                .next()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or_default();
+            let process_cpu = values
+                .next()
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or_default();
+            (
+                memory_bytes.saturating_add(rss_kib.saturating_mul(1024)),
+                cpu_percent + process_cpu,
+            )
         })
 }
 
@@ -1489,7 +1503,7 @@ mod tests {
     use super::{
         mailpit_value_allowed, mysql_service_config, path_disk_size, postgres_service_config,
         redis_service_config, selected_mysql_release, selected_postgres_release,
-        selected_redis_release, sum_rss_bytes,
+        selected_redis_release, sum_process_metrics,
     };
     use devbox_core::{ConfigManager, ServiceConfig};
     use std::fs;
@@ -1530,9 +1544,12 @@ mod tests {
     }
 
     #[test]
-    fn rss_values_are_summed_and_converted_from_kibibytes() {
-        assert_eq!(sum_rss_bytes(" 1024\n 2048\n"), 3 * 1024 * 1024);
-        assert_eq!(sum_rss_bytes(""), 0);
+    fn process_metrics_are_summed_and_rss_is_converted_from_kibibytes() {
+        assert_eq!(
+            sum_process_metrics(" 1024 1.5\n 2048 2.25\n"),
+            (3 * 1024 * 1024, 3.75)
+        );
+        assert_eq!(sum_process_metrics(""), (0, 0.0));
     }
 
     #[test]

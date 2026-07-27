@@ -55,6 +55,7 @@ export interface ServiceDiskUsage {
 }
 
 export interface EnvironmentMetrics {
+  cpuPercent: number;
   memoryBytes: number;
   runningServiceCount: number;
 }
