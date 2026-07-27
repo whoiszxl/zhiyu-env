@@ -214,6 +214,18 @@ zhiyu-env/
 install · start · stop · restart · status
 ```
 
+## 下载镜像
+
+智屿会按“自定义镜像 → GitHub 公共加速 → 官方源”的顺序下载安装包。某个下载源连接失败、速度持续过慢或 SHA-256 校验不一致时，会自动切换到下一个来源。
+
+如需使用自己的国内对象存储或 CDN，可将安装包按原始文件名上传到同一目录，然后在 `~/.devbox/download-mirror.txt` 中写入该目录的 HTTPS 地址：
+
+```text
+https://your-cdn.example.com/zhiyu-packages
+```
+
+也可以通过 `ZHIYU_DOWNLOAD_MIRROR` 环境变量临时覆盖这个地址。公共加速服务是第三方服务；如不希望使用，可设置 `ZHIYU_DISABLE_PUBLIC_MIRROR=1`，此时仍会在自定义镜像失败后回退官方源。无论使用哪个来源，安装包都必须通过项目预置的 SHA-256 校验。
+
 ## 安全边界
 
 - 下载内容必须通过预置 SHA-256 校验。

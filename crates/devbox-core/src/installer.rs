@@ -2053,28 +2053,127 @@ fn prepare_archive(
     }
 
     let partial = archive.with_file_name(format!("{archive_name}.partial"));
-    let _ = fs::remove_file(&partial);
-    report_install_progress(12, "下载安装包", format!("开始下载：{source_url}"));
-    run(
-        Command::new("/usr/bin/curl")
-            .args(["--fail", "--location", "--silent", "--show-error"])
-            .arg("--output")
-            .arg(&partial)
-            .arg(source_url),
-        "curl",
-    )?;
-    report_install_progress(30, "校验安装包", "下载完成，正在计算 SHA-256");
-    let actual = sha256(&partial)?;
-    if actual != expected_sha256 {
+    let devbox_root = archive
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new(""));
+    let configured_mirror = configured_download_mirror(devbox_root);
+    let candidates = download_candidates(
+        source_url,
+        archive_name,
+        configured_mirror.as_deref(),
+        std::env::var_os("ZHIYU_DISABLE_PUBLIC_MIRROR").is_none(),
+    );
+    let mut failures = Vec::new();
+
+    for (index, candidate) in candidates.iter().enumerate() {
         let _ = fs::remove_file(&partial);
-        return Err(DevBoxError::IntegrityMismatch {
-            expected: expected_sha256.into(),
-            actual,
+        report_install_progress(
+            12,
+            "下载安装包",
+            format!(
+                "尝试下载源 {}/{}（{}）：{}",
+                index + 1,
+                candidates.len(),
+                candidate.label,
+                candidate.url
+            ),
+        );
+        let mut command = Command::new("/usr/bin/curl");
+        command
+            .args([
+                "--fail",
+                "--location",
+                "--silent",
+                "--show-error",
+                "--connect-timeout",
+                "8",
+                "--retry",
+                "1",
+            ])
+            .arg("--output")
+            .arg(&partial);
+        if !candidate.official {
+            command.args(["--speed-time", "15", "--speed-limit", "16384"]);
+        }
+        let output = command.arg(&candidate.url).output()?;
+        if !output.status.success() {
+            let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            failures.push(format!("{}: {}", candidate.label, message));
+            report_install_log(
+                "切换下载源",
+                format!("{}不可用，自动尝试下一个下载源", candidate.label),
+            );
+            continue;
+        }
+
+        report_install_progress(30, "校验安装包", "下载完成，正在计算 SHA-256");
+        let actual = sha256(&partial)?;
+        if actual != expected_sha256 {
+            failures.push(format!("{}: SHA-256 校验不一致", candidate.label));
+            report_install_log(
+                "切换下载源",
+                format!("{}返回的文件校验失败，已丢弃并切换", candidate.label),
+            );
+            continue;
+        }
+        fs::rename(&partial, archive)?;
+        report_install_progress(
+            35,
+            "安装包就绪",
+            format!("通过{}下载并校验成功：{archive_name}", candidate.label),
+        );
+        return Ok(());
+    }
+    let _ = fs::remove_file(&partial);
+    Err(DevBoxError::CommandFailed {
+        command: "curl".into(),
+        message: format!("所有下载源均失败：{}", failures.join("；")),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DownloadCandidate {
+    label: String,
+    url: String,
+    official: bool,
+}
+
+fn configured_download_mirror(devbox_root: &Path) -> Option<String> {
+    std::env::var("ZHIYU_DOWNLOAD_MIRROR")
+        .ok()
+        .or_else(|| fs::read_to_string(devbox_root.join("download-mirror.txt")).ok())
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| value.starts_with("https://"))
+}
+
+fn download_candidates(
+    source_url: &str,
+    archive_name: &str,
+    configured_mirror: Option<&str>,
+    public_mirror_enabled: bool,
+) -> Vec<DownloadCandidate> {
+    let mut candidates = Vec::new();
+    if let Some(mirror) = configured_mirror {
+        candidates.push(DownloadCandidate {
+            label: "自定义镜像".into(),
+            url: format!("{}/{archive_name}", mirror.trim_end_matches('/')),
+            official: false,
         });
     }
-    fs::rename(partial, archive)?;
-    report_install_progress(35, "安装包就绪", format!("校验通过：{archive_name}"));
-    Ok(())
+    if public_mirror_enabled && source_url.starts_with("https://github.com/") {
+        candidates.push(DownloadCandidate {
+            label: "GitHub 公共加速".into(),
+            url: format!("https://gh-proxy.com/{source_url}"),
+            official: false,
+        });
+    }
+    candidates.push(DownloadCandidate {
+        label: "官方源".into(),
+        url: source_url.into(),
+        official: true,
+    });
+    candidates
 }
 
 fn write_manifest(
@@ -2233,6 +2332,60 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn github_downloads_prefer_configured_and_public_mirrors() {
+        let source =
+            "https://github.com/example/project/releases/download/v1.0/project-v1.0.tar.gz";
+        let candidates = download_candidates(
+            source,
+            "project-v1.0.tar.gz",
+            Some("https://mirror.example.com/zhiyu/"),
+            true,
+        );
+
+        assert_eq!(
+            candidates,
+            vec![
+                DownloadCandidate {
+                    label: "自定义镜像".into(),
+                    url: "https://mirror.example.com/zhiyu/project-v1.0.tar.gz".into(),
+                    official: false,
+                },
+                DownloadCandidate {
+                    label: "GitHub 公共加速".into(),
+                    url: format!("https://gh-proxy.com/{source}"),
+                    official: false,
+                },
+                DownloadCandidate {
+                    label: "官方源".into(),
+                    url: source.into(),
+                    official: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn public_mirror_only_applies_to_github_and_can_be_disabled() {
+        let non_github = download_candidates(
+            "https://cdn.example.com/project.tar.gz",
+            "project.tar.gz",
+            None,
+            true,
+        );
+        assert_eq!(non_github.len(), 1);
+        assert!(non_github[0].official);
+
+        let github = download_candidates(
+            "https://github.com/example/project/releases/download/v1/project.tar.gz",
+            "project.tar.gz",
+            None,
+            false,
+        );
+        assert_eq!(github.len(), 1);
+        assert!(github[0].official);
     }
 
     #[test]

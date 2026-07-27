@@ -209,6 +209,18 @@ Every core service implements the same `ServiceManager` lifecycle:
 install · start · stop · restart · status
 ```
 
+## Download mirrors
+
+Zhiyu tries downloads in this order: custom mirror, public GitHub accelerator, then the official source. A connection failure, sustained low speed, or SHA-256 mismatch automatically falls through to the next source.
+
+To use your own object storage or CDN, upload packages under their original archive names to one directory, then put that directory's HTTPS URL in `~/.devbox/download-mirror.txt`:
+
+```text
+https://your-cdn.example.com/zhiyu-packages
+```
+
+The `ZHIYU_DOWNLOAD_MIRROR` environment variable can override this setting temporarily. The public accelerator is a third-party service; set `ZHIYU_DISABLE_PUBLIC_MIRROR=1` to disable it. Zhiyu will still fall back from a custom mirror to the official source. Packages from every source must match the SHA-256 checksum bundled with the application.
+
 ## Security boundaries
 
 - Downloads must match a predefined SHA-256 checksum.
