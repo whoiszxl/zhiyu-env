@@ -1,3 +1,4 @@
+import DataFormatTool from "../components/tools/DataFormatTool.vue";
 import DuckdbTool from "../components/tools/DuckdbTool.vue";
 import PortTool from "../components/tools/PortTool.vue";
 import type { ToolDefinition, ToolId } from "./types";
@@ -13,6 +14,13 @@ export const TOOLS: ToolDefinition[] = [
     navHint: "TCP LISTEN",
     icon: "↔",
     component: PortTool,
+  },
+  {
+    id: "dataformat",
+    navLabel: "数据格式工具箱",
+    navHint: "JSON · YAML · TOML",
+    icon: "{ }",
+    component: DataFormatTool,
   },
   {
     id: "duckdb",

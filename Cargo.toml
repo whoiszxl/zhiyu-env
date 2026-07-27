@@ -13,5 +13,9 @@ csv = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# serde_yaml 已归档，serde_norway 是其活跃维护分支
+serde_norway = "0.9"
+serde_json_path = "0.7"
 sha2 = "0.10"
 thiserror = "2"
+toml = "1"

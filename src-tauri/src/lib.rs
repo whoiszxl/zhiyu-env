@@ -6,6 +6,7 @@ mod mongodb_tools;
 mod port_tools;
 mod redis_tools;
 mod storage_tools;
+mod tools;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -53,6 +54,9 @@ pub fn run() {
             duckdb_tools::duckdb_status,
             duckdb_tools::duckdb_install,
             duckdb_tools::duckdb_query,
+            tools::data_format::data_format_transform,
+            tools::json_diff::data_json_diff,
+            tools::json_path::data_jsonpath_query,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");

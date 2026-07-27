@@ -260,3 +260,38 @@ export interface DuckdbQueryResult {
   truncated: boolean;
   summary: string;
 }
+
+// ── 内置工具：JSON / YAML / TOML 工具箱 ──────────────────────
+
+export type DataFormat = "json" | "yaml" | "toml" | "auto";
+export type OutputStyle = "pretty" | "compact";
+
+export interface TransformResult {
+  output: string;
+  detectedFormat: string;
+  warnings: string[];
+  inputBytes: number;
+  outputBytes: number;
+}
+
+export type JsonDiffKind = "added" | "removed" | "changed";
+
+export interface JsonDiffEntry {
+  path: string;
+  kind: JsonDiffKind;
+  left: string | null;
+  right: string | null;
+}
+
+export interface JsonDiffResult {
+  entries: JsonDiffEntry[];
+  added: number;
+  removed: number;
+  changed: number;
+  identical: boolean;
+}
+
+export interface JsonPathResult {
+  matches: string[];
+  count: number;
+}
