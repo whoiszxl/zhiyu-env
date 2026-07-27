@@ -130,7 +130,7 @@ type ActivityRecord = {
   message: string;
 };
 type TrayNavigationEvent = {
-  target: "overview" | "settings" | "service";
+  target: "overview" | "settings" | "service" | "clipboard";
   kind: ServiceKind | null;
 };
 type TrayServiceActionEvent = {
