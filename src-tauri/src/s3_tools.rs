@@ -4,7 +4,9 @@ use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
+use std::fs;
 use std::io::Read;
+use std::path::PathBuf;
 use std::time::Duration;
 use time::OffsetDateTime;
 
@@ -15,6 +17,7 @@ const LIST_RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
 const PREVIEW_RESPONSE_LIMIT: usize = 3 * 1024 * 1024;
 const ERROR_RESPONSE_LIMIT: usize = 256 * 1024;
 const DEFAULT_PAGE_SIZE: u16 = 200;
+const MAX_UPLOAD_SIZE: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +29,45 @@ pub struct S3Config {
     pub bucket: String,
     #[serde(default = "default_true")]
     pub path_style: bool,
+}
+
+fn s3_config_path() -> Result<PathBuf, String> {
+    let directory = dirs::config_dir()
+        .ok_or_else(|| "无法确定应用配置目录".to_string())?
+        .join("zhiyu-env");
+    fs::create_dir_all(&directory).map_err(|error| format!("创建对象存储配置目录失败: {error}"))?;
+    Ok(directory.join("s3-config.json"))
+}
+
+#[tauri::command]
+pub fn s3_config_get() -> Result<Option<S3Config>, String> {
+    let path = s3_config_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let config: S3Config = serde_json::from_slice(
+        &fs::read(&path).map_err(|error| format!("读取对象存储配置失败: {error}"))?,
+    )
+    .map_err(|error| format!("解析对象存储配置失败: {error}"))?;
+    Ok(Some(config))
+}
+
+#[tauri::command]
+pub fn s3_config_save(config: S3Config) -> Result<(), String> {
+    validate_config(&config)?;
+    let path = s3_config_path()?;
+    let bytes = serde_json::to_vec_pretty(&config)
+        .map_err(|error| format!("序列化对象存储配置失败: {error}"))?;
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, bytes).map_err(|error| format!("写入对象存储配置失败: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("设置对象存储配置权限失败: {error}"))?;
+    }
+    fs::rename(&temporary, &path).map_err(|error| format!("保存对象存储配置失败: {error}"))?;
+    Ok(())
 }
 
 fn default_true() -> bool {
@@ -79,6 +121,8 @@ struct S3Response {
 struct RequestTarget {
     url_prefix: String,
     host: String,
+    // COS 的签名字符串使用原始 UTF-8 请求路径；实际 HTTP URL 仍使用编码后的路径。
+    cos_uri: String,
     canonical_uri: String,
 }
 
@@ -225,6 +269,7 @@ fn request_target(
     Ok(RequestTarget {
         url_prefix: format!("{scheme}://{host}"),
         host,
+        cos_uri: raw_uri.clone(),
         canonical_uri: percent_encode(&raw_uri, false),
     })
 }
@@ -262,8 +307,11 @@ fn cos_authorization(
         percent_encode(host, true)
     );
     let string_to_sign = format!("sha1\n{key_time}\n{}\n", sha1_hex(&http_string));
-    let sign_key = hmac_sha1(config.secret_key.as_bytes(), &key_time);
-    let signature = hex(&hmac_sha1(&sign_key, &string_to_sign));
+    // COS defines SignKey as the lowercase hex string produced by the first
+    // HMAC, then uses that string (not the raw 20-byte digest) as the key for
+    // the second HMAC.
+    let sign_key = hex(&hmac_sha1(config.secret_key.as_bytes(), &key_time));
+    let signature = hex(&hmac_sha1(sign_key.as_bytes(), &string_to_sign));
     format!(
         "q-sign-algorithm=sha1&q-ak={}&q-sign-time={key_time}&q-key-time={key_time}&\
          q-header-list=host&q-url-param-list={query_keys}&q-signature={signature}",
@@ -380,7 +428,7 @@ fn s3_request(
             cos_authorization(
                 config,
                 method,
-                &target.canonical_uri,
+                &target.cos_uri,
                 &query,
                 &target.host,
                 now_unix(),
@@ -564,6 +612,33 @@ pub async fn s3_put_object(config: S3Config, key: String, data: String) -> Resul
 }
 
 #[tauri::command]
+pub async fn s3_put_file(config: S3Config, key: String, path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let metadata = fs::metadata(&path).map_err(|error| format!("读取待上传文件失败: {error}"))?;
+        if !metadata.is_file() {
+            return Err("选择的路径不是文件".to_string());
+        }
+        if metadata.len() > MAX_UPLOAD_SIZE {
+            return Err(format!("文件超过 256 MB 上传限制: {}", metadata.len()));
+        }
+        let data = fs::read(&path).map_err(|error| format!("读取待上传文件失败: {error}"))?;
+        let endpoint = validate_config(&config)?;
+        let key = object_key(&config, &endpoint, &key);
+        s3_request(
+            &config,
+            "PUT",
+            &key,
+            &[],
+            Some(&data),
+            ERROR_RESPONSE_LIMIT,
+        )?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("对象存储上传任务异常: {error}"))?
+}
+
+#[tauri::command]
 pub async fn s3_delete_object(config: S3Config, key: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let endpoint = validate_config(&config)?;
@@ -590,7 +665,7 @@ pub async fn s3_presigned_url(
         let authorization = cos_authorization(
             &config,
             "GET",
-            &target.canonical_uri,
+            &target.cos_uri,
             "",
             &target.host,
             now_unix(),
@@ -694,12 +769,45 @@ mod tests {
             &config,
             "GET",
             "/",
-            "delimiter=%2F&max-keys=200&prefix=",
+            "delimiter=%2F&list-type=2&max-keys=200&prefix=",
             "demo-123.cos.ap-guangzhou.myqcloud.com",
             100,
             3_600,
         );
-        assert!(auth.contains("q-url-param-list=delimiter;max-keys;prefix"));
+        assert!(auth.contains("q-url-param-list=delimiter;list-type;max-keys;prefix"));
+        assert!(auth.contains("q-signature=769db06df8b07e5a74a9125b3ec0e8b8ad85bd33"));
         assert!(is_cos_endpoint("cos.ap-guangzhou.myqcloud.com"));
+    }
+
+    #[test]
+    fn cos_format_string_matches_reported_server_hash() {
+        let format_string = "get\n/\ndelimiter=%2F&list-type=2&max-keys=200&prefix=\n\
+                             host=demo-123.cos.ap-guangzhou.myqcloud.com\n";
+        assert_eq!(
+            sha1_hex(format_string),
+            "6b245b4c7b16047afa899a5226ee78c7320e0923"
+        );
+    }
+
+    #[test]
+    fn cos_signing_keeps_raw_unicode_uri_but_encodes_http_uri() {
+        let config = S3Config {
+            endpoint: "https://cos.ap-guangzhou.myqcloud.com".into(),
+            access_key: "id".into(),
+            secret_key: "secret".into(),
+            region: "ap-guangzhou".into(),
+            bucket: "demo-123".into(),
+            path_style: false,
+        };
+        let endpoint = reqwest::Url::parse(&config.endpoint).unwrap();
+        let target = request_target(
+            &config,
+            &endpoint,
+            "creative-materials/林一航_-*Java*高级开发工程师简历.html",
+        )
+        .unwrap();
+        assert!(target.cos_uri.contains("林一航"));
+        assert!(target.canonical_uri.contains("%E6%9E%97"));
+        assert!(target.canonical_uri.contains("%2A"));
     }
 }

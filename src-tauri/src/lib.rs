@@ -154,8 +154,11 @@ pub fn run() {
             s3_tools::s3_list_objects,
             s3_tools::s3_get_object,
             s3_tools::s3_put_object,
+            s3_tools::s3_put_file,
             s3_tools::s3_delete_object,
             s3_tools::s3_presigned_url,
+            s3_tools::s3_config_get,
+            s3_tools::s3_config_save,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");

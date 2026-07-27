@@ -112,6 +112,14 @@ export function executeSqlite(
 
 // ── S3 对象存储浏览器 ──────────────────────────────────────
 
+export function s3ConfigGet(): Promise<S3Config | null> {
+  return invoke<S3Config | null>("s3_config_get");
+}
+
+export function s3ConfigSave(config: S3Config): Promise<void> {
+  return invoke<void>("s3_config_save", { config });
+}
+
 export function s3ListBuckets(config: S3Config): Promise<S3Bucket[]> {
   return invoke<S3Bucket[]>("s3_list_buckets", { config });
 }
@@ -136,6 +144,10 @@ export function s3GetObject(config: S3Config, key: string): Promise<S3ObjectCont
 
 export function s3PutObject(config: S3Config, key: string, data: string): Promise<void> {
   return invoke<void>("s3_put_object", { config, key, data });
+}
+
+export function s3PutFile(config: S3Config, key: string, path: string): Promise<void> {
+  return invoke<void>("s3_put_file", { config, key, path });
 }
 
 export function s3DeleteObject(config: S3Config, key: string): Promise<void> {

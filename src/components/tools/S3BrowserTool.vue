@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   s3DeleteObject,
+  s3ConfigGet,
+  s3ConfigSave,
   s3GetObject,
   s3ListBuckets,
   s3ListObjects,
   s3PresignedUrl,
-  s3PutObject,
+  s3PutFile,
 } from "../../api/tools";
 import type { S3Config, S3Bucket, S3Object } from "../../types";
 import { formatBytes } from "../../utils/format";
@@ -38,9 +41,10 @@ const previewUrl = ref("");
 const previewContentType = ref("");
 const previewing = ref(false);
 
-const uploadKey = ref("");
-const uploadData = ref("");
 const uploading = ref(false);
+const selectedPreset = ref("");
+const connectionHistory = ref<Array<S3Config & { label: string; provider: string; lastUsedAt: number }>>([]);
+const HISTORY_STORAGE_KEY = "zhiyu-env.s3.connection-history";
 
 const presignedResult = ref("");
 const isCos = computed(() =>
@@ -72,8 +76,36 @@ const previewKind = computed<
   }
   return "download";
 });
+
+onMounted(async () => {
+  try {
+    const rawHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (rawHistory) {
+      const parsed = JSON.parse(rawHistory);
+      if (Array.isArray(parsed)) connectionHistory.value = parsed.slice(0, 8);
+    }
+  } catch {
+    connectionHistory.value = [];
+  }
+  try {
+    const saved = await s3ConfigGet();
+    if (saved) {
+      config.value = saved;
+      const matchingPreset = presets.find(
+        (preset) =>
+          preset.endpoint === saved.endpoint &&
+          preset.region === saved.region &&
+          preset.pathStyle === saved.pathStyle,
+      );
+      if (matchingPreset) selectedPreset.value = matchingPreset.label;
+      if (saved && connectionHistory.value.length === 0) saveConnectionHistory();
+    }
+  } catch {
+    // 本地配置不可用时保留默认配置，连接时再提示用户。
+  }
+});
 const breadcrumbs = computed(() => {
-  const crumbs = [{ label: config.value.bucket, prefix: "" }];
+  const crumbs = [{ label: "根目录", prefix: "" }];
   let prefix = "";
   for (const part of currentPrefix.value.split("/").filter(Boolean)) {
     prefix += `${part}/`;
@@ -98,6 +130,54 @@ function objectName(key: string) {
   return key.slice(currentPrefix.value.length);
 }
 
+function fileTypeLabel(key: string) {
+  const name = key.split("/").pop() ?? key;
+  const extension = name.includes(".") ? name.split(".").pop() ?? "" : "";
+  return extension ? extension.slice(0, 5).toUpperCase() : "FILE";
+}
+
+function historyLabel() {
+  return selectedPreset.value || "S3 兼容存储";
+}
+
+function saveConnectionHistory() {
+  const entry = {
+    ...config.value,
+    label: historyLabel(),
+    provider: selectedPreset.value || "S3 兼容存储",
+    lastUsedAt: Date.now(),
+  };
+  const identity = `${entry.endpoint}|${entry.region}|${entry.bucket}|${entry.accessKey}`;
+  connectionHistory.value = [
+    entry,
+    ...connectionHistory.value.filter(
+      (item) => `${item.endpoint}|${item.region}|${item.bucket}|${item.accessKey}` !== identity,
+    ),
+  ].slice(0, 8);
+  try {
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(connectionHistory.value));
+  } catch {
+    // 本地存储不可用时不影响当前连接。
+  }
+}
+
+function useConnectionHistory(item: S3Config & { provider?: string }) {
+  config.value = {
+    endpoint: item.endpoint,
+    accessKey: item.accessKey,
+    secretKey: item.secretKey,
+    region: item.region,
+    bucket: item.bucket,
+    pathStyle: item.pathStyle,
+  };
+  selectedPreset.value = item.provider ?? "";
+  connected.value = false;
+  buckets.value = [];
+  folders.value = [];
+  objects.value = [];
+  error.value = "";
+}
+
 function parentPrefix() {
   const parts = currentPrefix.value.split("/").filter(Boolean);
   parts.pop();
@@ -115,6 +195,8 @@ async function connect() {
     } else {
       buckets.value = await s3ListBuckets(config.value);
     }
+    await s3ConfigSave(config.value);
+    saveConnectionHistory();
     connected.value = true;
   } catch (e: any) {
     error.value = String(e);
@@ -129,6 +211,8 @@ async function selectBucket(name: string) {
   currentPrefix.value = "";
   resetPagination();
   await loadObjectPage();
+  await s3ConfigSave(config.value);
+  saveConnectionHistory();
 }
 
 async function loadObjectPage(token = pageTokens.value[pageIndex.value] || "") {
@@ -232,17 +316,21 @@ function closePreview() {
   previewContentType.value = "";
 }
 
-async function uploadFile() {
-  if (!uploadKey.value || !uploadData.value) return;
+async function uploadSelectedFile() {
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    title: `上传到 ${currentPrefix.value || "根目录"}`,
+  });
+  if (typeof selected !== "string") return;
+
+  const fileName = selected.split(/[\\/]/).pop();
+  if (!fileName) return;
+
   uploading.value = true;
   error.value = "";
   try {
-    const key = uploadKey.value.startsWith(currentPrefix.value)
-      ? uploadKey.value
-      : `${currentPrefix.value}${uploadKey.value}`;
-    await s3PutObject(config.value, key, uploadData.value);
-    uploadKey.value = "";
-    uploadData.value = "";
+    await s3PutFile(config.value, `${currentPrefix.value}${fileName}`, selected);
     await refreshObjects();
   } catch (e: any) {
     error.value = String(e);
@@ -299,12 +387,14 @@ const presets = [
   { label: "七牛云 Kodo", endpoint: "https://s3-cn-east-1.qiniucs.com", region: "cn-east-1", pathStyle: true },
   { label: "AWS S3", endpoint: "https://s3.amazonaws.com", region: "us-east-1", pathStyle: false },
   { label: "MinIO", endpoint: "http://127.0.0.1:9000", region: "us-east-1", pathStyle: true },
+  { label: "RustFS", endpoint: "http://127.0.0.1:9000", region: "us-east-1", pathStyle: true },
 ];
 
 function applyPreset(p: typeof presets[0]) {
   config.value.endpoint = p.endpoint;
   config.value.region = p.region;
   config.value.pathStyle = p.pathStyle;
+  selectedPreset.value = p.label;
   error.value = "";
 }
 </script>
@@ -342,8 +432,22 @@ function applyPreset(p: typeof presets[0]) {
             :key="p.label"
             type="button"
             class="preset-btn"
+            :class="{ selected: selectedPreset === p.label }"
             @click="applyPreset(p)"
           >{{ p.label }}</button>
+        </div>
+        <div v-if="connectionHistory.length" class="s3-history">
+          <p>最近连接</p>
+          <button
+            v-for="item in connectionHistory"
+            :key="`${item.endpoint}-${item.bucket}-${item.lastUsedAt}`"
+            type="button"
+            class="s3-history-item"
+            @click="useConnectionHistory(item)"
+          >
+            <strong>{{ item.label }}</strong>
+            <small>{{ item.endpoint }}</small>
+          </button>
         </div>
         <label>
           <span>Endpoint</span>
@@ -366,7 +470,7 @@ function applyPreset(p: typeof presets[0]) {
           <input
             v-model="config.bucket"
             type="text"
-            :placeholder="isCos ? '例如 bucket-name-123456' : '留空则先列出 Bucket'"
+            :placeholder="isCos ? '请输入 Bucket' : '留空则先列出 Bucket'"
             spellcheck="false"
           />
         </label>
@@ -430,7 +534,7 @@ function applyPreset(p: typeof presets[0]) {
         <div v-if="config.bucket" class="s3-list">
           <div class="s3-toolbar">
             <div>
-              <p>BUCKET · {{ config.bucket }}</p>
+              <p>OBJECTS</p>
               <div class="s3-breadcrumbs">
                 <template
                   v-for="(crumb, index) in breadcrumbs"
@@ -447,7 +551,12 @@ function applyPreset(p: typeof presets[0]) {
                 </template>
               </div>
             </div>
-            <button type="button" @click="refreshObjects" :disabled="loading">刷新</button>
+            <div class="s3-toolbar-actions">
+              <button type="button" @click="refreshObjects" :disabled="loading">刷新</button>
+              <button type="button" class="primary" @click="uploadSelectedFile" :disabled="uploading || loading">
+                {{ uploading ? "上传中…" : "上传" }}
+              </button>
+            </div>
           </div>
 
           <div v-if="loading" class="panel-state">加载中…</div>
@@ -491,7 +600,8 @@ function applyPreset(p: typeof presets[0]) {
             </button>
             <div v-for="obj in objects" :key="obj.key" class="s3-row">
               <span class="s3-key" :title="obj.key">
-                {{ objectName(obj.key) }}
+                <span class="s3-file-badge" aria-hidden="true">{{ fileTypeLabel(obj.key) }}</span>
+                <span class="s3-key-name">{{ objectName(obj.key) }}</span>
               </span>
               <span>{{ formatBytes(obj.size) }}</span>
               <span>{{ obj.lastModified.slice(0, 10) }}</span>
@@ -523,52 +633,55 @@ function applyPreset(p: typeof presets[0]) {
             </div>
           </div>
 
-          <!-- Upload section -->
-          <div class="s3-upload">
-            <p>UPLOAD</p>
-            <div class="s3-upload-row">
-              <input v-model="uploadKey" type="text" placeholder="对象 Key（路径）" spellcheck="false" />
-              <textarea v-model="uploadData" placeholder="文件内容…" rows="3" spellcheck="false"></textarea>
-              <button type="button" class="primary" :disabled="uploading || !uploadKey || !uploadData" @click="uploadFile">
-                {{ uploading ? "上传中…" : "上传" }}
-              </button>
-            </div>
-          </div>
         </div>
 
         <!-- Preview -->
-        <div v-if="previewKey" class="s3-preview">
-          <div class="s3-toolbar">
-            <h2>{{ previewKey }}</h2>
-            <button type="button" @click="closePreview">×</button>
-          </div>
-          <div v-if="previewing" class="panel-state">正在准备预览…</div>
-          <pre v-else-if="previewKind === 'text'"><code>{{ previewContent }}</code></pre>
-          <audio
-            v-else-if="previewKind === 'audio' && previewUrl"
-            :src="previewUrl"
-            controls
-            preload="metadata"
-          ></audio>
-          <video
-            v-else-if="previewKind === 'video' && previewUrl"
-            :src="previewUrl"
-            controls
-            preload="metadata"
-          ></video>
-          <img
-            v-else-if="previewKind === 'image' && previewUrl"
-            :src="previewUrl"
-            alt="对象预览"
-          />
-          <iframe
-            v-else-if="previewKind === 'pdf' && previewUrl"
-            :src="previewUrl"
-            title="PDF 预览"
-          ></iframe>
-          <div v-else class="s3-binary-preview">
-            <p>该文件类型不支持直接预览，可通过临时链接打开或下载。</p>
-            <a v-if="previewUrl" :href="previewUrl" target="_blank">打开临时链接</a>
+        <div
+          v-if="previewKey"
+          class="s3-preview-modal"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="`预览 ${previewKey}`"
+          tabindex="-1"
+          @click.self="closePreview"
+          @keydown.esc="closePreview"
+        >
+          <div class="s3-preview-dialog">
+            <div class="s3-toolbar">
+              <div>
+                <p>PREVIEW</p>
+                <h2 :title="previewKey">{{ previewKey }}</h2>
+              </div>
+              <button type="button" aria-label="关闭预览" @click="closePreview">×</button>
+            </div>
+            <div v-if="previewing" class="panel-state">正在准备预览…</div>
+            <pre v-else-if="previewKind === 'text'"><code>{{ previewContent }}</code></pre>
+            <audio
+              v-else-if="previewKind === 'audio' && previewUrl"
+              :src="previewUrl"
+              controls
+              preload="metadata"
+            ></audio>
+            <video
+              v-else-if="previewKind === 'video' && previewUrl"
+              :src="previewUrl"
+              controls
+              preload="metadata"
+            ></video>
+            <img
+              v-else-if="previewKind === 'image' && previewUrl"
+              :src="previewUrl"
+              alt="对象预览"
+            />
+            <iframe
+              v-else-if="previewKind === 'pdf' && previewUrl"
+              :src="previewUrl"
+              title="PDF 预览"
+            ></iframe>
+            <div v-else class="s3-binary-preview">
+              <p>该文件类型不支持直接预览，可通过临时链接打开或下载。</p>
+              <a v-if="previewUrl" :href="previewUrl" target="_blank">打开临时链接</a>
+            </div>
           </div>
         </div>
 
@@ -637,9 +750,7 @@ function applyPreset(p: typeof presets[0]) {
   font-size: 9px;
 }
 
-.s3-sidebar-body input,
-.s3-upload input,
-.s3-upload textarea {
+.s3-sidebar-body input {
   width: 100%;
   padding: 6px 9px;
   border: 1px solid #c8c7bf;
@@ -650,9 +761,7 @@ function applyPreset(p: typeof presets[0]) {
   color: #353830;
 }
 
-.s3-sidebar-body input:focus,
-.s3-upload input:focus,
-.s3-upload textarea:focus {
+.s3-sidebar-body input:focus {
   border-color: #777a70;
   box-shadow: 0 0 0 2px rgba(77, 81, 69, 0.08);
 }
@@ -677,6 +786,57 @@ function applyPreset(p: typeof presets[0]) {
   border-color: #898b83;
   color: #252920;
 }
+
+.preset-btn.selected {
+  border-color: #5d795f;
+  background: #e6eee4;
+  color: #315c3a;
+  font-weight: 600;
+}
+
+.s3-history {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 3px;
+  border-top: 1px solid #e4e2da;
+}
+
+.s3-history > p {
+  margin: 0 0 2px;
+  color: #989a93;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.s3-history-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid #deddd5;
+  background: #f7f6f1;
+  color: #55584f;
+  text-align: left;
+  cursor: pointer;
+}
+
+.s3-history-item:hover {
+  border-color: #9bb39b;
+  background: #edf3ea;
+}
+
+.s3-history-item strong,
+.s3-history-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.s3-history-item strong { font-size: 9px; }
+.s3-history-item small { color: #96988f; font-size: 8px; }
 
 .connect-btn {
   width: 100%;
@@ -736,6 +896,18 @@ function applyPreset(p: typeof presets[0]) {
   cursor: pointer;
 }
 
+.s3-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.s3-toolbar-actions button.primary {
+  border-color: #526b54;
+  background: #526b54;
+  color: #fff;
+}
+
 .s3-table {
   font-size: 11px;
 }
@@ -781,12 +953,39 @@ function applyPreset(p: typeof presets[0]) {
 }
 
 .s3-key {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   color: #353830;
+}
+
+.s3-file-badge {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid #c6c9bc;
+  border-radius: 4px;
+  background: #eef1e9;
+  color: #5c765e;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.s3-key-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .s3-actions {
@@ -818,52 +1017,56 @@ function applyPreset(p: typeof presets[0]) {
   font-size: 9px;
 }
 
-.s3-upload {
-  margin: 16px;
-  padding: 14px 16px;
-  border: 1px solid #d2d1c9;
-  background: #faf9f5;
+.s3-preview-modal {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  padding: 32px;
+  place-items: center;
+  background: rgba(24, 27, 22, 0.52);
+  backdrop-filter: blur(3px);
 }
 
-.s3-upload p {
-  margin: 0 0 10px;
-  color: #989a93;
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
-  letter-spacing: 0.12em;
-}
-
-.s3-upload-row {
+.s3-preview-dialog {
   display: flex;
+  width: min(920px, 100%);
+  height: min(680px, calc(100vh - 64px));
+  max-height: min(760px, calc(100vh - 64px));
   flex-direction: column;
-  gap: 8px;
+  overflow: hidden;
+  border: 1px solid #b9b8ae;
+  border-radius: 10px;
+  background: #faf9f5;
+  box-shadow: 0 24px 80px rgba(20, 23, 18, 0.28);
 }
 
-.s3-upload-row textarea {
-  resize: vertical;
-  min-height: 60px;
+.s3-preview-dialog .s3-toolbar {
+  flex: 0 0 auto;
 }
 
-.s3-upload-row button {
-  align-self: flex-start;
-  padding: 6px 16px;
-  border: 1px solid #252920;
-  background: #252920;
-  color: white;
-  font-size: 9px;
-  cursor: pointer;
+.s3-preview-dialog .s3-toolbar > div {
+  min-width: 0;
 }
 
-.s3-preview {
-  margin: 16px;
-  border: 1px solid #d2d1c9;
+.s3-preview-dialog .s3-toolbar p {
+  margin: 0 0 3px;
 }
 
-.s3-preview pre {
+.s3-preview-dialog .s3-toolbar h2 {
+  max-width: min(720px, 70vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.s3-preview-dialog pre {
   margin: 0;
   padding: 14px;
   overflow: auto;
-  max-height: 400px;
+  min-height: 0;
+  flex: 1 1 auto;
+  max-height: none;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   line-height: 1.5;
@@ -873,20 +1076,20 @@ function applyPreset(p: typeof presets[0]) {
   word-break: break-all;
 }
 
-.s3-preview audio {
+.s3-preview-dialog audio {
   display: block;
   width: calc(100% - 32px);
   margin: 22px 16px;
 }
 
-.s3-preview video {
+.s3-preview-dialog video {
   display: block;
   width: 100%;
   max-height: 560px;
   background: #171914;
 }
 
-.s3-preview img {
+.s3-preview-dialog img {
   display: block;
   max-width: calc(100% - 32px);
   max-height: 560px;
@@ -894,10 +1097,18 @@ function applyPreset(p: typeof presets[0]) {
   object-fit: contain;
 }
 
-.s3-preview iframe {
+.s3-preview-dialog iframe {
   width: 100%;
-  height: 620px;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
   border: 0;
+}
+
+.s3-preview-dialog > .panel-state,
+.s3-preview-dialog > .s3-binary-preview {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .s3-binary-preview {
@@ -913,6 +1124,15 @@ function applyPreset(p: typeof presets[0]) {
 .s3-binary-preview a {
   color: #416b49;
   font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .s3-preview-modal { padding: 12px; }
+  .s3-preview-dialog {
+    height: calc(100vh - 24px);
+    max-height: calc(100vh - 24px);
+  }
+  .s3-preview-dialog iframe { height: min(620px, calc(100vh - 150px)); }
 }
 
 .panel-state {
