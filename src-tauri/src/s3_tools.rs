@@ -1,13 +1,20 @@
 use base64::Engine;
 use hmac::{Hmac, Mac};
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
-use sha2::Digest;
-use std::collections::BTreeMap;
+use sha2::{Digest, Sha256};
+use std::io::Read;
+use std::time::Duration;
 use time::OffsetDateTime;
 
 type HmacSha1 = Hmac<Sha1>;
+type HmacSha256 = Hmac<Sha256>;
+
+const LIST_RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
+const PREVIEW_RESPONSE_LIMIT: usize = 3 * 1024 * 1024;
+const ERROR_RESPONSE_LIMIT: usize = 256 * 1024;
+const DEFAULT_PAGE_SIZE: u16 = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,173 +28,678 @@ pub struct S3Config {
     pub path_style: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct S3Bucket { pub name: String, pub creation_date: String }
+pub struct S3Bucket {
+    pub name: String,
+    pub creation_date: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct S3Object { pub key: String, pub size: u64, pub last_modified: String, pub etag: String }
+pub struct S3Object {
+    pub key: String,
+    pub size: u64,
+    pub last_modified: String,
+    pub etag: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct S3ObjectContent { pub content_type: String, pub data: String, pub size: u64 }
+pub struct S3ListResult {
+    pub folders: Vec<String>,
+    pub objects: Vec<S3Object>,
+    pub next_continuation_token: Option<String>,
+    pub truncated: bool,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct S3PresignedUrl { pub url: String }
+pub struct S3ObjectContent {
+    pub content_type: String,
+    pub data: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S3PresignedUrl {
+    pub url: String,
+}
+
+struct S3Response {
+    content_type: String,
+    body: Vec<u8>,
+}
+
+struct RequestTarget {
+    url_prefix: String,
+    host: String,
+    canonical_uri: String,
+}
 
 fn now_iso() -> String {
     let now = OffsetDateTime::now_utc();
-    format!("{:04}{:02}{:02}T{:02}{:02}{:02}Z", now.year(), u8::from(now.month()), now.day(), now.hour(), now.minute(), now.second())
+    format!(
+        "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second()
+    )
+}
+
+fn now_date() -> String {
+    let now = OffsetDateTime::now_utc();
+    format!(
+        "{:04}{:02}{:02}",
+        now.year(),
+        u8::from(now.month()),
+        now.day()
+    )
 }
 
 fn now_unix() -> u64 {
     OffsetDateTime::now_utc().unix_timestamp() as u64
 }
 
-fn obj_key(config: &S3Config, key: &str) -> String {
-    if config.path_style { format!("{}/{}", config.bucket, key) } else { key.to_string() }
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn sign_sha1(key: &[u8], msg: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha1::new_from_slice(key).unwrap();
-    mac.update(msg);
+fn hmac_sha1(key: &[u8], message: &str) -> Vec<u8> {
+    let mut mac = HmacSha1::new_from_slice(key).expect("HMAC accepts keys of any length");
+    mac.update(message.as_bytes());
     mac.finalize().into_bytes().to_vec()
 }
 
-fn sha1_hex(data: &[u8]) -> String {
-    let mut h = Sha1::default();
-    h.update(data);
-    format!("{:x}", h.finalize())
+fn hmac_sha256(key: &[u8], message: &str) -> Vec<u8> {
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts keys of any length");
+    mac.update(message.as_bytes());
+    mac.finalize().into_bytes().to_vec()
 }
 
-fn quote(s: &str) -> String { s.replace('%', "%25") }
-
-/// Tencent COS native signing (q-sign-algorithm=sha1)
-fn cos_sign(config: &S3Config, method: &str, uri: &str, query: &str, headers: &BTreeMap<String, String>, header_list: &str) -> String {
-    let now = now_unix();
-    let expires = now + 3600;
-    let key_time = format!("{now};{expires}");
-    let sign_key = sign_sha1(config.secret_key.as_bytes(), key_time.as_bytes());
-
-    let header_parts: Vec<String> = header_list.split(';').filter(|h| !h.is_empty()).map(|h| {
-        let v = headers.get(h).cloned().unwrap_or_default();
-        format!("{}={}", quote(h), quote(&v))
-    }).collect();
-    let http_headers = header_parts.join("&");
-
-    let http_string = format!("{}\n{}\n{}\n{}\n", method.to_lowercase(), uri, query, http_headers);
-    let sha1_http = sha1_hex(http_string.as_bytes());
-    let string_to_sign = format!("sha1\n{key_time}\n{sha1_http}\n");
-
-    format!("q-sign-algorithm=sha1&q-ak={}&q-sign-time={}&q-key-time={}&q-header-list={}&q-url-param-list=&q-signature={}",
-        config.access_key, key_time, key_time, header_list,
-        hex(&sign_sha1(&sign_key, string_to_sign.as_bytes())))
+fn sha1_hex(data: &str) -> String {
+    hex(&Sha1::digest(data.as_bytes()))
 }
 
-fn hex(bytes: &[u8]) -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() }
+fn sha256_hex(data: &str) -> String {
+    hex(&Sha256::digest(data.as_bytes()))
+}
+
+fn sha256_hex_bytes(data: &[u8]) -> String {
+    hex(&Sha256::digest(data))
+}
+
+fn percent_encode(value: &str, encode_slash: bool) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'_' | b'.' | b'~')
+            || (!encode_slash && byte == b'/')
+        {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
+}
+
+fn canonical_query(pairs: &[(String, String)]) -> String {
+    let mut encoded = pairs
+        .iter()
+        .map(|(key, value)| (percent_encode(key, true), percent_encode(value, true)))
+        .collect::<Vec<_>>();
+    encoded.sort();
+    encoded
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn is_cos_endpoint(host: &str) -> bool {
+    host == "myqcloud.com" || host.ends_with(".myqcloud.com")
+}
+
+fn validate_config(config: &S3Config) -> Result<reqwest::Url, String> {
+    if config.endpoint.trim().is_empty()
+        || config.access_key.trim().is_empty()
+        || config.secret_key.is_empty()
+        || config.region.trim().is_empty()
+    {
+        return Err("Endpoint、Access Key、Secret Key 和 Region 均不能为空".into());
+    }
+    let endpoint = reqwest::Url::parse(config.endpoint.trim())
+        .map_err(|error| format!("Endpoint 格式无效: {error}"))?;
+    if !matches!(endpoint.scheme(), "http" | "https") {
+        return Err("Endpoint 只支持 HTTP 或 HTTPS".into());
+    }
+    if endpoint.path() != "/" || endpoint.query().is_some() || endpoint.fragment().is_some() {
+        return Err("Endpoint 只能填写协议和域名，不能包含路径、查询参数或片段".into());
+    }
+    if endpoint.host_str().is_some_and(is_cos_endpoint) && config.bucket.trim().is_empty() {
+        return Err("腾讯云 COS 必须填写包含 APPID 的 Bucket，例如 bucket-name-123456".into());
+    }
+    Ok(endpoint)
+}
+
+fn request_target(
+    config: &S3Config,
+    endpoint: &reqwest::Url,
+    object_key: &str,
+) -> Result<RequestTarget, String> {
+    let scheme = endpoint.scheme();
+    let base_host = endpoint
+        .host_str()
+        .ok_or_else(|| "Endpoint 缺少主机名".to_string())?;
+    let port_suffix = endpoint
+        .port()
+        .map(|port| format!(":{port}"))
+        .unwrap_or_default();
+    let base_authority = format!("{base_host}{port_suffix}");
+    let path_style = config.path_style && !is_cos_endpoint(base_host);
+
+    let (host, raw_uri) = if path_style {
+        (base_authority, format!("/{object_key}"))
+    } else if config.bucket.is_empty() {
+        (base_authority, "/".into())
+    } else {
+        let host = if base_host.starts_with(&format!("{}.", config.bucket)) {
+            base_authority
+        } else {
+            format!("{}.{base_host}{port_suffix}", config.bucket)
+        };
+        let key = object_key
+            .strip_prefix(&format!("{}/", config.bucket))
+            .unwrap_or(object_key);
+        (host, format!("/{key}"))
+    };
+    Ok(RequestTarget {
+        url_prefix: format!("{scheme}://{host}"),
+        host,
+        canonical_uri: percent_encode(&raw_uri, false),
+    })
+}
+
+fn object_key(config: &S3Config, endpoint: &reqwest::Url, key: &str) -> String {
+    let path_style = config.path_style && !endpoint.host_str().is_some_and(is_cos_endpoint);
+    if path_style {
+        format!("{}/{}", config.bucket, key)
+    } else {
+        key.into()
+    }
+}
+
+fn cos_authorization(
+    config: &S3Config,
+    method: &str,
+    uri: &str,
+    query: &str,
+    host: &str,
+    start: u64,
+    expires: u64,
+) -> String {
+    let key_time = format!("{start};{}", start.saturating_add(expires));
+    let query_keys = query
+        .split('&')
+        .filter_map(|part| {
+            part.split_once('=')
+                .map(|(key, _)| key.to_ascii_lowercase())
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    let http_string = format!(
+        "{}\n{uri}\n{query}\nhost={}\n",
+        method.to_ascii_lowercase(),
+        percent_encode(host, true)
+    );
+    let string_to_sign = format!("sha1\n{key_time}\n{}\n", sha1_hex(&http_string));
+    let sign_key = hmac_sha1(config.secret_key.as_bytes(), &key_time);
+    let signature = hex(&hmac_sha1(&sign_key, &string_to_sign));
+    format!(
+        "q-sign-algorithm=sha1&q-ak={}&q-sign-time={key_time}&q-key-time={key_time}&\
+         q-header-list=host&q-url-param-list={query_keys}&q-signature={signature}",
+        percent_encode(&config.access_key, true),
+    )
+}
+
+fn aws_authorization(
+    config: &S3Config,
+    method: &str,
+    uri: &str,
+    query: &str,
+    host: &str,
+    payload_hash: &str,
+    amz_date: &str,
+    date: &str,
+) -> String {
+    let canonical_headers =
+        format!("host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n");
+    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+    let canonical_request =
+        format!("{method}\n{uri}\n{query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}");
+    let scope = format!("{date}/{}/s3/aws4_request", config.region);
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{}",
+        sha256_hex(&canonical_request)
+    );
+    let date_key = hmac_sha256(format!("AWS4{}", config.secret_key).as_bytes(), date);
+    let region_key = hmac_sha256(&date_key, &config.region);
+    let service_key = hmac_sha256(&region_key, "s3");
+    let signing_key = hmac_sha256(&service_key, "aws4_request");
+    let signature = hex(&hmac_sha256(&signing_key, &string_to_sign));
+    format!(
+        "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
+        config.access_key
+    )
+}
+
+fn read_response(mut response: Response, limit: usize) -> Result<S3Response, String> {
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    if status.is_success() {
+        if response
+            .content_length()
+            .is_some_and(|length| length > limit as u64)
+        {
+            return Err(format!(
+                "对象超过预览上限 {} MB，请使用预签名链接流式查看或下载",
+                limit / 1024 / 1024
+            ));
+        }
+        let mut body = Vec::new();
+        response
+            .by_ref()
+            .take(limit as u64 + 1)
+            .read_to_end(&mut body)
+            .map_err(|error| format!("读取对象响应失败: {error}"))?;
+        if body.len() > limit {
+            return Err(format!(
+                "对象超过预览上限 {} MB，请使用预签名链接流式查看或下载",
+                limit / 1024 / 1024
+            ));
+        }
+        return Ok(S3Response { content_type, body });
+    }
+
+    let mut body = Vec::new();
+    response
+        .by_ref()
+        .take(ERROR_RESPONSE_LIMIT as u64)
+        .read_to_end(&mut body)
+        .map_err(|error| format!("读取错误响应失败: {error}"))?;
+    Err(format!("HTTP {status}: {}", String::from_utf8_lossy(&body)))
+}
 
 fn s3_request(
-    config: &S3Config, method: &str, object_key: &str, query: &str, body: Option<&[u8]>,
-) -> Result<String, String> {
-    let client = Client::builder()
-        .danger_accept_invalid_certs(true)
-        .timeout(std::time::Duration::from_secs(30))
-        .build().map_err(|e| e.to_string())?;
-
-    let endpoint = config.endpoint.trim_end_matches('/');
-    let bare_host = endpoint.strip_prefix("https://").or_else(|| endpoint.strip_prefix("http://")).unwrap_or(endpoint);
-
-    let (url, host_header, uri) = if config.path_style {
-        (format!("{endpoint}/{object_key}"), bare_host.to_string(), format!("/{object_key}"))
-    } else if config.bucket.is_empty() {
-        (endpoint.to_string(), bare_host.to_string(), "/".to_string())
+    config: &S3Config,
+    method: &str,
+    object_key: &str,
+    query_pairs: &[(String, String)],
+    body: Option<&[u8]>,
+    response_limit: usize,
+) -> Result<S3Response, String> {
+    let endpoint = validate_config(config)?;
+    let target = request_target(config, &endpoint, object_key)?;
+    let query = canonical_query(query_pairs);
+    let url = if query.is_empty() {
+        format!("{}{}", target.url_prefix, target.canonical_uri)
     } else {
-        let bucket_host = format!("{}.{}", config.bucket, bare_host);
-        if object_key.is_empty() {
-            (format!("https://{bucket_host}/"), bucket_host, "/".to_string())
-        } else {
-            (format!("https://{bucket_host}/{object_key}"), bucket_host, format!("/{object_key}"))
-        }
+        format!("{}{}?{query}", target.url_prefix, target.canonical_uri)
     };
-
-    let query_str = if query.is_empty() { String::new() } else { format!("?{query}") };
-    let url = format!("{url}{query_str}");
-
-    let mut headers = BTreeMap::new();
-    headers.insert("host".into(), host_header.clone());
-    headers.insert("content-type".into(), "application/octet-stream".into());
-
-    let header_list = "content-type;host";
-    let auth = cos_sign(config, method, &uri, query, &headers, header_list);
-
-    let mut req = match method {
+    let payload = body.unwrap_or_default();
+    let payload_hash = sha256_hex_bytes(payload);
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("创建 HTTP 客户端失败: {error}"))?;
+    let mut request = match method {
         "GET" => client.get(&url),
         "PUT" => client.put(&url),
         "DELETE" => client.delete(&url),
-        _ => return Err("不支持的方法".into()),
-    };
-    for (k, v) in &headers { req = req.header(k.as_str(), v.as_str()); }
-    req = req.header("Authorization", &auth);
-    if !body.unwrap_or(b"").is_empty() {
-        req = req.body(body.unwrap_or(b"").to_vec());
+        _ => return Err("不支持的对象存储请求方法".into()),
     }
+    .header("host", &target.host);
 
-    let resp = req.send().map_err(|e| format!("请求失败: {e}"))?;
-    let status = resp.status();
-    let text = resp.text().map_err(|e| e.to_string())?;
-    if !status.is_success() { return Err(format!("HTTP {status}: {text}")); }
-    Ok(text)
+    if endpoint.host_str().is_some_and(is_cos_endpoint) {
+        request = request.header(
+            "authorization",
+            cos_authorization(
+                config,
+                method,
+                &target.canonical_uri,
+                &query,
+                &target.host,
+                now_unix(),
+                3_600,
+            ),
+        );
+    } else {
+        let amz_date = now_iso();
+        let date = now_date();
+        request = request
+            .header("x-amz-content-sha256", &payload_hash)
+            .header("x-amz-date", &amz_date)
+            .header(
+                "authorization",
+                aws_authorization(
+                    config,
+                    method,
+                    &target.canonical_uri,
+                    &query,
+                    &target.host,
+                    &payload_hash,
+                    &amz_date,
+                    &date,
+                ),
+            );
+    }
+    if body.is_some() {
+        request = request
+            .header("content-type", "application/octet-stream")
+            .body(payload.to_vec());
+    }
+    let response = request
+        .send()
+        .map_err(|error| format!("对象存储请求失败: {error}"))?;
+    read_response(response, response_limit)
+}
+
+fn xml_value(section: &str, tag: &str) -> Option<String> {
+    let start = format!("<{tag}>");
+    let end = format!("</{tag}>");
+    section
+        .split_once(&start)
+        .and_then(|(_, rest)| rest.split_once(&end))
+        .map(|(value, _)| xml_unescape(value))
+}
+
+fn xml_unescape(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 fn parse_list_buckets(xml: &str) -> Vec<S3Bucket> {
-    let mut b = Vec::new();
-    for cap in xml.split("<Bucket>").skip(1) {
-        let name = cap.split("<Name>").nth(1).and_then(|s| s.split("</Name>").next()).unwrap_or("").to_string();
-        let date = cap.split("<CreationDate>").nth(1).and_then(|s| s.split("</CreationDate>").next()).unwrap_or("").to_string();
-        if !name.is_empty() { b.push(S3Bucket { name, creation_date: date }); }
-    }
-    b
+    xml.split("<Bucket>")
+        .skip(1)
+        .filter_map(|section| {
+            let name = xml_value(section, "Name")?;
+            Some(S3Bucket {
+                name,
+                creation_date: xml_value(section, "CreationDate").unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
-fn parse_list_objects(xml: &str) -> Vec<S3Object> {
-    let mut o = Vec::new();
-    for cap in xml.split("<Contents>").skip(1) {
-        let key = cap.split("<Key>").nth(1).and_then(|s| s.split("</Key>").next()).unwrap_or("").to_string();
-        let size: u64 = cap.split("<Size>").nth(1).and_then(|s| s.split("</Size>").next()).unwrap_or("0").parse().unwrap_or(0);
-        let lm = cap.split("<LastModified>").nth(1).and_then(|s| s.split("</LastModified>").next()).unwrap_or("").to_string();
-        let etag = cap.split("<ETag>").nth(1).and_then(|s| s.split("</ETag>").next()).unwrap_or("").trim_matches('"').to_string();
-        if !key.is_empty() { o.push(S3Object { key, size, last_modified: lm, etag }); }
+fn parse_list_objects(xml: &str) -> S3ListResult {
+    let folders = xml
+        .split("<CommonPrefixes>")
+        .skip(1)
+        .filter_map(|section| xml_value(section, "Prefix"))
+        .collect();
+    let objects = xml
+        .split("<Contents>")
+        .skip(1)
+        .filter_map(|section| {
+            let key = xml_value(section, "Key")?;
+            Some(S3Object {
+                key,
+                size: xml_value(section, "Size")
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(0),
+                last_modified: xml_value(section, "LastModified").unwrap_or_default(),
+                etag: xml_value(section, "ETag")
+                    .unwrap_or_default()
+                    .trim_matches('"')
+                    .to_string(),
+            })
+        })
+        .collect();
+    let next_continuation_token = xml_value(xml, "NextContinuationToken");
+    S3ListResult {
+        folders,
+        objects,
+        truncated: xml_value(xml, "IsTruncated").as_deref() == Some("true"),
+        next_continuation_token,
     }
-    o
 }
 
-#[tauri::command] pub async fn s3_list_buckets(config: S3Config) -> Result<Vec<S3Bucket>, String> {
-    tauri::async_runtime::spawn_blocking(move || Ok(parse_list_buckets(&s3_request(&config, "GET", "", "", None)?))).await.map_err(|e| format!("S3: {e}"))?
+fn response_xml(response: S3Response) -> Result<String, String> {
+    String::from_utf8(response.body).map_err(|error| format!("对象存储返回了无效 XML: {error}"))
 }
-#[tauri::command] pub async fn s3_list_objects(config: S3Config, prefix: Option<String>) -> Result<Vec<S3Object>, String> {
+
+#[tauri::command]
+pub async fn s3_list_buckets(config: S3Config) -> Result<Vec<S3Bucket>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let q = format!("prefix={}&max-keys=500", prefix.as_deref().unwrap_or(""));
-        let k = if config.path_style { config.bucket.clone() } else { String::new() };
-        Ok(parse_list_objects(&s3_request(&config, "GET", &k, &q, None)?))
-    }).await.map_err(|e| format!("S3: {e}"))?
+        let response = s3_request(&config, "GET", "", &[], None, LIST_RESPONSE_LIMIT)?;
+        Ok(parse_list_buckets(&response_xml(response)?))
+    })
+    .await
+    .map_err(|error| format!("对象存储任务异常: {error}"))?
 }
-#[tauri::command] pub async fn s3_get_object(config: S3Config, key: String) -> Result<S3ObjectContent, String> {
+
+#[tauri::command]
+pub async fn s3_list_objects(
+    config: S3Config,
+    prefix: Option<String>,
+    continuation_token: Option<String>,
+    page_size: Option<u16>,
+) -> Result<S3ListResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let k = obj_key(&config, &key);
-        let xml = s3_request(&config, "GET", &k, "", None)?;
-        Ok(S3ObjectContent { content_type: "application/octet-stream".into(), data: base64::engine::general_purpose::STANDARD.encode(xml.as_bytes()), size: xml.len() as u64 })
-    }).await.map_err(|e| format!("S3: {e}"))?
+        let endpoint = validate_config(&config)?;
+        let page_size = page_size.unwrap_or(DEFAULT_PAGE_SIZE).clamp(1, 500);
+        let mut query = vec![
+            ("list-type".into(), "2".into()),
+            ("delimiter".into(), "/".into()),
+            ("max-keys".into(), page_size.to_string()),
+            ("prefix".into(), prefix.unwrap_or_default()),
+        ];
+        if let Some(token) = continuation_token.filter(|token| !token.is_empty()) {
+            query.push(("continuation-token".into(), token));
+        }
+        let key = if config.path_style && !endpoint.host_str().is_some_and(is_cos_endpoint) {
+            config.bucket.clone()
+        } else {
+            String::new()
+        };
+        let response = s3_request(&config, "GET", &key, &query, None, LIST_RESPONSE_LIMIT)?;
+        Ok(parse_list_objects(&response_xml(response)?))
+    })
+    .await
+    .map_err(|error| format!("对象存储任务异常: {error}"))?
 }
-#[tauri::command] pub async fn s3_put_object(config: S3Config, key: String, data: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || { s3_request(&config, "PUT", &obj_key(&config, &key), "", Some(data.as_bytes()))?; Ok(()) }).await.map_err(|e| format!("S3: {e}"))?
+
+#[tauri::command]
+pub async fn s3_get_object(config: S3Config, key: String) -> Result<S3ObjectContent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let endpoint = validate_config(&config)?;
+        let key = object_key(&config, &endpoint, &key);
+        let response = s3_request(&config, "GET", &key, &[], None, PREVIEW_RESPONSE_LIMIT)?;
+        let size = response.body.len() as u64;
+        Ok(S3ObjectContent {
+            content_type: response.content_type,
+            data: base64::engine::general_purpose::STANDARD.encode(response.body),
+            size,
+        })
+    })
+    .await
+    .map_err(|error| format!("对象存储任务异常: {error}"))?
 }
-#[tauri::command] pub async fn s3_delete_object(config: S3Config, key: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || { s3_request(&config, "DELETE", &obj_key(&config, &key), "", None)?; Ok(()) }).await.map_err(|e| format!("S3: {e}"))?
+
+#[tauri::command]
+pub async fn s3_put_object(config: S3Config, key: String, data: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let endpoint = validate_config(&config)?;
+        let key = object_key(&config, &endpoint, &key);
+        s3_request(
+            &config,
+            "PUT",
+            &key,
+            &[],
+            Some(data.as_bytes()),
+            ERROR_RESPONSE_LIMIT,
+        )?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("对象存储任务异常: {error}"))?
 }
-#[tauri::command] pub async fn s3_presigned_url(config: S3Config, key: String, _expires: Option<u64>) -> Result<S3PresignedUrl, String> {
-    Err("暂不支持".into())
+
+#[tauri::command]
+pub async fn s3_delete_object(config: S3Config, key: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let endpoint = validate_config(&config)?;
+        let key = object_key(&config, &endpoint, &key);
+        s3_request(&config, "DELETE", &key, &[], None, ERROR_RESPONSE_LIMIT)?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("对象存储任务异常: {error}"))?
+}
+
+#[tauri::command]
+pub async fn s3_presigned_url(
+    config: S3Config,
+    key: String,
+    expires: Option<u64>,
+) -> Result<S3PresignedUrl, String> {
+    let endpoint = validate_config(&config)?;
+    let expires = expires.unwrap_or(3_600).clamp(1, 604_800);
+    let key = object_key(&config, &endpoint, &key);
+    let target = request_target(&config, &endpoint, &key)?;
+
+    if endpoint.host_str().is_some_and(is_cos_endpoint) {
+        let authorization = cos_authorization(
+            &config,
+            "GET",
+            &target.canonical_uri,
+            "",
+            &target.host,
+            now_unix(),
+            expires,
+        );
+        return Ok(S3PresignedUrl {
+            url: format!(
+                "{}{}?{authorization}",
+                target.url_prefix, target.canonical_uri
+            ),
+        });
+    }
+
+    let amz_date = now_iso();
+    let date = now_date();
+    let scope = format!("{date}/{}/s3/aws4_request", config.region);
+    let mut query = vec![
+        ("X-Amz-Algorithm".into(), "AWS4-HMAC-SHA256".into()),
+        (
+            "X-Amz-Credential".into(),
+            format!("{}/{scope}", config.access_key),
+        ),
+        ("X-Amz-Date".into(), amz_date.clone()),
+        ("X-Amz-Expires".into(), expires.to_string()),
+        ("X-Amz-SignedHeaders".into(), "host".into()),
+    ];
+    let canonical = canonical_query(&query);
+    let canonical_request = format!(
+        "GET\n{}\n{canonical}\nhost:{}\n\nhost\nUNSIGNED-PAYLOAD",
+        target.canonical_uri, target.host
+    );
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{}",
+        sha256_hex(&canonical_request)
+    );
+    let date_key = hmac_sha256(format!("AWS4{}", config.secret_key).as_bytes(), &date);
+    let region_key = hmac_sha256(&date_key, &config.region);
+    let service_key = hmac_sha256(&region_key, "s3");
+    let signing_key = hmac_sha256(&service_key, "aws4_request");
+    query.push((
+        "X-Amz-Signature".into(),
+        hex(&hmac_sha256(&signing_key, &string_to_sign)),
+    ));
+    Ok(S3PresignedUrl {
+        url: format!(
+            "{}{}?{}",
+            target.url_prefix,
+            target.canonical_uri,
+            canonical_query(&query)
+        ),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_parameters_are_encoded_and_sorted() {
+        let query = vec![
+            ("prefix".into(), "音乐/中文 & demo/".into()),
+            ("max-keys".into(), "200".into()),
+            ("delimiter".into(), "/".into()),
+        ];
+        assert_eq!(
+            canonical_query(&query),
+            "delimiter=%2F&max-keys=200&prefix=%E9%9F%B3%E4%B9%90%2F%E4%B8%AD%E6%96%87%20%26%20demo%2F"
+        );
+    }
+
+    #[test]
+    fn list_response_groups_folders_and_keeps_page_token() {
+        let xml = r#"<ListBucketResult>
+          <IsTruncated>true</IsTruncated>
+          <Contents><Key>readme.txt</Key><Size>12</Size><LastModified>2026-07-27</LastModified><ETag>"abc"</ETag></Contents>
+          <CommonPrefixes><Prefix>audio/</Prefix></CommonPrefixes>
+          <CommonPrefixes><Prefix>视频/</Prefix></CommonPrefixes>
+          <NextContinuationToken>next&amp;token</NextContinuationToken>
+        </ListBucketResult>"#;
+        let result = parse_list_objects(xml);
+        assert_eq!(result.folders, ["audio/", "视频/"]);
+        assert_eq!(result.objects[0].key, "readme.txt");
+        assert_eq!(
+            result.next_continuation_token.as_deref(),
+            Some("next&token")
+        );
+        assert!(result.truncated);
+    }
+
+    #[test]
+    fn cos_signs_query_keys_and_virtual_host_is_detected() {
+        let config = S3Config {
+            endpoint: "https://cos.ap-guangzhou.myqcloud.com".into(),
+            access_key: "id".into(),
+            secret_key: "secret".into(),
+            region: "ap-guangzhou".into(),
+            bucket: "demo-123".into(),
+            path_style: true,
+        };
+        let auth = cos_authorization(
+            &config,
+            "GET",
+            "/",
+            "delimiter=%2F&max-keys=200&prefix=",
+            "demo-123.cos.ap-guangzhou.myqcloud.com",
+            100,
+            3_600,
+        );
+        assert!(auth.contains("q-url-param-list=delimiter;max-keys;prefix"));
+        assert!(is_cos_endpoint("cos.ap-guangzhou.myqcloud.com"));
+    }
 }

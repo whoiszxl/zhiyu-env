@@ -10,7 +10,7 @@ import type {
   OutputStyle,
   S3Bucket,
   S3Config,
-  S3Object,
+  S3ListResult,
   S3ObjectContent,
   S3PresignedUrl,
   SecretEncoding,
@@ -116,8 +116,18 @@ export function s3ListBuckets(config: S3Config): Promise<S3Bucket[]> {
   return invoke<S3Bucket[]>("s3_list_buckets", { config });
 }
 
-export function s3ListObjects(config: S3Config, prefix?: string): Promise<S3Object[]> {
-  return invoke<S3Object[]>("s3_list_objects", { config, prefix });
+export function s3ListObjects(
+  config: S3Config,
+  prefix?: string,
+  continuationToken?: string,
+  pageSize = 200,
+): Promise<S3ListResult> {
+  return invoke<S3ListResult>("s3_list_objects", {
+    config,
+    prefix,
+    continuationToken,
+    pageSize,
+  });
 }
 
 export function s3GetObject(config: S3Config, key: string): Promise<S3ObjectContent> {

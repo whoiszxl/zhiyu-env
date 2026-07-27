@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import {
-  s3ListBuckets, s3ListObjects, s3GetObject,
-  s3PutObject, s3DeleteObject, s3PresignedUrl,
+  s3DeleteObject,
+  s3GetObject,
+  s3ListBuckets,
+  s3ListObjects,
+  s3PresignedUrl,
+  s3PutObject,
 } from "../../api/tools";
 import type { S3Config, S3Bucket, S3Object } from "../../types";
 import { formatBytes } from "../../utils/format";
@@ -21,11 +25,17 @@ const error = ref("");
 const loading = ref(false);
 
 const buckets = ref<S3Bucket[]>([]);
+const folders = ref<string[]>([]);
 const objects = ref<S3Object[]>([]);
 const currentPrefix = ref("");
+const nextContinuationToken = ref<string | null>(null);
+const pageTokens = ref<string[]>([""]);
+const pageIndex = ref(0);
 
 const previewKey = ref("");
 const previewContent = ref("");
+const previewUrl = ref("");
+const previewContentType = ref("");
 const previewing = ref(false);
 
 const uploadKey = ref("");
@@ -36,13 +46,72 @@ const presignedResult = ref("");
 const isCos = computed(() =>
   config.value.endpoint.toLowerCase().includes(".myqcloud.com"),
 );
+const previewKind = computed<
+  "audio" | "video" | "image" | "pdf" | "text" | "download"
+>(() => {
+  const extension = previewKey.value.split(".").pop()?.toLowerCase() ?? "";
+  if (["mp3", "wav", "ogg", "m4a", "aac", "flac"].includes(extension)) {
+    return "audio";
+  }
+  if (["mp4", "webm", "mov", "m4v", "ogv"].includes(extension)) {
+    return "video";
+  }
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(extension)) {
+    return "image";
+  }
+  if (extension === "pdf") return "pdf";
+  if (
+    previewContentType.value.startsWith("text/") ||
+    [
+      "txt", "md", "json", "xml", "yaml", "yml", "toml", "ini", "csv",
+      "log", "js", "ts", "vue", "css", "html", "java", "go", "rs", "py",
+      "sh", "sql", "properties",
+    ].includes(extension)
+  ) {
+    return "text";
+  }
+  return "download";
+});
+const breadcrumbs = computed(() => {
+  const crumbs = [{ label: config.value.bucket, prefix: "" }];
+  let prefix = "";
+  for (const part of currentPrefix.value.split("/").filter(Boolean)) {
+    prefix += `${part}/`;
+    crumbs.push({ label: part, prefix });
+  }
+  return crumbs;
+});
+
+function resetPagination() {
+  pageTokens.value = [""];
+  pageIndex.value = 0;
+  nextContinuationToken.value = null;
+}
+
+function folderName(prefix: string) {
+  return prefix
+    .slice(currentPrefix.value.length)
+    .replace(/\/$/, "");
+}
+
+function objectName(key: string) {
+  return key.slice(currentPrefix.value.length);
+}
+
+function parentPrefix() {
+  const parts = currentPrefix.value.split("/").filter(Boolean);
+  parts.pop();
+  return parts.length ? `${parts.join("/")}/` : "";
+}
 
 async function connect() {
   loading.value = true;
   error.value = "";
   try {
     if (config.value.bucket) {
-      objects.value = await s3ListObjects(config.value);
+      currentPrefix.value = "";
+      resetPagination();
+      await loadObjectPage();
     } else {
       buckets.value = await s3ListBuckets(config.value);
     }
@@ -54,18 +123,30 @@ async function connect() {
   }
 }
 
-function selectBucket(name: string) {
+async function selectBucket(name: string) {
   config.value.bucket = name;
   buckets.value = [];
-  connect();
+  currentPrefix.value = "";
+  resetPagination();
+  await loadObjectPage();
 }
 
-async function refreshObjects() {
+async function loadObjectPage(token = pageTokens.value[pageIndex.value] || "") {
   if (!config.value.bucket) return;
   loading.value = true;
   error.value = "";
   try {
-    objects.value = await s3ListObjects(config.value, currentPrefix.value || undefined);
+    const result = await s3ListObjects(
+      config.value,
+      currentPrefix.value || undefined,
+      token || undefined,
+      200,
+    );
+    folders.value = result.folders;
+    objects.value = result.objects.filter(
+      (object) => object.key !== currentPrefix.value,
+    );
+    nextContinuationToken.value = result.nextContinuationToken;
   } catch (e: any) {
     error.value = String(e);
   } finally {
@@ -73,17 +154,69 @@ async function refreshObjects() {
   }
 }
 
+async function refreshObjects() {
+  await loadObjectPage();
+}
+
+async function enterFolder(prefix: string) {
+  currentPrefix.value = prefix;
+  resetPagination();
+  closePreview();
+  await loadObjectPage();
+}
+
+async function navigatePrefix(prefix: string) {
+  if (prefix === currentPrefix.value) return;
+  currentPrefix.value = prefix;
+  resetPagination();
+  closePreview();
+  await loadObjectPage();
+}
+
+async function nextPage() {
+  if (!nextContinuationToken.value) return;
+  const token = nextContinuationToken.value;
+  pageTokens.value = pageTokens.value.slice(0, pageIndex.value + 1);
+  pageTokens.value.push(token);
+  pageIndex.value += 1;
+  await loadObjectPage(token);
+}
+
+async function previousPage() {
+  if (pageIndex.value === 0) return;
+  pageIndex.value -= 1;
+  await loadObjectPage(pageTokens.value[pageIndex.value]);
+}
+
+function decodeBase64Utf8(data: string) {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
 async function viewObject(key: string) {
   previewing.value = true;
   error.value = "";
+  previewKey.value = key;
+  previewContent.value = "";
+  previewUrl.value = "";
+  previewContentType.value = "";
   try {
-    const result = await s3GetObject(config.value, key);
-    previewKey.value = key;
-    // Try to decode base64 as text
-    try {
-      previewContent.value = atob(result.data);
-    } catch {
-      previewContent.value = `[二进制内容，${formatBytes(result.size)}]`;
+    const extension = key.split(".").pop()?.toLowerCase() ?? "";
+    const textLike = [
+      "txt", "md", "json", "xml", "yaml", "yml", "toml", "ini", "csv",
+      "log", "js", "ts", "vue", "css", "html", "java", "go", "rs", "py",
+      "sh", "sql", "properties",
+    ].includes(extension);
+    if (textLike) {
+      const result = await s3GetObject(config.value, key);
+      previewContentType.value = result.contentType;
+      previewContent.value = decodeBase64Utf8(result.data);
+    } else {
+      previewUrl.value = (await s3PresignedUrl(config.value, key, 900)).url;
     }
   } catch (e: any) {
     error.value = String(e);
@@ -92,12 +225,22 @@ async function viewObject(key: string) {
   }
 }
 
+function closePreview() {
+  previewKey.value = "";
+  previewContent.value = "";
+  previewUrl.value = "";
+  previewContentType.value = "";
+}
+
 async function uploadFile() {
   if (!uploadKey.value || !uploadData.value) return;
   uploading.value = true;
   error.value = "";
   try {
-    await s3PutObject(config.value, uploadKey.value, uploadData.value);
+    const key = uploadKey.value.startsWith(currentPrefix.value)
+      ? uploadKey.value
+      : `${currentPrefix.value}${uploadKey.value}`;
+    await s3PutObject(config.value, key, uploadData.value);
     uploadKey.value = "";
     uploadData.value = "";
     await refreshObjects();
@@ -115,6 +258,13 @@ async function deleteObject(key: string) {
   try {
     await s3DeleteObject(config.value, key);
     await refreshObjects();
+    if (
+      folders.value.length === 0 &&
+      objects.value.length === 0 &&
+      pageIndex.value > 0
+    ) {
+      await previousPage();
+    }
   } catch (e: any) {
     error.value = String(e);
   } finally {
@@ -136,9 +286,11 @@ async function generatePresigned(key: string) {
 function disconnect() {
   connected.value = false;
   buckets.value = [];
+  folders.value = [];
   objects.value = [];
-  previewKey.value = "";
-  previewContent.value = "";
+  currentPrefix.value = "";
+  resetPagination();
+  closePreview();
 }
 
 const presets = [
@@ -279,26 +431,68 @@ function applyPreset(p: typeof presets[0]) {
           <div class="s3-toolbar">
             <div>
               <p>BUCKET · {{ config.bucket }}</p>
-              <h2>对象列表</h2>
+              <div class="s3-breadcrumbs">
+                <template
+                  v-for="(crumb, index) in breadcrumbs"
+                  :key="crumb.prefix"
+                >
+                  <span v-if="index > 0">/</span>
+                  <button
+                    type="button"
+                    :disabled="crumb.prefix === currentPrefix"
+                    @click="navigatePrefix(crumb.prefix)"
+                  >
+                    {{ crumb.label }}
+                  </button>
+                </template>
+              </div>
             </div>
             <button type="button" @click="refreshObjects" :disabled="loading">刷新</button>
           </div>
 
           <div v-if="loading" class="panel-state">加载中…</div>
-          <div v-else-if="objects.length === 0" class="panel-state empty">
+          <div
+            v-else-if="folders.length === 0 && objects.length === 0"
+            class="panel-state empty"
+          >
             <span class="empty-symbol">&#x2610;</span>
             <strong>暂无对象</strong>
-            <small>该 Bucket 下没有文件，或所有文件在当前前缀之外</small>
+            <small>当前目录下没有子目录或文件</small>
           </div>
           <div v-else class="s3-table">
             <div class="s3-row s3-row-head">
-              <span>Key</span>
+              <span>名称</span>
               <span>大小</span>
               <span>修改时间</span>
               <span>操作</span>
             </div>
+            <button
+              v-if="currentPrefix"
+              type="button"
+              class="s3-row s3-folder-row"
+              @click="navigatePrefix(parentPrefix())"
+            >
+              <span class="s3-key">📁 ..</span>
+              <span>—</span>
+              <span>—</span>
+              <span></span>
+            </button>
+            <button
+              v-for="folder in folders"
+              :key="folder"
+              type="button"
+              class="s3-row s3-folder-row"
+              @click="enterFolder(folder)"
+            >
+              <span class="s3-key">📁 {{ folderName(folder) }}</span>
+              <span>—</span>
+              <span>目录</span>
+              <span></span>
+            </button>
             <div v-for="obj in objects" :key="obj.key" class="s3-row">
-              <span class="s3-key">{{ obj.key }}</span>
+              <span class="s3-key" :title="obj.key">
+                {{ objectName(obj.key) }}
+              </span>
               <span>{{ formatBytes(obj.size) }}</span>
               <span>{{ obj.lastModified.slice(0, 10) }}</span>
               <span class="s3-actions">
@@ -306,6 +500,26 @@ function applyPreset(p: typeof presets[0]) {
                 <button type="button" class="clip-btn" @click="generatePresigned(obj.key)">预签名</button>
                 <button type="button" class="clip-btn remove" @click="deleteObject(obj.key)">删除</button>
               </span>
+            </div>
+          </div>
+
+          <div class="s3-pagination">
+            <span>第 {{ pageIndex + 1 }} 页 · 每页最多 200 项</span>
+            <div>
+              <button
+                type="button"
+                :disabled="loading || pageIndex === 0"
+                @click="previousPage"
+              >
+                上一页
+              </button>
+              <button
+                type="button"
+                :disabled="loading || !nextContinuationToken"
+                @click="nextPage"
+              >
+                下一页
+              </button>
             </div>
           </div>
 
@@ -326,9 +540,36 @@ function applyPreset(p: typeof presets[0]) {
         <div v-if="previewKey" class="s3-preview">
           <div class="s3-toolbar">
             <h2>{{ previewKey }}</h2>
-            <button type="button" @click="previewKey = ''; previewContent = ''">×</button>
+            <button type="button" @click="closePreview">×</button>
           </div>
-          <pre><code>{{ previewContent }}</code></pre>
+          <div v-if="previewing" class="panel-state">正在准备预览…</div>
+          <pre v-else-if="previewKind === 'text'"><code>{{ previewContent }}</code></pre>
+          <audio
+            v-else-if="previewKind === 'audio' && previewUrl"
+            :src="previewUrl"
+            controls
+            preload="metadata"
+          ></audio>
+          <video
+            v-else-if="previewKind === 'video' && previewUrl"
+            :src="previewUrl"
+            controls
+            preload="metadata"
+          ></video>
+          <img
+            v-else-if="previewKind === 'image' && previewUrl"
+            :src="previewUrl"
+            alt="对象预览"
+          />
+          <iframe
+            v-else-if="previewKind === 'pdf' && previewUrl"
+            :src="previewUrl"
+            title="PDF 预览"
+          ></iframe>
+          <div v-else class="s3-binary-preview">
+            <p>该文件类型不支持直接预览，可通过临时链接打开或下载。</p>
+            <a v-if="previewUrl" :href="previewUrl" target="_blank">打开临时链接</a>
+          </div>
         </div>
 
         <!-- Presigned notice -->
@@ -462,6 +703,30 @@ function applyPreset(p: typeof presets[0]) {
   font-size: 13px;
 }
 
+.s3-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.s3-breadcrumbs > span {
+  color: #a1a39b;
+  font-size: 10px;
+}
+
+.s3-breadcrumbs > button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #4f7051;
+  font: 600 11px/1.4 "SFMono-Regular", Consolas, monospace;
+}
+
+.s3-breadcrumbs > button:disabled {
+  color: #252920;
+}
+
 .s3-toolbar button {
   padding: 4px 12px;
   border: 1px solid #d2d1c9;
@@ -502,6 +767,19 @@ function applyPreset(p: typeof presets[0]) {
   background: #f0eee7;
 }
 
+.s3-folder-row {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #e8e6df;
+  background: rgba(244, 242, 235, 0.68);
+  color: #73766d;
+  text-align: left;
+}
+
+.s3-folder-row:hover {
+  background: #eceae2;
+}
+
 .s3-key {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -514,6 +792,30 @@ function applyPreset(p: typeof presets[0]) {
 .s3-actions {
   display: flex;
   gap: 4px;
+}
+
+.s3-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #d2d1c9;
+  color: #8a8d84;
+  font-size: 9px;
+}
+
+.s3-pagination > div {
+  display: flex;
+  gap: 6px;
+}
+
+.s3-pagination button {
+  padding: 5px 10px;
+  border: 1px solid #d2d1c9;
+  background: #faf9f5;
+  color: #55584f;
+  font-size: 9px;
 }
 
 .s3-upload {
@@ -569,6 +871,48 @@ function applyPreset(p: typeof presets[0]) {
   background: #fffefa;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.s3-preview audio {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 22px 16px;
+}
+
+.s3-preview video {
+  display: block;
+  width: 100%;
+  max-height: 560px;
+  background: #171914;
+}
+
+.s3-preview img {
+  display: block;
+  max-width: calc(100% - 32px);
+  max-height: 560px;
+  margin: 16px auto;
+  object-fit: contain;
+}
+
+.s3-preview iframe {
+  width: 100%;
+  height: 620px;
+  border: 0;
+}
+
+.s3-binary-preview {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  color: #73766d;
+  font-size: 10px;
+}
+
+.s3-binary-preview a {
+  color: #416b49;
+  font-weight: 600;
 }
 
 .panel-state {

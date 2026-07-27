@@ -529,6 +529,13 @@ export interface S3Object {
   etag: string;
 }
 
+export interface S3ListResult {
+  folders: string[];
+  objects: S3Object[];
+  nextContinuationToken: string | null;
+  truncated: boolean;
+}
+
 export interface S3ObjectContent {
   contentType: string;
   data: string;
