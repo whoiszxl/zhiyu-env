@@ -17,6 +17,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+arboard = "3"
 base64.workspace = true
 bson.workspace = true
 csv.workspace = true
@@ -32,6 +33,7 @@ sha2.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
+tokio = { version = "1", features = ["time"] }
 toml.workspace = true
 
 [dev-dependencies]

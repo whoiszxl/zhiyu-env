@@ -1,3 +1,4 @@
+mod clipboard;
 mod commands;
 mod database_tools;
 mod duckdb_tools;
@@ -21,6 +22,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .manage(clipboard::commands::ClipboardState(std::sync::Mutex::new(None)))
         .setup(|app| {
             let settings = settings::load_settings();
             let _ = settings::apply_log_retention(&settings);
@@ -97,6 +99,16 @@ pub fn run() {
             tools::jwt::jwt_sign_hmac,
             tools::jwk::jwk_inspect,
             commands::service_test_connection,
+            clipboard::commands::clipboard_start,
+            clipboard::commands::clipboard_stop,
+            clipboard::commands::clipboard_pause,
+            clipboard::commands::clipboard_resume,
+            clipboard::commands::clipboard_status,
+            clipboard::commands::clipboard_list,
+            clipboard::commands::clipboard_copy,
+            clipboard::commands::clipboard_pin,
+            clipboard::commands::clipboard_delete,
+            clipboard::commands::clipboard_clear,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");
