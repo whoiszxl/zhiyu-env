@@ -2,6 +2,7 @@ import DataFormatTool from "../components/tools/DataFormatTool.vue";
 import DuckdbTool from "../components/tools/DuckdbTool.vue";
 import JwtTool from "../components/tools/JwtTool.vue";
 import PortTool from "../components/tools/PortTool.vue";
+import SqliteTool from "../components/tools/SqliteTool.vue";
 import type { ToolDefinition, ToolId } from "./types";
 
 /**
@@ -36,6 +37,13 @@ export const TOOLS: ToolDefinition[] = [
     navHint: "LOCAL FILE SQL",
     icon: "D",
     component: DuckdbTool,
+  },
+  {
+    id: "sqlite",
+    navLabel: "SQLite 数据库",
+    navHint: "LOCAL DATABASE",
+    icon: "S",
+    component: SqliteTool,
   },
 ];
 

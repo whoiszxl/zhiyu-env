@@ -9,6 +9,9 @@ import type {
   JwtVerifyResult,
   OutputStyle,
   SecretEncoding,
+  SqliteOverview,
+  SqliteQueryResult,
+  SqliteTable,
   TransformResult,
 } from "../types";
 
@@ -71,4 +74,32 @@ export function signJwtHmac(
 
 export function inspectJwk(input: string): Promise<JwkInspection> {
   return invoke<JwkInspection>("jwk_inspect", { input });
+}
+
+export function createSqliteDatabase(
+  filePath: string,
+): Promise<SqliteOverview> {
+  return invoke<SqliteOverview>("sqlite_create", { filePath });
+}
+
+export function getSqliteOverview(
+  filePath: string,
+): Promise<SqliteOverview> {
+  return invoke<SqliteOverview>("sqlite_overview", { filePath });
+}
+
+export function listSqliteTables(filePath: string): Promise<SqliteTable[]> {
+  return invoke<SqliteTable[]>("sqlite_tables", { filePath });
+}
+
+export function executeSqlite(
+  filePath: string,
+  sql: string,
+  confirmed = false,
+): Promise<SqliteQueryResult> {
+  return invoke<SqliteQueryResult>("sqlite_execute", {
+    filePath,
+    sql,
+    confirmed,
+  });
 }

@@ -20,5 +20,6 @@ serde_json = { version = "1", features = ["preserve_order"] }
 serde_norway = "0.9"
 serde_json_path = "0.7"
 sha2 = "0.10"
+rusqlite = { version = "0.37", features = ["bundled"] }
 thiserror = "2"
 toml = "1"

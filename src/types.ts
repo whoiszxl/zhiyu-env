@@ -157,6 +157,27 @@ export interface SqlResult {
   truncated: boolean;
 }
 
+export interface SqliteOverview {
+  version: string;
+  fileSizeBytes: number;
+  tableCount: number;
+  indexCount: number;
+  journalMode: string;
+}
+
+export interface SqliteTable {
+  name: string;
+  tableType: "table" | "view";
+}
+
+export interface SqliteQueryResult {
+  columns: string[];
+  rows: Array<Array<string | null>>;
+  summary: string;
+  elapsedMs: number;
+  truncated: boolean;
+}
+
 export interface TableDetail {
   columns: ColumnInfo[];
   preview: SqlResult;

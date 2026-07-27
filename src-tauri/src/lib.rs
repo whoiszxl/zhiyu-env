@@ -5,6 +5,7 @@ mod mailpit_tools;
 mod mongodb_tools;
 mod port_tools;
 mod redis_tools;
+mod sqlite_tools;
 mod storage_tools;
 mod tools;
 
@@ -54,6 +55,10 @@ pub fn run() {
             duckdb_tools::duckdb_status,
             duckdb_tools::duckdb_install,
             duckdb_tools::duckdb_query,
+            sqlite_tools::sqlite_create,
+            sqlite_tools::sqlite_overview,
+            sqlite_tools::sqlite_tables,
+            sqlite_tools::sqlite_execute,
             tools::data_format::data_format_transform,
             tools::json_diff::data_json_diff,
             tools::json_path::data_jsonpath_query,

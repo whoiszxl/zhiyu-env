@@ -66,10 +66,11 @@ Every service supports:
 
 Redis, MySQL, and PostgreSQL include a dedicated Version Manager page. Binaries and data for different versions can coexist, and the active version can be changed while the service is stopped. PostgreSQL major versions use separate `initdb` data directories.
 
-Zhiyu also includes two lightweight tools with no resident process:
+Zhiyu also includes lightweight tools with no resident process:
 
 - **TCP port checker** — identifies listening ports and their owning processes.
 - **DuckDB local file query tool** — runs read-only SQL against CSV, TSV, JSON, JSONL, Parquet, and `.duckdb` files.
+- **SQLite local database tool** — creates, opens, and queries `.sqlite`, `.sqlite3`, and `.db` files with an embedded engine.
 
 ## Desktop features
 
