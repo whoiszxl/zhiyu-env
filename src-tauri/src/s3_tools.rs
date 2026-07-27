@@ -157,24 +157,32 @@ fn s3_request(
             format!("/{object_key}"),
             host.to_string(),
         )
-    } else if object_key.is_empty() {
-        // List buckets: request to endpoint root
+    } else if config.bucket.is_empty() {
+        // Virtual-hosted, no bucket yet: request endpoint root to list buckets
         (
             endpoint.to_string(),
             "/".to_string(),
             host.to_string(),
         )
     } else {
-        // Virtual-hosted style: bucket is in hostname
+        // Virtual-hosted with bucket: bucket is part of hostname
         let bucket_host = format!("{}.{}", config.bucket, host);
-        let rest = object_key
-            .strip_prefix(&format!("{}/", config.bucket))
-            .unwrap_or(object_key);
-        (
-            format!("https://{bucket_host}/{rest}"),
-            format!("/{rest}"),
-            bucket_host,
-        )
+        if object_key.is_empty() {
+            (
+                format!("https://{bucket_host}/"),
+                "/".to_string(),
+                bucket_host,
+            )
+        } else {
+            let rest = object_key
+                .strip_prefix(&format!("{}/", config.bucket))
+                .unwrap_or(object_key);
+            (
+                format!("https://{bucket_host}/{rest}"),
+                format!("/{rest}"),
+                bucket_host,
+            )
+        }
     };
 
     let query_str = if query.is_empty() { String::new() } else { format!("?{query}") };
@@ -389,17 +397,31 @@ pub async fn s3_presigned_url(
     let expires = expires.unwrap_or(3600);
     let amz_date = now_iso();
     let date_stamp = now_date();
-    let host = config
-        .endpoint
-        .trim_end_matches('/')
+    let endpoint = config.endpoint.trim_end_matches('/');
+    let bare_host = endpoint
         .strip_prefix("https://")
-        .or_else(|| config.endpoint.strip_prefix("http://"))
-        .unwrap_or(&config.endpoint);
+        .or_else(|| endpoint.strip_prefix("http://"))
+        .unwrap_or(endpoint);
+
+    let (req_host, req_url_prefix, canonical_uri) = if config.path_style {
+        (
+            bare_host.to_string(),
+            endpoint.to_string(),
+            format!("/{}/{}", config.bucket, key),
+        )
+    } else {
+        let bucket_host = format!("{}.{}", config.bucket, bare_host);
+        (
+            bucket_host.clone(),
+            format!("https://{bucket_host}"),
+            format!("/{key}"),
+        )
+    };
+
     let credential = format!(
         "{}/{}/{}/s3/aws4_request",
         config.access_key, date_stamp, config.region
     );
-    let canonical_uri = format!("/{}/{}", config.bucket, key);
     let query = format!(
         "X-Amz-Algorithm=AWS4-HMAC-SHA256&\
          X-Amz-Credential={}&\
@@ -412,7 +434,7 @@ pub async fn s3_presigned_url(
     );
     let canonical_request = format!(
         "GET\n{}\n{}\nhost:{}\n\nhost\nUNSIGNED-PAYLOAD",
-        canonical_uri, query, host
+        canonical_uri, query, req_host
     );
     let scope = format!("{date_stamp}/{}/{}/aws4_request", config.region, "s3");
     let string_to_sign = format!(
@@ -420,16 +442,11 @@ pub async fn s3_presigned_url(
         sha256_hex(&canonical_request)
     );
     let signature = sign_v4(
-        &config.secret_key,
-        &date_stamp,
-        &config.region,
-        "s3",
-        &string_to_sign,
+        &config.secret_key, &date_stamp, &config.region, "s3", &string_to_sign,
     );
-    let endpoint = config.endpoint.trim_end_matches('/');
     let url = format!(
-        "{endpoint}{}?{}&X-Amz-Signature={}",
-        canonical_uri, query, signature
+        "{}{}?{}&X-Amz-Signature={}",
+        req_url_prefix, canonical_uri, query, signature
     );
     Ok(S3PresignedUrl { url })
 }
