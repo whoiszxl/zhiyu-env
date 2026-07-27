@@ -16,6 +16,7 @@ import {
   executeSql,
   executeRedisCommand,
   executeMongoCommand,
+  forceStopService,
   getEnvironmentDiskUsage,
   getEnvironmentMetrics,
   getAppSettings,
@@ -47,6 +48,7 @@ import {
   publishNatsMessage,
   readServiceConfig,
   receiveNatsMessage,
+  repairServiceState,
   runServiceAction,
   saveAppSettings,
   restoreServiceBackup,
@@ -194,6 +196,7 @@ const environmentDiskBytes = ref(0);
 const portListeners = ref<PortListener[]>([]);
 const activityRecords = ref<ActivityRecord[]>(loadActivityRecords());
 const stoppingAll = ref(false);
+const repairingServices = ref(false);
 const appSettings = ref<AppSettings>({
   launchAtLogin: false,
   keepServicesRunningOnClose: true,
@@ -378,10 +381,17 @@ const dashboardPortListeners = computed(() => {
 const dashboardAlerts = computed(() => {
   const alerts: Array<{ level: "warning" | "danger"; message: string }> = [];
   for (const service of services.value) {
+    if (service.status === "crashed") {
+      alerts.push({
+        level: "danger",
+        message: `${service.name} 进程已意外退出（原 PID ${service.pid ?? "未知"}），可一键修复状态后重新启动`,
+      });
+      continue;
+    }
     if (service.status === "stale_pid") {
       alerts.push({
         level: "danger",
-        message: `${service.name} 的 PID 记录已经失效，请重新启动服务`,
+        message: `${service.name} 的 PID 身份校验失败，已清理过期 PID 文件`,
       });
       continue;
     }
@@ -677,6 +687,7 @@ const statusLabel: Record<ServiceState, string> = {
   stopped: "已停止",
   running: "运行中",
   stale_pid: "状态异常",
+  crashed: "意外退出",
 };
 
 const iconLetter: Record<ServiceKind, string> = {
@@ -775,7 +786,7 @@ async function refreshServices(silent = false) {
   if (!silent) loading.value = true;
   try {
     services.value = await listServices();
-    error.value = "";
+    if (!silent) error.value = "";
   } catch (cause) {
     error.value = String(cause);
   } finally {
@@ -1065,6 +1076,39 @@ async function stopAllServices() {
     error.value = `${targets.length - failed} 个服务已停止，${failed} 个服务停止失败`;
   } else {
     notice.value = `已停止 ${targets.length} 个服务`;
+  }
+}
+
+async function repairAbnormalServices() {
+  if (repairingServices.value) return;
+  const targets = services.value.filter(
+    (service) =>
+      service.status === "stale_pid" || service.status === "crashed",
+  );
+  if (targets.length === 0) return;
+  repairingServices.value = true;
+  notice.value = "";
+  error.value = "";
+  const failures: string[] = [];
+  for (const service of targets) {
+    try {
+      const updated = await repairServiceState(service.kind);
+      const index = services.value.findIndex(
+        (item) => item.kind === updated.kind,
+      );
+      if (index >= 0) services.value[index] = updated;
+      recordActivity(updated, "修复状态", true, "已清理异常运行记录");
+    } catch (cause) {
+      failures.push(`${service.name}: ${String(cause)}`);
+      recordActivity(service, "修复状态", false, String(cause));
+    }
+  }
+  repairingServices.value = false;
+  await refreshServices(true);
+  if (failures.length > 0) {
+    error.value = `部分服务修复失败：${failures.join("；")}`;
+  } else {
+    notice.value = `已修复 ${targets.length} 个异常服务状态`;
   }
 }
 
@@ -1501,9 +1545,41 @@ async function execute(action: ServiceAction) {
             : Promise.resolve(),
     ]);
   } catch (cause) {
+    const message = String(cause);
+    if (
+      action === "stop" &&
+      message.includes("did not stop within") &&
+      window.confirm(
+        `${service.name} 未能在正常停止时限内退出，是否强制停止？\n\n强制停止可能导致尚未落盘的数据丢失。`,
+      )
+    ) {
+      try {
+        const updated = await forceStopService(service.kind);
+        const index = services.value.findIndex(
+          (item) => item.kind === updated.kind,
+        );
+        if (index >= 0) services.value[index] = updated;
+        notice.value = `${service.name} 已强制停止`;
+        recordActivity(updated, "强制停止", true, notice.value);
+        await Promise.all([
+          refreshMetrics(),
+          refreshEnvironmentMetrics(),
+          refreshPortListeners(),
+        ]);
+        return;
+      } catch (forceCause) {
+        error.value = String(forceCause);
+        recordActivity(service, "强制停止", false, error.value);
+        return;
+      }
+    }
     if (operationId) recordInstallFailure(operationId, cause);
-    recordActivity(service, activityAction, false, String(cause));
-    error.value = String(cause);
+    recordActivity(service, activityAction, false, message);
+    error.value = message;
+    if (action === "start" && message.includes("最后 50 行日志")) {
+      activeTab.value = "logs";
+      await loadLogs();
+    }
   } finally {
     pendingAction.value = null;
   }
@@ -2671,7 +2747,18 @@ onUnmounted(() => {
                 <h2>异常提醒</h2>
                 <p>PID、端口和最近操作</p>
               </div>
-              <span>{{ dashboardAlerts.length }}</span>
+              <div class="dashboard-alert-actions">
+                <button
+                  v-if="services.some((service) => service.status === 'stale_pid' || service.status === 'crashed')"
+                  type="button"
+                  :disabled="repairingServices"
+                  @click="repairAbnormalServices"
+                >
+                  <span v-if="repairingServices" class="spinner"></span>
+                  {{ repairingServices ? "修复中" : "一键修复" }}
+                </button>
+                <span>{{ dashboardAlerts.length }}</span>
+              </div>
             </div>
             <p v-if="dashboardAlerts.length === 0" class="dashboard-empty">
               当前没有发现异常

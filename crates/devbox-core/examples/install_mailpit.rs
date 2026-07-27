@@ -21,6 +21,7 @@ fn main() {
             arguments: Vec::new(),
             environment: environment(&instance),
             instance_dir: instance,
+            wait_for_port: true,
         })?;
         service.install()?;
         if should_start {

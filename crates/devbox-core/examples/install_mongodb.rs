@@ -24,6 +24,7 @@ fn main() {
             ],
             environment: BTreeMap::new(),
             instance_dir: instance,
+            wait_for_port: true,
         })?;
         service.install()?;
         if should_start {

@@ -67,7 +67,9 @@ impl ServiceManager for RedisService {
 
     fn start(&self) -> Result<u32> {
         match self.inner.status()? {
-            ServiceStatus::Stopped | ServiceStatus::StalePid { .. } => {
+            ServiceStatus::Stopped
+            | ServiceStatus::StalePid { .. }
+            | ServiceStatus::Crashed { .. } => {
                 self.prepare_version_data()?;
                 self.inner.start()
             }
@@ -79,18 +81,21 @@ impl ServiceManager for RedisService {
         self.inner.stop()
     }
 
+    fn force_stop(&self) -> Result<()> {
+        self.inner.force_stop()
+    }
+
     fn restart(&self) -> Result<u32> {
-        match self.inner.status()? {
-            ServiceStatus::Running { .. } => self.inner.stop()?,
-            ServiceStatus::NotInstalled => return self.inner.restart(),
-            ServiceStatus::Stopped | ServiceStatus::StalePid { .. } => {}
-        }
         self.prepare_version_data()?;
-        self.inner.start()
+        self.inner.restart()
     }
 
     fn status(&self) -> Result<ServiceStatus> {
         self.inner.status()
+    }
+
+    fn repair(&self) -> Result<()> {
+        self.inner.repair()
     }
 }
 

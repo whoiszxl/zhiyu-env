@@ -433,6 +433,7 @@ mod tests {
             ],
             environment: BTreeMap::new(),
             instance_dir: instance,
+            wait_for_port: true,
         })
         .unwrap();
         service.install().unwrap();

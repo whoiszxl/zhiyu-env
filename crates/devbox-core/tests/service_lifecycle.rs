@@ -7,6 +7,7 @@ use devbox_core::{
 };
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -21,6 +22,7 @@ fn config(root: &Path, kind: ServiceKind) -> ServiceConfig {
         arguments: vec!["30".into()],
         environment: BTreeMap::new(),
         instance_dir: root.join(kind.as_str()),
+        wait_for_port: false,
     }
 }
 
@@ -166,6 +168,98 @@ fn stale_pid_is_detected() {
         service.status().unwrap(),
         ServiceStatus::StalePid { pid: 999_999 }
     );
+}
+
+#[test]
+fn concurrent_start_only_creates_one_process() {
+    let temp = TempDir::new().unwrap();
+    let service = Arc::new(RedisService::new(config(temp.path(), ServiceKind::Redis)).unwrap());
+    service.install().unwrap();
+    let barrier = Arc::new(Barrier::new(3));
+    let handles = (0..2)
+        .map(|_| {
+            let service = Arc::clone(&service);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                service.start()
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    let results = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| result
+                .as_ref()
+                .is_err_and(|error| error.to_string().contains("操作正在执行")))
+            .count(),
+        1
+    );
+    service.stop().unwrap();
+}
+
+#[test]
+fn pid_identity_mismatch_is_never_treated_as_managed() {
+    let temp = TempDir::new().unwrap();
+    let service_config = config(temp.path(), ServiceKind::Redis);
+    let service = RedisService::new(service_config.clone()).unwrap();
+    service.install().unwrap();
+    let pid = std::process::id();
+    let record = serde_json::json!({
+        "pid": pid,
+        "executable": service_config.executable,
+        "start_marker": "a different process start time",
+    });
+    std::fs::write(
+        service_config.pid_path(),
+        serde_json::to_vec_pretty(&record).unwrap(),
+    )
+    .unwrap();
+
+    assert!(!matches!(
+        service.status().unwrap(),
+        ServiceStatus::Running { .. }
+    ));
+    assert!(service_config.anomaly_path().is_file());
+    assert!(service.stop().is_err());
+    assert!(unsafe { libc::kill(pid as libc::pid_t, 0) } == 0);
+}
+
+#[test]
+fn unexpected_exit_survives_restart_until_repaired() {
+    let temp = TempDir::new().unwrap();
+    let service_config = config(temp.path(), ServiceKind::Redis);
+    let service = RedisService::new(service_config.clone()).unwrap();
+    service.install().unwrap();
+    let pid = service.start().unwrap();
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let status = loop {
+        let status = service.status().unwrap();
+        if matches!(
+            status,
+            ServiceStatus::Crashed { pid: crashed_pid } if crashed_pid == pid
+        ) || Instant::now() >= deadline
+        {
+            break status;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(status, ServiceStatus::Crashed { pid });
+
+    let reopened = RedisService::new(service_config).unwrap();
+    assert_eq!(reopened.status().unwrap(), ServiceStatus::Crashed { pid });
+    reopened.repair().unwrap();
+    assert_eq!(reopened.status().unwrap(), ServiceStatus::Stopped);
 }
 
 #[test]

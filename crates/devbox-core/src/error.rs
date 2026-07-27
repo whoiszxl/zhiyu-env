@@ -17,6 +17,9 @@ pub enum DevBoxError {
     #[error("service is already running with pid {0}")]
     AlreadyRunning(u32),
 
+    #[error("服务操作正在执行，请稍候")]
+    OperationInProgress,
+
     #[error("service is not running")]
     NotRunning,
 
@@ -31,6 +34,16 @@ pub enum DevBoxError {
 
     #[error("process {pid} did not stop within {timeout_secs} seconds")]
     StopTimeout { pid: u32, timeout_secs: u64 },
+
+    #[error("端口 {port} 已被 {process}（PID {pid}）占用")]
+    PortOccupied {
+        port: u16,
+        pid: u32,
+        process: String,
+    },
+
+    #[error("服务启动失败：{message}\n\n最后 50 行日志：\n{log_tail}")]
+    StartupFailed { message: String, log_tail: String },
 
     #[error("unsupported platform: {0}")]
     UnsupportedPlatform(String),

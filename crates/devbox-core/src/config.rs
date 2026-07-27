@@ -52,6 +52,12 @@ pub struct ServiceConfig {
     pub arguments: Vec<String>,
     pub environment: BTreeMap<String, String>,
     pub instance_dir: PathBuf,
+    #[serde(default = "default_wait_for_port")]
+    pub wait_for_port: bool,
+}
+
+fn default_wait_for_port() -> bool {
+    true
 }
 
 impl ServiceConfig {
@@ -106,6 +112,10 @@ impl ServiceConfig {
 
     pub fn pid_path(&self) -> PathBuf {
         self.run_dir().join("service.pid")
+    }
+
+    pub fn anomaly_path(&self) -> PathBuf {
+        self.run_dir().join("service.anomaly.json")
     }
 
     pub fn stdout_log_path(&self) -> PathBuf {

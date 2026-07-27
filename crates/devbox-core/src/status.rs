@@ -7,4 +7,5 @@ pub enum ServiceStatus {
     Stopped,
     Running { pid: u32 },
     StalePid { pid: u32 },
+    Crashed { pid: u32 },
 }

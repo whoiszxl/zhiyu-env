@@ -31,6 +31,8 @@ pub fn run() {
             commands::service_start,
             commands::service_stop,
             commands::service_restart,
+            commands::service_force_stop,
+            commands::service_repair,
             commands::service_stop_all,
             commands::service_metrics,
             commands::service_disk_usage,

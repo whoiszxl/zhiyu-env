@@ -28,6 +28,7 @@ fn main() {
             ],
             environment: BTreeMap::new(),
             instance_dir: instance.clone(),
+            wait_for_port: true,
         })?;
         service.install()?;
         installer.initialize(&data_dir)

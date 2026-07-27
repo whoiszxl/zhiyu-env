@@ -263,6 +263,7 @@ fn redis_service_config(root: &Path, release: &RedisRelease) -> ServiceConfig {
         ],
         environment: BTreeMap::new(),
         instance_dir: instance,
+        wait_for_port: true,
     }
 }
 
@@ -295,6 +296,7 @@ fn mysql_service_config(root: &Path, release: &MysqlRelease) -> ServiceConfig {
         ],
         environment: BTreeMap::new(),
         instance_dir: instance,
+        wait_for_port: true,
     }
 }
 
@@ -335,6 +337,7 @@ fn postgres_service_config(root: &Path, release: &PostgresRelease) -> ServiceCon
         ],
         environment: BTreeMap::new(),
         instance_dir: instance,
+        wait_for_port: true,
     }
 }
 
@@ -559,6 +562,7 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
         arguments,
         environment,
         instance_dir,
+        wait_for_port: true,
     })
 }
 
@@ -681,6 +685,7 @@ fn status_parts(status: ServiceStatus) -> (&'static str, Option<u32>) {
         ServiceStatus::Stopped => ("stopped", None),
         ServiceStatus::Running { pid } => ("running", Some(pid)),
         ServiceStatus::StalePid { pid } => ("stale_pid", Some(pid)),
+        ServiceStatus::Crashed { pid } => ("crashed", Some(pid)),
     }
 }
 
@@ -1126,6 +1131,20 @@ pub async fn service_restart(kind: ServiceKindInput) -> Result<ServiceInfo, Stri
 }
 
 #[tauri::command]
+pub async fn service_force_stop(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || run_action(kind, |service| service.force_stop()))
+        .await
+        .map_err(|error| format!("强制停止任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn service_repair(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || run_action(kind, |service| service.repair()))
+        .await
+        .map_err(|error| format!("修复服务状态任务异常结束: {error}"))?
+}
+
+#[tauri::command]
 pub async fn service_stop_all() -> Result<Vec<ServiceInfo>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let mut failures = Vec::new();
@@ -1444,7 +1463,9 @@ pub(crate) fn stopped_service_instance(kind: ServiceKindInput) -> Result<PathBuf
     match with_service(kind, |service| service.status())? {
         ServiceStatus::NotInstalled => Err(format!("{} 尚未安装，无法备份或恢复", config.name)),
         ServiceStatus::Running { .. } => Err(format!("请先停止 {}，再执行备份或恢复", config.name)),
-        ServiceStatus::Stopped | ServiceStatus::StalePid { .. } => Ok(config.instance_dir),
+        ServiceStatus::Stopped | ServiceStatus::StalePid { .. } | ServiceStatus::Crashed { .. } => {
+            Ok(config.instance_dir)
+        }
     }
 }
 

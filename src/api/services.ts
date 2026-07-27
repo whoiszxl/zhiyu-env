@@ -99,6 +99,14 @@ export function stopAllManagedServices(): Promise<ServiceInfo[]> {
   return invoke<ServiceInfo[]>("service_stop_all");
 }
 
+export function forceStopService(kind: ServiceKind): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("service_force_stop", { kind });
+}
+
+export function repairServiceState(kind: ServiceKind): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("service_repair", { kind });
+}
+
 export function cleanServiceCache(
   kind: ServiceKind,
 ): Promise<CacheCleanupResult> {

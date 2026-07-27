@@ -41,11 +41,19 @@ impl ManagedService {
         self.process.stop(&self.config)
     }
 
+    pub(crate) fn force_stop(&self) -> Result<()> {
+        self.process.force_stop(&self.config)
+    }
+
     pub(crate) fn restart(&self) -> Result<u32> {
         self.process.restart(&self.config)
     }
 
     pub(crate) fn status(&self) -> Result<ServiceStatus> {
         self.process.status(&self.config)
+    }
+
+    pub(crate) fn repair(&self) -> Result<()> {
+        self.process.repair(&self.config)
     }
 }

@@ -45,10 +45,16 @@ impl ServiceManager for RnacosService {
     fn stop(&self) -> Result<()> {
         self.inner.stop()
     }
+    fn force_stop(&self) -> Result<()> {
+        self.inner.force_stop()
+    }
     fn restart(&self) -> Result<u32> {
         self.inner.restart()
     }
     fn status(&self) -> Result<ServiceStatus> {
         self.inner.status()
+    }
+    fn repair(&self) -> Result<()> {
+        self.inner.repair()
     }
 }

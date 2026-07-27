@@ -299,7 +299,9 @@ button {
 }
 
 .nav-state.stale_pid,
-.status-dot.stale_pid {
+.status-dot.stale_pid,
+.nav-state.crashed,
+.status-dot.crashed {
   background: #dd5633;
 }
 
@@ -475,6 +477,7 @@ button:disabled {
   background: #e2ece0;
   color: #275739;
   font-size: 11px;
+  white-space: pre-wrap;
 }
 
 .notice.danger {
@@ -944,6 +947,34 @@ button:disabled {
   text-align: center;
 }
 
+.dashboard-alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-alert-actions > span {
+  min-width: 24px;
+  padding: 3px 6px;
+  background: #e8e5dc;
+  color: #696c63;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  text-align: center;
+}
+
+.dashboard-alert-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid #c88c7b;
+  background: #faf9f5;
+  color: #9b3e29;
+  cursor: pointer;
+  font-size: 9px;
+}
+
 .dashboard-alerts {
   margin-bottom: 18px;
   border-left: 2px solid #d39845;
@@ -1055,7 +1086,8 @@ button:disabled {
   color: #34714a;
 }
 
-.dashboard-service-row > em.stale_pid {
+.dashboard-service-row > em.stale_pid,
+.dashboard-service-row > em.crashed {
   background: #f3dfd8;
   color: #a8442c;
 }

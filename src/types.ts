@@ -18,7 +18,8 @@ export type ServiceState =
   | "not_installed"
   | "stopped"
   | "running"
-  | "stale_pid";
+  | "stale_pid"
+  | "crashed";
 
 export interface ServiceInfo {
   kind: ServiceKind;

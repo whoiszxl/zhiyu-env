@@ -368,6 +368,7 @@ mod tests {
                 ("MP_BLOCK_REMOTE_CSS_AND_FONTS".into(), "true".into()),
             ]),
             instance_dir: root.clone(),
+            wait_for_port: true,
         })
         .unwrap();
 
