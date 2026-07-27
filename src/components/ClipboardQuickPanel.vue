@@ -92,12 +92,9 @@ onMounted(async () => {
   input?.focus();
 
   // Hide when window loses focus
-  const unlisten = await win.onFocusChanged(({ payload: focused }) => {
-    if (!focused) win.hide();
+  await win.listen("tauri://blur", () => {
+    win.hide();
   });
-
-  // Also listen for clipboard:changed to refresh
-  // (use a simple poll or rely on reload on next open)
 });
 
 onUnmounted(() => {});
