@@ -35,8 +35,8 @@ fn query(input: &str, path: &str) -> Result<JsonPathResult, String> {
         )
     })?;
 
-    let expression = JsonPath::parse(path.trim())
-        .map_err(|error| format!("JSONPath 表达式无效：{error}"))?;
+    let expression =
+        JsonPath::parse(path.trim()).map_err(|error| format!("JSONPath 表达式无效：{error}"))?;
 
     let matches: Vec<String> = expression
         .query(&value)

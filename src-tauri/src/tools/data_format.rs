@@ -109,8 +109,13 @@ fn detect_and_parse(input: &str) -> Result<(Value, DataFormat), String> {
 }
 
 fn parse_json(input: &str) -> Result<Value, String> {
-    serde_json::from_str(input)
-        .map_err(|error| format!("JSON 解析失败：第 {} 行第 {} 列 {error}", error.line(), error.column()))
+    serde_json::from_str(input).map_err(|error| {
+        format!(
+            "JSON 解析失败：第 {} 行第 {} 列 {error}",
+            error.line(),
+            error.column()
+        )
+    })
 }
 
 fn parse_yaml(input: &str) -> Result<Value, String> {
@@ -196,7 +201,9 @@ fn find_unsafe_integers(value: &Value, path: &str, found: &mut Vec<String>) {
             let unsafe_integer = number
                 .as_i64()
                 .is_some_and(|raw| raw.abs() > JS_SAFE_INTEGER)
-                || number.as_u64().is_some_and(|raw| raw > JS_SAFE_INTEGER as u64);
+                || number
+                    .as_u64()
+                    .is_some_and(|raw| raw > JS_SAFE_INTEGER as u64);
             if unsafe_integer {
                 found.push(path.to_string());
             }
@@ -248,7 +255,11 @@ mod tests {
 
     #[test]
     fn converts_json_to_yaml_and_back() {
-        let yaml = run(r#"{"name":"张三","tags":["a","b"]}"#, DataFormat::Json, DataFormat::Yaml);
+        let yaml = run(
+            r#"{"name":"张三","tags":["a","b"]}"#,
+            DataFormat::Json,
+            DataFormat::Yaml,
+        );
         assert!(yaml.output.contains("name: 张三"));
 
         let back = run(&yaml.output, DataFormat::Yaml, DataFormat::Json);
@@ -259,7 +270,11 @@ mod tests {
 
     #[test]
     fn converts_json_to_toml() {
-        let result = run(r#"{"server":{"host":"127.0.0.1","port":6379}}"#, DataFormat::Json, DataFormat::Toml);
+        let result = run(
+            r#"{"server":{"host":"127.0.0.1","port":6379}}"#,
+            DataFormat::Json,
+            DataFormat::Toml,
+        );
 
         assert!(result.output.contains("[server]"));
         assert!(result.output.contains("port = 6379"));
@@ -267,15 +282,29 @@ mod tests {
 
     #[test]
     fn detects_format_automatically() {
-        assert_eq!(run("{\"a\":1}", DataFormat::Auto, DataFormat::Json).detected_format, "json");
-        assert_eq!(run("a = 1\n", DataFormat::Auto, DataFormat::Json).detected_format, "toml");
-        assert_eq!(run("a:\n  - 1\n", DataFormat::Auto, DataFormat::Json).detected_format, "yaml");
+        assert_eq!(
+            run("{\"a\":1}", DataFormat::Auto, DataFormat::Json).detected_format,
+            "json"
+        );
+        assert_eq!(
+            run("a = 1\n", DataFormat::Auto, DataFormat::Json).detected_format,
+            "toml"
+        );
+        assert_eq!(
+            run("a:\n  - 1\n", DataFormat::Auto, DataFormat::Json).detected_format,
+            "yaml"
+        );
     }
 
     #[test]
     fn reports_json_error_with_position() {
-        let error = transform("{\"a\": }", DataFormat::Json, DataFormat::Json, OutputStyle::Pretty)
-            .expect_err("非法 JSON 应当报错");
+        let error = transform(
+            "{\"a\": }",
+            DataFormat::Json,
+            DataFormat::Json,
+            OutputStyle::Pretty,
+        )
+        .expect_err("非法 JSON 应当报错");
 
         assert!(error.contains("JSON 解析失败"), "实际错误：{error}");
         assert!(error.contains("行"), "错误信息应包含行号：{error}");
@@ -283,17 +312,30 @@ mod tests {
 
     #[test]
     fn warns_about_integers_beyond_javascript_precision() {
-        let result = run(r#"{"id":9007199254740993,"small":42}"#, DataFormat::Json, DataFormat::Json);
+        let result = run(
+            r#"{"id":9007199254740993,"small":42}"#,
+            DataFormat::Json,
+            DataFormat::Json,
+        );
 
         assert_eq!(result.warnings.len(), 1);
-        assert!(result.warnings[0].contains("$.id"), "实际提示：{}", result.warnings[0]);
+        assert!(
+            result.warnings[0].contains("$.id"),
+            "实际提示：{}",
+            result.warnings[0]
+        );
         assert!(!result.warnings[0].contains("$.small"));
     }
 
     #[test]
     fn rejects_toml_output_for_top_level_array() {
-        let error = transform("[1,2,3]", DataFormat::Json, DataFormat::Toml, OutputStyle::Pretty)
-            .expect_err("顶层数组不能转 TOML");
+        let error = transform(
+            "[1,2,3]",
+            DataFormat::Json,
+            DataFormat::Toml,
+            OutputStyle::Pretty,
+        )
+        .expect_err("顶层数组不能转 TOML");
 
         assert!(error.contains("顶层必须是键值表"), "实际错误：{error}");
     }
@@ -313,8 +355,13 @@ mod tests {
 
     #[test]
     fn rejects_empty_input() {
-        let error = transform("   ", DataFormat::Auto, DataFormat::Json, OutputStyle::Pretty)
-            .expect_err("空输入应当报错");
+        let error = transform(
+            "   ",
+            DataFormat::Auto,
+            DataFormat::Json,
+            OutputStyle::Pretty,
+        )
+        .expect_err("空输入应当报错");
 
         assert!(error.contains("请输入"));
     }

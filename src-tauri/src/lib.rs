@@ -57,6 +57,10 @@ pub fn run() {
             tools::data_format::data_format_transform,
             tools::json_diff::data_json_diff,
             tools::json_path::data_jsonpath_query,
+            tools::jwt::jwt_decode,
+            tools::jwt::jwt_verify_hmac,
+            tools::jwt::jwt_sign_hmac,
+            tools::jwk::jwk_inspect,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");

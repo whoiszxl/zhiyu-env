@@ -3306,3 +3306,140 @@ button:disabled {
   background: #f9f3e6;
   color: #8a6522;
 }
+
+/* ── JWT 调试器 ─────────────────────────────────────────────── */
+
+.nav-icon.jwt,
+.service-logo.jwt {
+  background: #ece7f0;
+  color: #5b4a72;
+}
+
+.jwt-input {
+  min-height: 120px;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: #34372e;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  resize: vertical;
+  word-break: break-all;
+}
+
+.jwt-input:focus {
+  outline: 0;
+}
+
+.jwt-verdict {
+  display: flex;
+  align-items: center;
+  padding: 11px 14px;
+  border: 1px solid #d2d1c9;
+  border-left-width: 2px;
+  gap: 12px;
+}
+
+.jwt-verdict.ok {
+  border-left-color: #4f8a5a;
+  background: rgba(238, 245, 239, 0.9);
+}
+
+.jwt-verdict.bad {
+  border-left-color: #dd5633;
+  background: rgba(251, 240, 236, 0.9);
+}
+
+.jwt-verdict strong {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.jwt-verdict.ok strong {
+  color: #3f6b3f;
+}
+
+.jwt-verdict.bad strong {
+  color: #a8442c;
+}
+
+.jwt-verdict span {
+  color: #55584e;
+  font-size: 11px;
+}
+
+.jwt-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jwt-status {
+  padding: 3px 10px;
+  border: 1px solid #d2d1c9;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.jwt-status.active {
+  border-color: #7fa87f;
+  background: #eef4ee;
+  color: #3f6b3f;
+}
+
+.jwt-status.expired {
+  border-color: #d99b8c;
+  background: #f9efec;
+  color: #a8442c;
+}
+
+.jwt-status.notYetValid,
+.jwt-status.noTimeLimit {
+  border-color: #c99a4e;
+  background: #f9f3e6;
+  color: #8a6522;
+}
+
+.jwt-status-detail {
+  color: #55584e;
+  font-size: 11px;
+}
+
+.jwt-chip {
+  padding: 3px 9px;
+  background: #eceadf;
+  color: #6f7269;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.jwt-token-output {
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.jwt-actions {
+  display: flex;
+  padding: 10px 12px;
+  border-top: 1px solid #e0ded6;
+  gap: 8px;
+}
+
+.jwt-actions button {
+  padding: 5px 12px;
+  border: 1px solid #d2d1c9;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.jwt-actions button:hover {
+  background: #f1efe8;
+}
+
+.jwt-muted {
+  color: #9a9c94;
+  font-size: 10px;
+}

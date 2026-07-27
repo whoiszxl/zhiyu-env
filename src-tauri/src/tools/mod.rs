@@ -4,3 +4,5 @@
 pub mod data_format;
 pub mod json_diff;
 pub mod json_path;
+pub mod jwk;
+pub mod jwt;

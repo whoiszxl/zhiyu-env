@@ -51,8 +51,14 @@ fn diff_documents(left: &str, right: &str) -> Result<DiffResult, String> {
     walk(&left_value, &right_value, "$", &mut entries);
 
     let added = entries.iter().filter(|e| e.kind == DiffKind::Added).count();
-    let removed = entries.iter().filter(|e| e.kind == DiffKind::Removed).count();
-    let changed = entries.iter().filter(|e| e.kind == DiffKind::Changed).count();
+    let removed = entries
+        .iter()
+        .filter(|e| e.kind == DiffKind::Removed)
+        .count();
+    let changed = entries
+        .iter()
+        .filter(|e| e.kind == DiffKind::Changed)
+        .count();
 
     Ok(DiffResult {
         identical: entries.is_empty(),

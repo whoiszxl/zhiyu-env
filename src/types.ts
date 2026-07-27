@@ -295,3 +295,59 @@ export interface JsonPathResult {
   matches: string[];
   count: number;
 }
+
+// ── 内置工具：JWT 调试器 ────────────────────────────────────
+
+export type SecretEncoding = "utf8" | "base64";
+export type HmacAlgorithm = "HS256" | "HS384" | "HS512";
+export type TokenStatus = "active" | "expired" | "notYetValid" | "noTimeLimit";
+
+export interface JwtTimeClaim {
+  name: string;
+  label: string;
+  description: string;
+  value: number;
+  offsetSeconds: number;
+}
+
+export interface JwtRegisteredClaim {
+  name: string;
+  label: string;
+  value: string;
+}
+
+export interface JwtDecoded {
+  header: string;
+  payload: string;
+  signature: string;
+  algorithm: string;
+  tokenType: string | null;
+  keyId: string | null;
+  timeClaims: JwtTimeClaim[];
+  registeredClaims: JwtRegisteredClaim[];
+  status: TokenStatus;
+  statusDetail: string;
+  warnings: string[];
+}
+
+export interface JwtVerifyResult {
+  valid: boolean;
+  algorithm: string;
+  detail: string;
+}
+
+export interface JwkKeyInfo {
+  keyId: string | null;
+  keyType: string;
+  algorithm: string | null;
+  usage: string | null;
+  summary: string;
+  containsPrivateMaterial: boolean;
+}
+
+export interface JwkInspection {
+  keys: JwkKeyInfo[];
+  count: number;
+  source: string;
+  warnings: string[];
+}

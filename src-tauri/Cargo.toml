@@ -17,14 +17,17 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64.workspace = true
 bson.workspace = true
 csv.workspace = true
 devbox-core = { path = "../crates/devbox-core" }
 dirs = "6"
+hmac.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_json_path.workspace = true
 serde_norway.workspace = true
+sha2.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 toml.workspace = true

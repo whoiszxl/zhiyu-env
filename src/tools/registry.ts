@@ -1,5 +1,6 @@
 import DataFormatTool from "../components/tools/DataFormatTool.vue";
 import DuckdbTool from "../components/tools/DuckdbTool.vue";
+import JwtTool from "../components/tools/JwtTool.vue";
 import PortTool from "../components/tools/PortTool.vue";
 import type { ToolDefinition, ToolId } from "./types";
 
@@ -21,6 +22,13 @@ export const TOOLS: ToolDefinition[] = [
     navHint: "JSON · YAML · TOML",
     icon: "{ }",
     component: DataFormatTool,
+  },
+  {
+    id: "jwt",
+    navLabel: "JWT 调试器",
+    navHint: "解码 · 验签 · 签发",
+    icon: "J",
+    component: JwtTool,
   },
   {
     id: "duckdb",

@@ -8,8 +8,11 @@ license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
+base64 = "0.22"
 bson = "2.15"
 csv = "1"
+# hmac 0.13 依赖 digest 0.11，与 sha2 0.10 不兼容，这里固定 0.12
+hmac = "0.12"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
