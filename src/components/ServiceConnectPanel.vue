@@ -55,310 +55,320 @@ const selectedSample = ref(0);
 </script>
 
 <template>
-  <div class="connect-panel">
-    <!-- 连接信息卡片 -->
-    <div class="card grid-card">
-      <div class="card-header">
-        <h3>连接参数</h3>
-        <div class="header-actions">
-          <button class="link-btn" @click="testConnection" :disabled="testing">
-            {{ testing ? "测试中..." : testResult === "ok" ? "\u2714 连接成功" : testResult === "fail" ? "\u2718 连接失败" : "测试连接" }}
-          </button>
-          <button class="link-btn export-btn" @click="exportEnv" v-if="connection.envVars.length">
-            导出 .env
-          </button>
-        </div>
-      </div>
-      <p class="card-error" v-if="testResult === 'fail'">{{ testError }}</p>
-
-      <div class="props-grid">
-        <div class="prop">
-          <span class="prop-label">Host</span>
-          <span class="prop-value">{{ connection.host }}</span>
-          <button class="copy-btn" @click="copyToClipboard(connection.host, 'Host')" :title="copiedLabel === 'Host' ? '已复制' : '复制'">
-            {{ copiedLabel === "Host" ? "\u2714" : "\u2398" }}
-          </button>
-        </div>
-        <div class="prop">
-          <span class="prop-label">Port</span>
-          <span class="prop-value">{{ connection.primaryPort }}</span>
-          <button class="copy-btn" @click="copyToClipboard(String(connection.primaryPort), 'Port')" :title="copiedLabel === 'Port' ? '已复制' : '复制'">
-            {{ copiedLabel === "Port" ? "\u2714" : "\u2398" }}
-          </button>
-        </div>
-        <div class="prop" v-if="connection.hasAuth || connection.username">
-          <span class="prop-label">Username</span>
-          <span class="prop-value">{{ connection.username || "\u2014" }}</span>
-          <button class="copy-btn" @click="copyToClipboard(connection.username, 'Username')" :title="copiedLabel === 'Username' ? '已复制' : '复制'" v-if="connection.username">
-            {{ copiedLabel === "Username" ? "\u2714" : "\u2398" }}
-          </button>
-        </div>
-        <div class="prop" v-if="connection.hasAuth">
-          <span class="prop-label">Password</span>
-          <span class="prop-value">
-            <span v-if="showPassword">{{ connection.password }}</span>
-            <span v-else>{{ "\u2022".repeat(Math.min(connection.password.length, 16)) }}</span>
-          </span>
-          <button class="copy-btn" @click="copyToClipboard(connection.password, 'Password')" :title="copiedLabel === 'Password' ? '已复制' : '复制'">
-            {{ copiedLabel === "Password" ? "\u2714" : "\u2398" }}
-          </button>
-          <button class="copy-btn" @click="togglePassword" :title="showPassword ? '隐藏' : '显示'">
-            {{ showPassword ? "\u25C9" : "\u25CE" }}
-          </button>
-        </div>
-      </div>
+  <div class="connect-page">
+    <div v-if="testResult === 'fail'" class="notice danger">
+      <span>{{ testError }}</span>
+      <button type="button" @click="testResult = 'idle'">&times;</button>
     </div>
 
-    <!-- 连接字符串 -->
-    <div class="card" v-if="connection.uris.length">
-      <h4>连接字符串</h4>
-      <div class="uri-list">
-        <div class="uri-row" v-for="uri in connection.uris" :key="uri.label">
-          <span class="uri-label">{{ uri.label }}</span>
-          <code class="uri-value">{{ uri.value }}</code>
-          <button class="copy-btn uri-copy" @click="copyToClipboard(uri.value, uri.label)" :title="copiedLabel === uri.label ? '已复制' : '复制'">
-            {{ copiedLabel === uri.label ? "\u2714" : "\u2398" }}
-          </button>
-        </div>
-      </div>
+    <div class="connect-metrics">
+      <article class="connect-metric">
+        <p>HOST</p>
+        <strong>{{ connection.host }}</strong>
+        <small>本地绑定地址</small>
+        <button class="metric-copy" @click="copyToClipboard(connection.host, 'Host')">{{ copiedLabel === "Host" ? "已复制" : "复制" }}</button>
+      </article>
+      <article class="connect-metric">
+        <p>PORT</p>
+        <strong>{{ connection.primaryPort }}</strong>
+        <small>主要通信端口</small>
+        <button class="metric-copy" @click="copyToClipboard(String(connection.primaryPort), 'Port')">{{ copiedLabel === "Port" ? "已复制" : "复制" }}</button>
+      </article>
+      <article class="connect-metric" v-if="connection.hasAuth || connection.username">
+        <p>USERNAME</p>
+        <strong>{{ connection.username || "\u2014" }}</strong>
+        <small>本地开发账号</small>
+        <button v-if="connection.username" class="metric-copy" @click="copyToClipboard(connection.username, 'Username')">{{ copiedLabel === "Username" ? "已复制" : "复制" }}</button>
+      </article>
+      <article class="connect-metric" v-if="connection.hasAuth">
+        <p>PASSWORD</p>
+        <strong class="password-val">
+          <span v-if="showPassword">{{ connection.password }}</span>
+          <span v-else>{{ "\u2022".repeat(Math.min(connection.password.length, 15)) }}</span>
+        </strong>
+        <small>本地开发密码</small>
+        <button class="metric-copy" @click="copyToClipboard(connection.password, 'Password')">{{ copiedLabel === "Password" ? "已复制" : "复制" }}</button>
+        <button class="metric-copy" style="margin-left:4px" @click="togglePassword">{{ showPassword ? "隐藏" : "显示" }}</button>
+      </article>
     </div>
 
-    <!-- 额外端点 -->
-    <div class="card" v-if="connection.extras.length">
-      <h4>其他端点</h4>
-      <div class="uri-list">
-        <div class="uri-row" v-for="extra in connection.extras" :key="extra.label">
-          <span class="uri-label">{{ extra.label }}</span>
-          <code class="uri-value">{{ extra.value }}</code>
-          <button class="copy-btn uri-copy" @click="copyToClipboard(extra.value, extra.label)" :title="copiedLabel === extra.label ? '已复制' : '复制'">
-            {{ copiedLabel === extra.label ? "\u2714" : "\u2398" }}
-          </button>
+    <div class="connect-layout">
+      <section class="connect-main">
+        <div class="connect-section-head">
+          <p>CONNECTION STRINGS</p>
+          <h2>连接字符串</h2>
+          <div class="connect-section-actions">
+            <button class="primary" type="button" :disabled="testing" @click="testConnection">
+              {{ testing ? "测试中…" : testResult === "ok" ? "连接成功" : "测试连接" }}
+            </button>
+            <button type="button" @click="exportEnv" v-if="connection.envVars.length">导出 .env</button>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 客户端配置示例 -->
-    <div class="card" v-if="connection.configSamples.length">
-      <h4>客户端配置示例</h4>
-      <div class="sample-tabs">
-        <button
-          v-for="(sample, idx) in connection.configSamples"
-          :key="idx"
-          :class="['sample-tab', { active: idx === selectedSample }]"
-          @click="selectedSample = idx"
-        >{{ sample.label }}</button>
-      </div>
-      <div class="sample-body">
-        <div class="sample-caption">{{ connection.configSamples[selectedSample].caption }}</div>
-        <pre><code>{{ connection.configSamples[selectedSample].code }}</code></pre>
-        <button class="copy-btn sample-copy" @click="copyToClipboard(connection.configSamples[selectedSample].code, 'config')">
-          {{ copiedLabel === "config" ? "已复制" : "复制代码" }}
-        </button>
-      </div>
+        <div v-if="connection.uris.length" class="uri-block">
+          <div class="uri-row" v-for="uri in connection.uris" :key="uri.label">
+            <span class="uri-label">{{ uri.label }}</span>
+            <div class="uri-field">
+              <code>{{ uri.value }}</code>
+              <button class="field-copy" @click="copyToClipboard(uri.value, uri.label)">{{ copiedLabel === uri.label ? "已复制" : "复制" }}</button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="connection.extras.length" class="uri-block">
+          <p style="color:#989a93;font-size:9px;margin:12px 0 6px;">ADDITIONAL ENDPOINTS</p>
+          <div class="uri-row" v-for="extra in connection.extras" :key="extra.label">
+            <span class="uri-label">{{ extra.label }}</span>
+            <div class="uri-field">
+              <code>{{ extra.value }}</code>
+              <button class="field-copy" @click="copyToClipboard(extra.value, extra.label)">{{ copiedLabel === extra.label ? "已复制" : "复制" }}</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="connect-samples" v-if="connection.configSamples.length">
+        <div class="connect-section-head">
+          <p>CLIENT EXAMPLES</p>
+          <h2>客户端配置</h2>
+        </div>
+        <div class="sample-tabs">
+          <button v-for="(s, i) in connection.configSamples" :key="i" :class="{ active: i === selectedSample }" @click="selectedSample = i">{{ s.label }}</button>
+        </div>
+        <div class="sample-body">
+          <div class="sample-caption">{{ connection.configSamples[selectedSample].caption }}</div>
+          <pre><code>{{ connection.configSamples[selectedSample].code }}</code></pre>
+          <button class="sample-copy-btn" @click="copyToClipboard(connection.configSamples[selectedSample].code, 'config')">{{ copiedLabel === "config" ? "已复制" : "复制" }}</button>
+        </div>
+      </aside>
     </div>
   </div>
 </template>
 
 <style scoped>
-.connect-panel {
-  max-width: 780px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
+.connect-page { padding: 26px 34px 34px; }
 
-.card {
-  background: var(--card-bg, #1a1e26);
-  border: 1px solid var(--border, #2d3240);
-  border-radius: 10px;
-  padding: 20px;
-}
-
-.card h3, .card h4 {
-  margin: 0 0 12px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary, #e1e4eb);
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.card-header h3 { margin: 0; }
-
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.card-error {
-  margin: 0 0 12px;
-  padding: 8px 12px;
-  background: #3d1a1a;
-  border: 1px solid #7a2a2a;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #f5a6a6;
-  word-break: break-all;
-}
-
-.link-btn {
-  background: var(--accent-bg, #1f2b4d);
-  color: var(--accent, #5b8dee);
-  border: 1px solid var(--accent-border, #2e4275);
-  border-radius: 6px;
-  padding: 6px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all .15s;
-}
-.link-btn:hover:not(:disabled) { background: #25345c; }
-.link-btn:disabled { opacity: .5; cursor: default; }
-.export-btn { background: #1a2e1a; color: #6abf6a; border-color: #2a4a2a; }
-
-.props-grid {
+.connect-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  margin-bottom: 18px;
+  border-top: 1px solid #d2d1c9;
+  border-left: 1px solid #d2d1c9;
 }
 
-.prop {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--input-bg, #10141b);
-  border-radius: 6px;
+.connect-metric {
+  position: relative;
+  min-width: 0;
+  padding: 18px 20px 36px;
+  border-right: 1px solid #d2d1c9;
+  border-bottom: 1px solid #d2d1c9;
+  background: rgba(250, 249, 245, 0.84);
 }
 
-.prop-label {
-  font-size: 12px;
-  color: var(--text-secondary, #787f8e);
-  min-width: 60px;
-  text-transform: uppercase;
-  letter-spacing: .5px;
+.connect-metric p {
+  margin: 0 0 12px;
+  color: #989a93;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.12em;
 }
 
-.prop-value {
-  font-size: 14px;
-  font-family: "SF Mono", "Fira Code", monospace;
-  color: var(--text-primary, #e1e4eb);
-  flex: 1;
+.connect-metric strong {
+  display: block;
   overflow: hidden;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.05em;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #353830;
 }
 
-.copy-btn {
-  background: none;
-  border: none;
-  color: var(--text-secondary, #787f8e);
+.connect-metric strong.password-val { font-size: 14px; letter-spacing: 0.14em; }
+
+.connect-metric small {
+  display: block;
+  margin-top: 8px;
+  color: #989a93;
+  font-size: 9px;
+}
+
+.metric-copy {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  padding: 3px 10px;
+  border: 1px solid #cfcec6;
+  background: #faf9f5;
+  color: #6f7269;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-size: 13px;
-  line-height: 1;
-  transition: color .15s, background .15s;
-  flex-shrink: 0;
+  font-size: 8px;
 }
-.copy-btn:hover { color: var(--accent, #5b8dee); background: #252e3d; }
+.metric-copy:hover { border-color: #898b83; color: #252920; }
 
-.uri-list {
+.connect-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+}
+
+.connect-main, .connect-samples {
+  border: 1px solid #d2d1c9;
+  background: rgba(250, 249, 245, 0.9);
+}
+
+.connect-section-head {
   display: flex;
-  flex-direction: column;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  border-bottom: 1px solid #d2d1c9;
+}
+
+.connect-section-head p {
+  margin: 0 0 3px;
+  color: #989a93;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.connect-section-head h2 { margin: 0; font-size: 14px; color: #252920; }
+
+.connect-section-actions {
+  display: flex;
   gap: 8px;
 }
+
+.connect-section-actions button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #c8c7bf;
+  background: #fffefa;
+  color: #6f7269;
+  font-size: 9px;
+  cursor: pointer;
+}
+.connect-section-actions button:hover { border-color: #898b83; color: #252920; }
+.connect-section-actions button.primary { background: #252920; color: white; border-color: #252920; }
+.connect-section-actions button.primary:hover { background: #393d33; }
+.connect-section-actions button:disabled { opacity: 0.5; cursor: default; }
+
+.uri-block { padding: 4px 16px 16px; }
 
 .uri-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #e8e6df;
 }
+.uri-row:last-child { border-bottom: 0; }
 
 .uri-label {
-  font-size: 12px;
-  color: var(--text-secondary, #787f8e);
-  min-width: 100px;
+  min-width: 80px;
+  color: #73766d;
+  font-size: 9px;
+  font-family: "SFMono-Regular", Consolas, monospace;
   text-transform: uppercase;
-  letter-spacing: .5px;
 }
 
-.uri-value {
-  font-size: 13px;
-  font-family: "SF Mono", "Fira Code", monospace;
-  color: var(--accent, #8badf5);
-  background: var(--input-bg, #10141b);
-  padding: 4px 10px;
-  border-radius: 4px;
+.uri-field {
+  display: flex;
   flex: 1;
+  align-items: center;
+  height: 30px;
+  border: 1px solid #c8c7bf;
+  background: #fffefa;
+}
+
+.uri-field code {
+  flex: 1;
+  padding: 0 10px;
   overflow: hidden;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  color: #353830;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.uri-copy { margin-left: 4px; }
+.field-copy {
+  height: 100%;
+  padding: 0 10px;
+  border: none;
+  border-left: 1px solid #e8e6df;
+  background: #f5f3ee;
+  color: #6f7269;
+  cursor: pointer;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.field-copy:hover { background: #edeae2; color: #252920; }
+
+.connect-samples {
+  width: 320px;
+  overflow: hidden;
+}
 
 .sample-tabs {
   display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
+  gap: 0;
+  padding: 10px 14px 0;
 }
 
-.sample-tab {
-  background: var(--input-bg, #10141b);
-  color: var(--text-secondary, #787f8e);
-  border: 1px solid var(--border, #2d3240);
-  border-radius: 6px 6px 0 0;
-  padding: 6px 14px;
-  font-size: 13px;
+.sample-tabs button {
+  padding: 5px 10px;
+  border: 1px solid #d2d1c9;
+  border-bottom: 0;
+  background: #f0ede5;
+  color: #8d8f87;
+  font-size: 8px;
   cursor: pointer;
-  transition: all .15s;
+  margin-right: -1px;
 }
-.sample-tab.active {
-  background: var(--accent-bg, #1f2b4d);
-  color: var(--accent, #5b8dee);
-  border-color: var(--accent-border, #2e4275);
+.sample-tabs button.active {
+  background: #faf9f5;
+  color: #252920;
 }
-.sample-tab:hover:not(.active) { color: var(--text-primary, #e1e4eb); }
 
 .sample-body {
-  background: var(--input-bg, #10141b);
-  border: 1px solid var(--border, #2d3240);
-  border-radius: 0 6px 6px 6px;
+  border-top: 1px solid #d2d1c9;
   padding: 14px;
   position: relative;
 }
 
 .sample-caption {
-  font-size: 12px;
-  color: var(--text-secondary, #787f8e);
+  color: #989a93;
+  font-size: 8px;
   margin-bottom: 8px;
 }
 
 .sample-body pre {
   margin: 0;
   overflow-x: auto;
-  font-size: 13px;
+  font-size: 10px;
 }
 
 .sample-body code {
-  font-family: "SF Mono", "Fira Code", monospace;
-  color: var(--text-primary, #e1e4eb);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #353830;
   white-space: pre;
+  line-height: 1.5;
 }
 
-.sample-copy {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 4px 10px;
-  font-size: 12px;
-  border: 1px solid var(--border, #2d3240);
-  border-radius: 4px;
-  background: var(--card-bg, #1a1e26);
+.sample-copy-btn {
+  margin-top: 10px;
+  padding: 4px 12px;
+  border: 1px solid #c8c7bf;
+  background: #faf9f5;
+  color: #6f7269;
+  cursor: pointer;
+  font-size: 8px;
 }
+.sample-copy-btn:hover { border-color: #898b83; color: #252920; }
 </style>
