@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, provide, ref } from "vue";
 import ServiceDocs from "./components/ServiceDocs.vue";
+import { findTool, TOOLS } from "./tools/registry";
+import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
+import { formatBytes } from "./utils/format";
 import {
   cleanServiceCache,
   createServiceBackup,
@@ -12,7 +14,6 @@ import {
   getMailpitMessageDetail,
   getMailpitOverview,
   getDatabaseOverview,
-  getDuckdbStatus,
   getMongoCollectionDetail,
   getMongoOverview,
   getRedisKeyDetail,
@@ -28,12 +29,9 @@ import {
   listMailpitMessages,
   listMysqlVersions,
   listPostgresVersions,
-  listPortListeners,
   listRedisVersions,
   listServiceBackups,
   listServices,
-  installDuckdb,
-  queryDuckdbFile,
   readServiceConfig,
   runServiceAction,
   restoreServiceBackup,
@@ -47,8 +45,6 @@ import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
   DatabaseInfo,
   DatabaseOverview,
-  DuckdbQueryResult,
-  DuckdbStatus,
   MailDetail,
   MailpitOverview,
   MailSummary,
@@ -58,7 +54,6 @@ import type {
   MongoOverview,
   MysqlVersionInfo,
   PostgresVersionInfo,
-  PortListener,
   RedisKeyDetail,
   RedisOverview,
   RedisVersionInfo,
@@ -102,7 +97,6 @@ type SqlConsoleEntry = {
   result: SqlResult | null;
   error: string;
 };
-type ActiveTool = "ports" | "duckdb";
 type MongoConsoleEntry = {
   database: string;
   command: string;
@@ -136,7 +130,8 @@ type InstallTask = {
 
 const services = ref<ServiceInfo[]>([]);
 const selectedKind = ref<ServiceKind>("redis");
-const activeTool = ref<ActiveTool | null>(null);
+const activeTool = ref<ToolId | null>(null);
+const activeToolDefinition = computed(() => findTool(activeTool.value));
 const activeTab = ref<DetailTab>("overview");
 const loading = ref(true);
 const pendingAction = ref<ServiceAction | null>(null);
@@ -203,16 +198,6 @@ const selectedMailId = ref<string | null>(null);
 const mailDetail = ref<MailDetail | null>(null);
 const mailLoading = ref(false);
 const mailDetailLoading = ref(false);
-const portListeners = ref<PortListener[]>([]);
-const portQuery = ref("");
-const portLoading = ref(false);
-const duckdbStatus = ref<DuckdbStatus | null>(null);
-const duckdbFilePath = ref("");
-const duckdbSql = ref("SELECT * FROM selected_file LIMIT 100;");
-const duckdbResult = ref<DuckdbQueryResult | null>(null);
-const duckdbStatusLoading = ref(false);
-const duckdbInstalling = ref(false);
-const duckdbQuerying = ref(false);
 const databases = ref<DatabaseInfo[]>([]);
 const selectedDatabase = ref("");
 const tables = ref<TableInfo[]>([]);
@@ -330,6 +315,13 @@ function recordInstallSuccess(operationId: string) {
   });
 }
 
+// 安装进度条由 App 持有，需要下载资源的工具组件通过 inject 复用
+provide(INSTALL_TASK_KEY, {
+  start: startInstallTask,
+  succeed: recordInstallSuccess,
+  fail: recordInstallFailure,
+});
+
 function handleInstallProgress(payload: InstallProgressPayload) {
   const task = installTask.value;
   if (!task || task.operationId !== payload.operationId) return;
@@ -344,54 +336,6 @@ function handleInstallProgress(payload: InstallProgressPayload) {
     message: payload.message,
   });
 }
-
-const filteredPortListeners = computed(() => {
-  const query = portQuery.value.trim().toLowerCase();
-  if (!query) return portListeners.value;
-  return portListeners.value.filter((listener) =>
-    [
-      listener.port,
-      listener.address,
-      listener.pid,
-      listener.process,
-      listener.managedService,
-      listener.commonService,
-    ]
-      .filter((value) => value !== null)
-      .some((value) => String(value).toLowerCase().includes(query)),
-  );
-});
-
-const portProcessCount = computed(
-  () => new Set(portListeners.value.map((listener) => listener.pid)).size,
-);
-
-const publicPortCount = computed(
-  () =>
-    portListeners.value.filter((listener) =>
-      ["*", "0.0.0.0", "[::]"].includes(listener.address),
-    ).length,
-);
-
-const duckdbFileName = computed(() => {
-  const parts = duckdbFilePath.value.split(/[\\/]/);
-  return parts.at(-1) || "尚未选择文件";
-});
-
-const duckdbFileType = computed(() => {
-  const extension = duckdbFileName.value.split(".").at(-1)?.toLowerCase();
-  if (extension === "csv" || extension === "tsv") return "CSV / TSV";
-  if (["json", "jsonl", "ndjson"].includes(extension ?? "")) return "JSON";
-  if (extension === "parquet") return "PARQUET";
-  if (extension === "duckdb" || extension === "db") return "DUCKDB";
-  return "LOCAL FILE";
-});
-
-const duckdbIsDatabase = computed(() =>
-  ["duckdb", "db"].includes(
-    duckdbFileName.value.split(".").at(-1)?.toLowerCase() ?? "",
-  ),
-);
 
 const configChanged = computed(
   () => configContent.value !== configOriginal.value,
@@ -663,6 +607,12 @@ async function restoreBackup(backup: ServiceBackup) {
   }
 }
 
+function selectTool(id: ToolId) {
+  activeTool.value = id;
+  notice.value = "";
+  error.value = "";
+}
+
 async function selectService(kind: ServiceKind) {
   activeTool.value = null;
   selectedKind.value = kind;
@@ -923,143 +873,6 @@ async function changePostgresVersion() {
     error.value = String(cause);
   } finally {
     postgresVersionChanging.value = false;
-  }
-}
-
-async function selectPortTool() {
-  activeTool.value = "ports";
-  notice.value = "";
-  error.value = "";
-  await loadPortListeners();
-}
-
-async function selectDuckdbTool() {
-  activeTool.value = "duckdb";
-  notice.value = "";
-  error.value = "";
-  await loadDuckdbStatus();
-}
-
-async function loadDuckdbStatus() {
-  if (duckdbStatusLoading.value) return;
-  duckdbStatusLoading.value = true;
-  try {
-    duckdbStatus.value = await getDuckdbStatus();
-    error.value = "";
-  } catch (cause) {
-    error.value = String(cause);
-  } finally {
-    duckdbStatusLoading.value = false;
-  }
-}
-
-async function installDuckdbTool() {
-  if (duckdbInstalling.value) return;
-  duckdbInstalling.value = true;
-  notice.value = "";
-  error.value = "";
-  const operationId = startInstallTask("duckdb", "DuckDB 1.5.5");
-  try {
-    duckdbStatus.value = await installDuckdb(operationId);
-    recordInstallSuccess(operationId);
-    notice.value = `DuckDB ${duckdbStatus.value.version} 安装成功`;
-  } catch (cause) {
-    recordInstallFailure(operationId, cause);
-    error.value = String(cause);
-  } finally {
-    duckdbInstalling.value = false;
-  }
-}
-
-async function chooseDuckdbFile() {
-  try {
-    const selected = await open({
-      multiple: false,
-      directory: false,
-      title: "选择本地数据文件",
-      filters: [
-        {
-          name: "DuckDB 可查询文件",
-          extensions: [
-            "csv",
-            "tsv",
-            "json",
-            "jsonl",
-            "ndjson",
-            "parquet",
-            "duckdb",
-            "db",
-          ],
-        },
-      ],
-    });
-    if (typeof selected !== "string") return;
-    duckdbFilePath.value = selected;
-    duckdbResult.value = null;
-    const extension = selected.split(".").at(-1)?.toLowerCase();
-    duckdbSql.value = ["duckdb", "db"].includes(extension ?? "")
-      ? "SHOW ALL TABLES;"
-      : "SELECT * FROM selected_file LIMIT 100;";
-    notice.value = "";
-    error.value = "";
-  } catch (cause) {
-    error.value = String(cause);
-  }
-}
-
-function useDuckdbTemplate(template: "preview" | "count" | "schema" | "tables") {
-  if (template === "preview") {
-    duckdbSql.value = "SELECT * FROM selected_file LIMIT 100;";
-  } else if (template === "count") {
-    duckdbSql.value = "SELECT count(*) AS total_rows FROM selected_file;";
-  } else if (template === "schema") {
-    duckdbSql.value = "DESCRIBE selected_file;";
-  } else {
-    duckdbSql.value = "SHOW ALL TABLES;";
-  }
-}
-
-async function runDuckdbQuery() {
-  if (
-    duckdbQuerying.value ||
-    !duckdbStatus.value?.installed ||
-    !duckdbFilePath.value
-  ) {
-    return;
-  }
-  duckdbQuerying.value = true;
-  notice.value = "";
-  error.value = "";
-  try {
-    duckdbResult.value = await queryDuckdbFile(
-      duckdbFilePath.value,
-      duckdbSql.value,
-    );
-  } catch (cause) {
-    duckdbResult.value = null;
-    error.value = String(cause);
-  } finally {
-    duckdbQuerying.value = false;
-  }
-}
-
-function handleDuckdbShortcut(event: KeyboardEvent) {
-  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-    event.preventDefault();
-    void runDuckdbQuery();
-  }
-}
-
-async function loadPortListeners(silent = false) {
-  if (portLoading.value) return;
-  portLoading.value = true;
-  try {
-    portListeners.value = await listPortListeners();
-    error.value = "";
-  } catch (cause) {
-    if (!silent) error.value = String(cause);
-  } finally {
-    portLoading.value = false;
   }
 }
 
@@ -1610,16 +1423,6 @@ async function loadLogs() {
   }
 }
 
-function formatBytes(value: number | null) {
-  if (value === null) return "—";
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KiB`;
-  if (value < 1024 * 1024 * 1024) {
-    return `${(value / 1024 / 1024).toFixed(1)} MiB`;
-  }
-  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GiB`;
-}
-
 function formatMailDate(value: string) {
   if (!value) return "—";
   const date = new Date(value);
@@ -1658,10 +1461,7 @@ onMounted(async () => {
   ]);
   serviceTimer = window.setInterval(() => refreshServices(true), 3000);
   metricTimer = window.setInterval(async () => {
-    if (activeTool.value === "ports") {
-      await loadPortListeners(true);
-      return;
-    }
+    if (activeTool.value) return;
     await refreshMetrics();
     if (activeTab.value === "logs") await loadLogs();
   }, 2000);
@@ -1718,28 +1518,17 @@ onUnmounted(() => {
 
         <p class="nav-label tool-label">TOOLS</p>
         <button
+          v-for="tool in TOOLS"
+          :key="tool.id"
           type="button"
           class="service-nav-item"
-          :class="{ active: activeTool === 'ports' }"
-          @click="selectPortTool"
+          :class="{ active: activeTool === tool.id }"
+          @click="selectTool(tool.id)"
         >
-          <span class="nav-icon ports">↔</span>
+          <span class="nav-icon" :class="tool.id">{{ tool.icon }}</span>
           <span class="nav-copy">
-            <strong>端口检查器</strong>
-            <small>TCP LISTEN</small>
-          </span>
-        </button>
-
-        <button
-          type="button"
-          class="service-nav-item"
-          :class="{ active: activeTool === 'duckdb' }"
-          @click="selectDuckdbTool"
-        >
-          <span class="nav-icon duckdb">D</span>
-          <span class="nav-copy">
-            <strong>DuckDB 查询器</strong>
-            <small>LOCAL FILE SQL</small>
+            <strong>{{ tool.navLabel }}</strong>
+            <small>{{ tool.navHint }}</small>
           </span>
         </button>
 
@@ -1819,373 +1608,10 @@ onUnmounted(() => {
 
       <div v-if="loading" class="page-loading">正在读取服务状态…</div>
 
-      <template v-else-if="activeTool === 'ports'">
-        <header class="detail-header">
-          <div class="detail-identity">
-            <span class="service-logo ports">↔</span>
-            <div>
-              <div class="title-line">
-                <h1>端口检查器</h1>
-                <span>TCP LISTEN</span>
-              </div>
-              <p>查看本机正在监听的 TCP 端口，不修改任何进程</p>
-            </div>
-          </div>
-          <div class="header-actions">
-            <button
-              class="primary"
-              type="button"
-              :disabled="portLoading"
-              @click="loadPortListeners()"
-            >
-              <span v-if="portLoading" class="spinner"></span>
-              {{ portLoading ? "检查中" : "重新检查" }}
-            </button>
-          </div>
-        </header>
-
-        <div v-if="error" class="notice danger">
-          <span>{{ error }}</span>
-          <button type="button" @click="error = ''">×</button>
-        </div>
-
-        <section class="port-tool-page">
-          <div class="metric-grid">
-            <article class="metric-card">
-              <p>LISTENERS</p>
-              <strong>{{ portListeners.length }}</strong>
-              <small>正在监听的地址</small>
-            </article>
-            <article class="metric-card">
-              <p>PROCESSES</p>
-              <strong>{{ portProcessCount }}</strong>
-              <small>占用端口的进程</small>
-            </article>
-            <article class="metric-card">
-              <p>ZHIYU</p>
-              <strong>{{
-                portListeners.filter((item) => item.managedService).length
-              }}</strong>
-              <small>智屿管理的监听地址</small>
-            </article>
-            <article class="metric-card">
-              <p>ALL INTERFACES</p>
-              <strong>{{ publicPortCount }}</strong>
-              <small>监听全部网络接口</small>
-            </article>
-          </div>
-
-          <div class="port-panel">
-            <div class="port-toolbar">
-              <div>
-                <p>LOCAL PORTS</p>
-                <h2>监听端口</h2>
-              </div>
-              <label>
-                筛选
-                <input
-                  v-model="portQuery"
-                  type="search"
-                  placeholder="端口、进程或服务"
-                />
-              </label>
-            </div>
-
-            <div v-if="portLoading && portListeners.length === 0" class="port-empty">
-              正在读取本机端口…
-            </div>
-            <div
-              v-else-if="filteredPortListeners.length === 0"
-              class="port-empty"
-            >
-              {{ portQuery ? "没有匹配的监听端口" : "当前没有 TCP 监听端口" }}
-            </div>
-            <div v-else class="port-table-wrap">
-              <table class="port-table">
-                <thead>
-                  <tr>
-                    <th>端口</th>
-                    <th>监听地址</th>
-                    <th>进程</th>
-                    <th>PID</th>
-                    <th>归属</th>
-                    <th>常见用途</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="listener in filteredPortListeners"
-                    :key="`${listener.pid}-${listener.address}-${listener.port}`"
-                  >
-                    <td><code>{{ listener.port }}</code></td>
-                    <td>
-                      <code>{{ listener.address }}:{{ listener.port }}</code>
-                      <span
-                        v-if="
-                          ['*', '0.0.0.0', '[::]'].includes(listener.address)
-                        "
-                        class="network-badge"
-                      >
-                        全部网卡
-                      </span>
-                    </td>
-                    <td>{{ listener.process || "未知进程" }}</td>
-                    <td><code>{{ listener.pid }}</code></td>
-                    <td>
-                      <span
-                        v-if="listener.managedService"
-                        class="ownership-badge managed"
-                      >
-                        智屿 · {{ listener.managedService }}
-                      </span>
-                      <span v-else class="ownership-badge">外部进程</span>
-                    </td>
-                    <td>{{ listener.commonService ?? "—" }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p class="port-note">
-              这里只显示 TCP 监听端口。监听 <code>127.0.0.1</code> 或
-              <code>::1</code> 的服务仅供本机访问；“全部网卡”表示局域网设备也可能连接。
-            </p>
-          </div>
-        </section>
-      </template>
-
-      <template v-else-if="activeTool === 'duckdb'">
-        <header class="detail-header">
-          <div class="detail-identity">
-            <span class="service-logo duckdb">D</span>
-            <div>
-              <div class="title-line">
-                <h1>DuckDB 本地文件查询器</h1>
-                <span>v{{ duckdbStatus?.version ?? "1.5.5" }}</span>
-              </div>
-              <p>
-                直接查询 CSV、JSON、Parquet 和 DuckDB 文件，不启动后台服务
-              </p>
-            </div>
-          </div>
-          <div class="header-actions">
-            <button
-              v-if="!duckdbStatus?.installed"
-              class="primary"
-              type="button"
-              :disabled="duckdbInstalling || duckdbStatusLoading"
-              @click="installDuckdbTool"
-            >
-              <span v-if="duckdbInstalling" class="spinner"></span>
-              {{ duckdbInstalling ? "安装中" : "下载并安装" }}
-            </button>
-            <button
-              v-else
-              class="primary"
-              type="button"
-              @click="chooseDuckdbFile"
-            >
-              选择本地文件
-            </button>
-          </div>
-        </header>
-
-        <div v-if="notice || error" class="notice" :class="{ danger: error }">
-          <span>{{ error || notice }}</span>
-          <button type="button" @click="notice = error = ''">×</button>
-        </div>
-
-        <section class="duckdb-tool-page">
-          <div v-if="duckdbStatusLoading && !duckdbStatus" class="duckdb-empty">
-            正在检查 DuckDB CLI…
-          </div>
-
-          <div v-else-if="!duckdbStatus?.installed" class="duckdb-install-card">
-            <span class="service-logo duckdb">D</span>
-            <h2>安装 DuckDB CLI</h2>
-            <p>
-              智屿会下载官方 macOS universal 单文件程序，校验 SHA-256
-              后安装到 <code>~/.devbox/</code>，不会修改系统 PATH。
-            </p>
-            <button
-              type="button"
-              :disabled="duckdbInstalling"
-              @click="installDuckdbTool"
-            >
-              <span v-if="duckdbInstalling" class="spinner"></span>
-              {{ duckdbInstalling ? "正在下载并校验…" : "安装 DuckDB 1.5.5" }}
-            </button>
-          </div>
-
-          <template v-else>
-            <div class="metric-grid duckdb-metrics">
-              <article class="metric-card">
-                <p>ENGINE</p>
-                <strong>v{{ duckdbStatus.version }}</strong>
-                <small>官方 DuckDB CLI</small>
-              </article>
-              <article class="metric-card">
-                <p>FILE TYPE</p>
-                <strong class="small-metric">{{ duckdbFileType }}</strong>
-                <small>当前数据源</small>
-              </article>
-              <article class="metric-card">
-                <p>DISK</p>
-                <strong>{{ formatBytes(duckdbStatus.installationBytes) }}</strong>
-                <small>查询引擎占用</small>
-              </article>
-              <article class="metric-card">
-                <p>EXECUTION</p>
-                <strong class="small-metric">LOCAL</strong>
-                <small>只读 · 15 秒超时</small>
-              </article>
-            </div>
-
-            <div class="duckdb-file-card">
-              <div class="duckdb-file-icon">{{ duckdbFileType.slice(0, 1) }}</div>
-              <div>
-                <p>SELECTED FILE</p>
-                <strong>{{ duckdbFileName }}</strong>
-                <small :title="duckdbFilePath">
-                  {{
-                    duckdbFilePath ||
-                    "选择一个 CSV、JSON、Parquet 或 DuckDB 文件"
-                  }}
-                </small>
-              </div>
-              <button type="button" @click="chooseDuckdbFile">
-                {{ duckdbFilePath ? "更换文件" : "选择文件" }}
-              </button>
-            </div>
-
-            <div class="duckdb-workbench">
-              <div class="duckdb-editor">
-                <div class="duckdb-editor-head">
-                  <div>
-                    <p>READ-ONLY SQL</p>
-                    <h2>查询语句</h2>
-                  </div>
-                  <div class="duckdb-templates">
-                    <template v-if="!duckdbIsDatabase">
-                      <button
-                        type="button"
-                        @click="useDuckdbTemplate('preview')"
-                      >
-                        预览 100 行
-                      </button>
-                      <button
-                        type="button"
-                        @click="useDuckdbTemplate('count')"
-                      >
-                        统计行数
-                      </button>
-                      <button
-                        type="button"
-                        @click="useDuckdbTemplate('schema')"
-                      >
-                        查看字段
-                      </button>
-                    </template>
-                    <button
-                      v-else
-                      type="button"
-                      @click="useDuckdbTemplate('tables')"
-                    >
-                      查看所有表
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  v-model="duckdbSql"
-                  spellcheck="false"
-                  :disabled="!duckdbFilePath"
-                  @keydown="handleDuckdbShortcut"
-                ></textarea>
-                <div class="duckdb-runbar">
-                  <span>
-                    {{
-                      duckdbIsDatabase
-                        ? ".duckdb 文件以 safe + readonly 模式打开"
-                        : "使用 selected_file 作为所选文件的表名"
-                    }}
-                  </span>
-                  <span>⌘ Enter 执行</span>
-                  <button
-                    type="button"
-                    :disabled="!duckdbFilePath || duckdbQuerying"
-                    @click="runDuckdbQuery"
-                  >
-                    <span v-if="duckdbQuerying" class="spinner"></span>
-                    {{ duckdbQuerying ? "查询中" : "运行查询" }}
-                  </button>
-                </div>
-              </div>
-
-              <div class="duckdb-result-panel">
-                <div class="duckdb-result-head">
-                  <div>
-                    <p>QUERY RESULT</p>
-                    <h2>结果</h2>
-                  </div>
-                  <span v-if="duckdbResult">
-                    {{ duckdbResult.summary }} · {{ duckdbResult.elapsedMs }} ms
-                  </span>
-                </div>
-                <div
-                  v-if="duckdbQuerying && !duckdbResult"
-                  class="duckdb-empty"
-                >
-                  正在本机执行查询…
-                </div>
-                <div v-else-if="!duckdbResult" class="duckdb-empty">
-                  {{
-                    duckdbFilePath
-                      ? "输入只读 SQL 后运行查询"
-                      : "请先选择一个本地文件"
-                  }}
-                </div>
-                <div
-                  v-else-if="duckdbResult.columns.length === 0"
-                  class="duckdb-empty"
-                >
-                  {{ duckdbResult.summary }}
-                </div>
-                <div v-else class="duckdb-table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th
-                          v-for="column in duckdbResult.columns"
-                          :key="column"
-                        >
-                          {{ column }}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr
-                        v-for="(row, rowIndex) in duckdbResult.rows"
-                        :key="rowIndex"
-                      >
-                        <td
-                          v-for="(value, columnIndex) in row"
-                          :key="columnIndex"
-                          :class="{ null: value === null }"
-                        >
-                          {{ value === null ? "NULL" : value }}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <p v-if="duckdbResult?.truncated" class="duckdb-result-note">
-                  为保持界面流畅，单次最多展示 500 行；请用 WHERE 或 LIMIT
-                  缩小结果。
-                </p>
-              </div>
-            </div>
-          </template>
-        </section>
-      </template>
+      <component
+        :is="activeToolDefinition.component"
+        v-else-if="activeToolDefinition"
+      />
 
       <template v-else-if="selectedService">
         <header class="detail-header">
