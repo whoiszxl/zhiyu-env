@@ -110,6 +110,7 @@ fn managed_service_pids() -> BTreeMap<u32, String> {
         ("mongodb", "MongoDB"),
         ("mailpit", "Mailpit"),
         ("nats", "NATS"),
+        ("meilisearch", "Meilisearch"),
     ]
     .into_iter()
     .filter_map(|(directory, name)| {

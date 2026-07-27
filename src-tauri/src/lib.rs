@@ -2,6 +2,7 @@ mod commands;
 mod database_tools;
 mod duckdb_tools;
 mod mailpit_tools;
+mod meilisearch_tools;
 mod mongodb_tools;
 mod nats_tools;
 mod port_tools;
@@ -52,6 +53,10 @@ pub fn run() {
             mailpit_tools::mailpit_overview,
             mailpit_tools::mailpit_messages,
             mailpit_tools::mailpit_message_detail,
+            meilisearch_tools::meilisearch_overview,
+            meilisearch_tools::meilisearch_indexes,
+            meilisearch_tools::meilisearch_add_documents,
+            meilisearch_tools::meilisearch_search,
             nats_tools::nats_overview,
             nats_tools::nats_publish,
             nats_tools::nats_receive,

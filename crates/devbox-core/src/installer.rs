@@ -315,6 +315,12 @@ const NATS_ARCHIVE: &str = "nats-server-v2.14.2-darwin-arm64.tar.gz";
 const NATS_URL: &str =
     "https://github.com/nats-io/nats-server/releases/download/v2.14.2/nats-server-v2.14.2-darwin-arm64.tar.gz";
 const NATS_SHA256: &str = "1027e634ef15c3be7befed6f6645c317cefea54a51d1ff3d312e220bac55ca21";
+pub const MEILISEARCH_SERIES: &str = "1.50";
+pub const MEILISEARCH_VERSION: &str = "1.50.0";
+const MEILISEARCH_BINARY: &str = "meilisearch-macos-apple-silicon-1.50.0";
+const MEILISEARCH_URL: &str =
+    "https://github.com/meilisearch/meilisearch/releases/download/v1.50.0/meilisearch-macos-apple-silicon";
+const MEILISEARCH_SHA256: &str = "deccb8a992e8d24c3e67118fd1166a37ef11e5b092cb1e269f2ae8a7ac8d65c8";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -814,6 +820,109 @@ impl DuckdbInstaller {
 #[derive(Debug, Clone)]
 pub struct NatsInstaller {
     devbox_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct MeilisearchInstaller {
+    devbox_root: PathBuf,
+}
+
+impl MeilisearchInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 Meilisearch {MEILISEARCH_VERSION}"),
+        );
+        ensure_macos_arm64("Meilisearch")?;
+        ensure_tools(&["/usr/bin/curl"])?;
+
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/meilisearch");
+        if binary_contains(&executable, &["--version"], MEILISEARCH_VERSION) {
+            report_install_progress(90, "已安装", "Meilisearch 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let temp_root = self.devbox_root.join("tmp");
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&temp_root)?;
+        fs::create_dir_all(
+            installation_dir
+                .parent()
+                .expect("Meilisearch installation has a parent"),
+        )?;
+
+        let download = downloads_dir.join(MEILISEARCH_BINARY);
+        prepare_archive(
+            &download,
+            MEILISEARCH_BINARY,
+            MEILISEARCH_URL,
+            MEILISEARCH_SHA256,
+        )?;
+        let work_dir = temp_root.join(format!(
+            "meilisearch-{MEILISEARCH_VERSION}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        fs::create_dir_all(&bin_dir)?;
+        report_install_progress(75, "整理文件", "正在写入 Meilisearch 版本目录");
+        fs::copy(download, bin_dir.join("meilisearch"))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                bin_dir.join("meilisearch"),
+                fs::Permissions::from_mode(0o755),
+            )?;
+        }
+
+        if !binary_contains(
+            &bin_dir.join("meilisearch"),
+            &["--version"],
+            MEILISEARCH_VERSION,
+        ) {
+            let _ = fs::remove_dir_all(&work_dir);
+            return Err(DevBoxError::CommandFailed {
+                command: "meilisearch --version".into(),
+                message: format!("downloaded binary is not Meilisearch {MEILISEARCH_VERSION}"),
+            });
+        }
+        write_manifest(
+            &stage,
+            "meilisearch",
+            MEILISEARCH_SERIES,
+            MEILISEARCH_VERSION,
+            MEILISEARCH_URL,
+            MEILISEARCH_SHA256,
+            "official-binary",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        let _ = fs::remove_dir_all(&work_dir);
+        report_install_progress(90, "完成安装", "Meilisearch 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations")
+            .join("meilisearch")
+            .join(MEILISEARCH_SERIES)
+    }
 }
 
 impl NatsInstaller {

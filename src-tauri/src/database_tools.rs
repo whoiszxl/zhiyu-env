@@ -97,6 +97,7 @@ impl TryFrom<ServiceKindInput> for DatabaseEngine {
             ServiceKindInput::Mongodb => Err("MongoDB 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Mailpit => Err("Mailpit 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Nats => Err("NATS 不使用 SQL 数据库接口".into()),
+            ServiceKindInput::Meilisearch => Err("Meilisearch 不使用 SQL 数据库接口".into()),
         }
     }
 }

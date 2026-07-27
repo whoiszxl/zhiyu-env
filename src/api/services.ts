@@ -8,6 +8,10 @@ import type {
   MailDetail,
   MailpitOverview,
   MailSummary,
+  MeilisearchIndex,
+  MeilisearchOverview,
+  MeilisearchSearchResult,
+  MeilisearchTask,
   MongoCollectionDetail,
   MongoCollectionInfo,
   MongoCommandResult,
@@ -296,6 +300,36 @@ export function publishNatsMessage(
 
 export function receiveNatsMessage(subject: string): Promise<NatsMessage> {
   return invoke<NatsMessage>("nats_receive", { subject });
+}
+
+export function getMeilisearchOverview(): Promise<MeilisearchOverview> {
+  return invoke<MeilisearchOverview>("meilisearch_overview");
+}
+
+export function listMeilisearchIndexes(): Promise<MeilisearchIndex[]> {
+  return invoke<MeilisearchIndex[]>("meilisearch_indexes");
+}
+
+export function addMeilisearchDocuments(
+  indexUid: string,
+  primaryKey: string,
+  documents: string,
+): Promise<MeilisearchTask> {
+  return invoke<MeilisearchTask>("meilisearch_add_documents", {
+    indexUid,
+    primaryKey,
+    documents,
+  });
+}
+
+export function searchMeilisearch(
+  indexUid: string,
+  query: string,
+): Promise<MeilisearchSearchResult> {
+  return invoke<MeilisearchSearchResult>("meilisearch_search", {
+    indexUid,
+    query,
+  });
 }
 
 export function getDuckdbStatus(): Promise<DuckdbStatus> {

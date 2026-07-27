@@ -1,14 +1,15 @@
 use devbox_core::{
     installer::{
         mysql_release, postgres_release, redis_release, MysqlRelease, PostgresRelease,
-        RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION, MONGODB_SERIES, MONGODB_VERSION,
-        MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION, POSTGRES_RELEASES,
-        POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION,
+        RedisRelease, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION,
+        MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION,
+        POSTGRES_RELEASES, POSTGRES_VERSION, REDIS_RELEASES, REDIS_VERSION,
     },
     report_install_progress, with_install_reporter, ConfigManager, InstallReporter,
-    MailpitInstaller, MailpitService, MongodbInstaller, MongodbService, MysqlInstaller,
-    MysqlService, NatsInstaller, NatsService, PostgresInstaller, PostgresService, RedisInstaller,
-    RedisService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService, MongodbInstaller,
+    MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService, PostgresInstaller,
+    PostgresService, RedisInstaller, RedisService, ServiceConfig, ServiceKind, ServiceManager,
+    ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -111,6 +112,7 @@ pub enum ServiceKindInput {
     Mongodb,
     Mailpit,
     Nats,
+    Meilisearch,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -122,6 +124,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Mongodb => Self::Mongodb,
             ServiceKindInput::Mailpit => Self::Mailpit,
             ServiceKindInput::Nats => Self::Nats,
+            ServiceKindInput::Meilisearch => Self::Meilisearch,
         }
     }
 }
@@ -366,6 +369,21 @@ fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
                 ],
             )
         }
+        ServiceKind::Meilisearch => {
+            let instance = root.join("instances/meilisearch/default");
+            (
+                "Meilisearch",
+                MEILISEARCH_VERSION,
+                7700,
+                root.join(format!(
+                    "installations/meilisearch/{MEILISEARCH_SERIES}/bin/meilisearch"
+                )),
+                vec![
+                    "--config-file-path".into(),
+                    instance.join("conf/meilisearch.toml").display().to_string(),
+                ],
+            )
+        }
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -475,6 +493,9 @@ fn with_service<T>(
             operation(&MailpitService::new(config).map_err(stringify_error)?)
         }
         ServiceKindInput::Nats => operation(&NatsService::new(config).map_err(stringify_error)?),
+        ServiceKindInput::Meilisearch => {
+            operation(&MeilisearchService::new(config).map_err(stringify_error)?)
+        }
     }
     .map_err(stringify_error)
 }
@@ -503,6 +524,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Mongodb => "MongoDB",
         ServiceKindInput::Mailpit => "Mailpit",
         ServiceKindInput::Nats => "NATS",
+        ServiceKindInput::Meilisearch => "Meilisearch",
     };
     Ok(ServiceInfo {
         kind: kind.into(),
@@ -574,6 +596,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Mongodb,
         ServiceKindInput::Mailpit,
         ServiceKindInput::Nats,
+        ServiceKindInput::Meilisearch,
     ]
     .into_iter()
     .map(info)
@@ -642,6 +665,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 NATS 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Meilisearch => {
+            MeilisearchInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 Meilisearch 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -930,7 +960,11 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         ServiceKind::Mongodb => {
             sources.push(("MONGODB", config.logs_dir().join("mongodb.log")));
         }
-        ServiceKind::Redis | ServiceKind::Postgres | ServiceKind::Mailpit | ServiceKind::Nats => {}
+        ServiceKind::Redis
+        | ServiceKind::Postgres
+        | ServiceKind::Mailpit
+        | ServiceKind::Nats
+        | ServiceKind::Meilisearch => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -951,9 +985,11 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
     match config.kind {
         ServiceKind::Mysql => config.logs_dir().join("mysql-error.log"),
         ServiceKind::Mongodb => config.logs_dir().join("mongodb.log"),
-        ServiceKind::Redis | ServiceKind::Postgres | ServiceKind::Mailpit | ServiceKind::Nats => {
-            config.stdout_log_path()
-        }
+        ServiceKind::Redis
+        | ServiceKind::Postgres
+        | ServiceKind::Mailpit
+        | ServiceKind::Nats
+        | ServiceKind::Meilisearch => config.stdout_log_path(),
     }
 }
 
@@ -965,6 +1001,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Mongodb => "mongod.conf",
         ServiceKind::Mailpit => "mailpit.env",
         ServiceKind::Nats => "nats.conf",
+        ServiceKind::Meilisearch => "meilisearch.toml",
     };
     config.config_dir().join(name)
 }
@@ -1071,6 +1108,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Mongodb => "mongodb",
         ServiceKind::Mailpit => "mailpit",
         ServiceKind::Nats => "nats-server",
+        ServiceKind::Meilisearch => "meilisearch",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {

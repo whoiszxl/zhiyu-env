@@ -196,6 +196,12 @@ button {
   font-family: "SFMono-Regular", Consolas, monospace;
 }
 
+.nav-icon.meilisearch,
+.service-logo.meilisearch {
+  background: linear-gradient(135deg, #ff5c7a, #7658c8);
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
 .nav-icon.ports,
 .service-logo.ports {
   background: #6b6659;
@@ -2527,6 +2533,91 @@ button:disabled {
   font: 10px/1.65 "SFMono-Regular", Consolas, monospace;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.meilisearch-workbench {
+  min-height: calc(100vh - 162px);
+  padding: 26px 34px 34px;
+}
+
+.meili-index-strip {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  padding: 10px;
+  border: 1px solid #d2d1c9;
+  background: rgba(250, 249, 245, 0.86);
+}
+
+.meili-index-strip button {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 3px;
+  min-width: 120px;
+  padding: 8px 10px;
+  border: 1px solid #d2d1c9;
+  background: #f4f2ec;
+  text-align: left;
+}
+
+.meili-index-strip button.active {
+  border-color: #7658c8;
+  background: #f0ebfa;
+}
+
+.meili-index-strip strong {
+  font: 600 10px/1.3 "SFMono-Regular", Consolas, monospace;
+}
+
+.meili-index-strip small {
+  color: #92948c;
+  font-size: 8px;
+}
+
+.meili-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.4fr);
+  gap: 10px;
+  margin: 14px 16px 0;
+}
+
+.meili-fields label {
+  display: grid;
+  gap: 7px;
+  color: #777a71;
+  font-size: 9px;
+}
+
+.meili-result {
+  min-height: 220px;
+  margin: 14px 16px 0;
+  border: 1px solid #d2d1c9;
+}
+
+.meili-result header {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #d2d1c9;
+  font-size: 9px;
+}
+
+.meili-result header span {
+  color: #92948c;
+}
+
+.meili-result pre {
+  max-height: 300px;
+  margin: 0;
+  overflow: auto;
+  padding: 14px;
+  background: #20231d;
+  color: #daddd3;
+  font: 9px/1.6 "SFMono-Regular", Consolas, monospace;
+  white-space: pre-wrap;
 }
 
 .sqlite-table-list > button small {

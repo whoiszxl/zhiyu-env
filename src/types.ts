@@ -4,7 +4,8 @@ export type ServiceKind =
   | "postgres"
   | "mongodb"
   | "mailpit"
-  | "nats";
+  | "nats"
+  | "meilisearch";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =
@@ -251,6 +252,34 @@ export interface NatsMessage {
   payload: string;
   payloadBytes: number;
   elapsedMs: number;
+}
+
+export interface MeilisearchOverview {
+  version: string;
+  indexCount: number;
+  documentCount: number;
+  databaseSizeBytes: number;
+  usedDatabaseSizeBytes: number;
+  indexingCount: number;
+}
+
+export interface MeilisearchIndex {
+  uid: string;
+  documentCount: number;
+  indexing: boolean;
+}
+
+export interface MeilisearchTask {
+  taskUid: number;
+  status: string;
+  indexUid: string | null;
+}
+
+export interface MeilisearchSearchResult {
+  hits: unknown[];
+  estimatedTotalHits: number;
+  processingTimeMs: number;
+  query: string;
 }
 
 export interface MailSummary {

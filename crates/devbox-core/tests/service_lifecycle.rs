@@ -1,8 +1,8 @@
 #![cfg(unix)]
 
 use devbox_core::{
-    MailpitService, MongodbService, MysqlService, NatsService, PostgresService, RedisService,
-    ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    MailpitService, MeilisearchService, MongodbService, MysqlService, NatsService, PostgresService,
+    RedisService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -92,6 +92,17 @@ fn nats_service_lifecycle() {
     let service = NatsService::new(config(temp.path(), ServiceKind::Nats)).unwrap();
     assert_lifecycle(&service);
     assert!(temp.path().join("nats/conf/nats.conf").is_file());
+}
+
+#[test]
+fn meilisearch_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = MeilisearchService::new(config(temp.path(), ServiceKind::Meilisearch)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp
+        .path()
+        .join("meilisearch/conf/meilisearch.toml")
+        .is_file());
 }
 
 #[test]

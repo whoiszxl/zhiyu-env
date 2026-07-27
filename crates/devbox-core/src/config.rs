@@ -13,6 +13,7 @@ pub enum ServiceKind {
     Mongodb,
     Mailpit,
     Nats,
+    Meilisearch,
 }
 
 impl ServiceKind {
@@ -24,6 +25,7 @@ impl ServiceKind {
             Self::Mongodb => "mongodb",
             Self::Mailpit => "mailpit",
             Self::Nats => "nats",
+            Self::Meilisearch => "meilisearch",
         }
     }
 }

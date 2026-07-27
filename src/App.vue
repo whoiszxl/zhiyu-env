@@ -7,12 +7,14 @@ import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
 import { formatBytes } from "./utils/format";
 import {
   cleanServiceCache,
+  addMeilisearchDocuments,
   createServiceBackup,
   executeSql,
   executeRedisCommand,
   executeMongoCommand,
   getMailpitMessageDetail,
   getMailpitOverview,
+  getMeilisearchOverview,
   getDatabaseOverview,
   getMongoCollectionDetail,
   getMongoOverview,
@@ -28,6 +30,7 @@ import {
   listMongoCollections,
   listMongoDatabases,
   listMailpitMessages,
+  listMeilisearchIndexes,
   listMysqlVersions,
   listPostgresVersions,
   listRedisVersions,
@@ -40,6 +43,7 @@ import {
   restoreServiceBackup,
   saveServiceConfig,
   scanRedisKeys,
+  searchMeilisearch,
   selectRedisVersion,
   selectMysqlVersion,
   selectPostgresVersion,
@@ -51,6 +55,9 @@ import type {
   MailDetail,
   MailpitOverview,
   MailSummary,
+  MeilisearchIndex,
+  MeilisearchOverview,
+  MeilisearchSearchResult,
   MongoCollectionDetail,
   MongoCollectionInfo,
   MongoDatabaseInfo,
@@ -85,6 +92,7 @@ type DetailTab =
   | "mongoConsole"
   | "mail"
   | "messages"
+  | "search"
   | "backup"
   | "config"
   | "logs"
@@ -208,6 +216,18 @@ const natsPublishResult = ref<NatsPublishResult | null>(null);
 const natsMessage = ref<NatsMessage | null>(null);
 const natsPublishing = ref(false);
 const natsReceiving = ref(false);
+const meilisearchOverview = ref<MeilisearchOverview | null>(null);
+const meilisearchIndexes = ref<MeilisearchIndex[]>([]);
+const meilisearchIndex = ref("movies");
+const meilisearchPrimaryKey = ref("id");
+const meilisearchDocuments = ref(
+  '[\n  {"id": 1, "title": "智屿开发环境", "category": "tools"}\n]',
+);
+const meilisearchQuery = ref("");
+const meilisearchResult = ref<MeilisearchSearchResult | null>(null);
+const meilisearchLoading = ref(false);
+const meilisearchImporting = ref(false);
+const meilisearchSearching = ref(false);
 const mailMessages = ref<MailSummary[]>([]);
 const selectedMailId = ref<string | null>(null);
 const mailDetail = ref<MailDetail | null>(null);
@@ -424,6 +444,16 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
+  if (selectedKind.value === "meilisearch") {
+    return [
+      ["overview", "概览"],
+      ["search", "索引与搜索"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["docs", "使用文档"],
+    ];
+  }
   return [
     ["overview", "概览"],
     ["data", "数据浏览"],
@@ -448,6 +478,7 @@ const iconLetter: Record<ServiceKind, string> = {
   mongodb: "M",
   mailpit: "@",
   nats: "N",
+  meilisearch: "M",
 };
 
 const actionLabel: Record<ServiceAction, string> = {
@@ -484,6 +515,7 @@ async function refreshMetrics() {
     mongoOverview.value = null;
     mailpitOverview.value = null;
     natsOverview.value = null;
+    meilisearchOverview.value = null;
     return;
   }
 
@@ -521,6 +553,12 @@ async function refreshMetrics() {
         natsOverview.value = await getNatsOverview();
       } catch {
         natsOverview.value = null;
+      }
+    } else if (service.kind === "meilisearch") {
+      try {
+        meilisearchOverview.value = await getMeilisearchOverview();
+      } catch {
+        meilisearchOverview.value = null;
       }
     } else if (
       (service.kind === "mysql" || service.kind === "postgres") &&
@@ -669,6 +707,8 @@ async function selectService(kind: ServiceKind) {
   mongoOverview.value = null;
   mailpitOverview.value = null;
   natsOverview.value = null;
+  meilisearchOverview.value = null;
+  meilisearchIndexes.value = [];
   mailMessages.value = [];
   selectedMailId.value = null;
   mailDetail.value = null;
@@ -944,6 +984,7 @@ async function execute(action: ServiceAction) {
     mongoOverview.value = null;
     mailpitOverview.value = null;
     natsOverview.value = null;
+    meilisearchOverview.value = null;
     await Promise.all([
       refreshMetrics(),
       refreshDiskUsage(service.kind),
@@ -997,6 +1038,71 @@ async function openTab(tab: DetailTab) {
     await loadMailMessages();
   }
   if (tab === "backup") await loadBackups();
+  if (tab === "search" && meilisearchIndexes.value.length === 0) {
+    await loadMeilisearchIndexes();
+  }
+}
+
+async function loadMeilisearchIndexes() {
+  if (
+    selectedKind.value !== "meilisearch" ||
+    selectedService.value?.status !== "running" ||
+    meilisearchLoading.value
+  ) {
+    return;
+  }
+  meilisearchLoading.value = true;
+  try {
+    meilisearchIndexes.value = await listMeilisearchIndexes();
+    if (
+      meilisearchIndexes.value.length > 0 &&
+      !meilisearchIndexes.value.some(
+        (index) => index.uid === meilisearchIndex.value,
+      )
+    ) {
+      meilisearchIndex.value = meilisearchIndexes.value[0].uid;
+    }
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    meilisearchLoading.value = false;
+  }
+}
+
+async function importMeilisearchDocuments() {
+  if (meilisearchImporting.value) return;
+  meilisearchImporting.value = true;
+  error.value = "";
+  try {
+    const task = await addMeilisearchDocuments(
+      meilisearchIndex.value,
+      meilisearchPrimaryKey.value,
+      meilisearchDocuments.value,
+    );
+    notice.value = `文档导入任务 #${task.taskUid} 已进入队列`;
+    window.setTimeout(() => void loadMeilisearchIndexes(), 500);
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    meilisearchImporting.value = false;
+  }
+}
+
+async function runMeilisearchSearch() {
+  if (meilisearchSearching.value || !meilisearchIndex.value) return;
+  meilisearchSearching.value = true;
+  error.value = "";
+  try {
+    meilisearchResult.value = await searchMeilisearch(
+      meilisearchIndex.value,
+      meilisearchQuery.value,
+    );
+  } catch (cause) {
+    meilisearchResult.value = null;
+    error.value = String(cause);
+  } finally {
+    meilisearchSearching.value = false;
+  }
 }
 
 async function publishNats() {
@@ -2261,6 +2367,30 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <div
+            v-if="selectedKind === 'meilisearch' && meilisearchOverview"
+            class="redis-stat-strip"
+          >
+            <div>
+              <span>索引数量</span>
+              <strong>{{ meilisearchOverview.indexCount }}</strong>
+            </div>
+            <div>
+              <span>文档数量</span>
+              <strong>{{ meilisearchOverview.documentCount }}</strong>
+            </div>
+            <div>
+              <span>数据库大小</span>
+              <strong>{{
+                formatBytes(meilisearchOverview.databaseSizeBytes)
+              }}</strong>
+            </div>
+            <div>
+              <span>索引任务</span>
+              <strong>{{ meilisearchOverview.indexingCount }}</strong>
+            </div>
+          </div>
+
           <div class="overview-columns">
             <article class="panel monitoring-panel">
               <div class="panel-title">
@@ -3230,6 +3360,127 @@ onUnmounted(() => {
             <code>{{ selectedService.dataPath }}/mailpit.db</code>；
             HTML 不会直接渲染，避免测试邮件中的脚本或远程资源影响桌面端。
           </p>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'search'"
+          class="meilisearch-workbench"
+        >
+          <div
+            v-if="selectedService.status !== 'running'"
+            class="workbench-empty"
+          >
+            启动 Meilisearch 后即可创建索引、导入文档和测试搜索
+          </div>
+          <template v-else>
+            <div class="meili-index-strip">
+              <button
+                v-for="index in meilisearchIndexes"
+                :key="index.uid"
+                type="button"
+                :class="{ active: meilisearchIndex === index.uid }"
+                @click="meilisearchIndex = index.uid"
+              >
+                <strong>{{ index.uid }}</strong>
+                <small>
+                  {{ index.documentCount }} 文档
+                  <template v-if="index.indexing"> · 索引中</template>
+                </small>
+              </button>
+              <button type="button" @click="loadMeilisearchIndexes">
+                {{ meilisearchLoading ? "读取中…" : "刷新索引" }}
+              </button>
+            </div>
+
+            <div class="nats-console-grid">
+              <article class="panel nats-console-card meili-card">
+                <div class="panel-title">
+                  <div>
+                    <p>DOCUMENTS</p>
+                    <h2>导入 JSON 文档</h2>
+                  </div>
+                  <span>自动创建索引</span>
+                </div>
+                <div class="meili-fields">
+                  <label>
+                    <span>索引 UID</span>
+                    <input v-model="meilisearchIndex" placeholder="movies" />
+                  </label>
+                  <label>
+                    <span>主键</span>
+                    <input v-model="meilisearchPrimaryKey" placeholder="id" />
+                  </label>
+                </div>
+                <label>
+                  <span>JSON 数组</span>
+                  <textarea
+                    v-model="meilisearchDocuments"
+                    spellcheck="false"
+                  ></textarea>
+                </label>
+                <button
+                  class="primary"
+                  type="button"
+                  :disabled="
+                    meilisearchImporting ||
+                    !meilisearchIndex.trim() ||
+                    !meilisearchPrimaryKey.trim()
+                  "
+                  @click="importMeilisearchDocuments"
+                >
+                  <span v-if="meilisearchImporting" class="spinner"></span>
+                  {{ meilisearchImporting ? "提交中" : "导入文档" }}
+                </button>
+              </article>
+
+              <article class="panel nats-console-card meili-card">
+                <div class="panel-title">
+                  <div>
+                    <p>SEARCH</p>
+                    <h2>搜索调试</h2>
+                  </div>
+                  <span v-if="meilisearchResult">
+                    {{ meilisearchResult.processingTimeMs }} ms
+                  </span>
+                </div>
+                <label>
+                  <span>索引 UID</span>
+                  <input v-model="meilisearchIndex" placeholder="movies" />
+                </label>
+                <label>
+                  <span>搜索内容（留空可预览全部）</span>
+                  <input
+                    v-model="meilisearchQuery"
+                    placeholder="输入关键词"
+                    @keydown.enter="runMeilisearchSearch"
+                  />
+                </label>
+                <button
+                  class="primary"
+                  type="button"
+                  :disabled="meilisearchSearching || !meilisearchIndex.trim()"
+                  @click="runMeilisearchSearch"
+                >
+                  <span v-if="meilisearchSearching" class="spinner"></span>
+                  {{ meilisearchSearching ? "搜索中" : "执行搜索" }}
+                </button>
+                <div v-if="meilisearchResult" class="meili-result">
+                  <header>
+                    <strong>
+                      约 {{ meilisearchResult.estimatedTotalHits }} 条结果
+                    </strong>
+                    <span>最多展示 50 条</span>
+                  </header>
+                  <pre>{{
+                    JSON.stringify(meilisearchResult.hits, null, 2)
+                  }}</pre>
+                </div>
+                <div v-else class="nats-message-empty">
+                  选择索引并输入关键词后执行搜索
+                </div>
+              </article>
+            </div>
+          </template>
         </section>
 
         <section v-else-if="activeTab === 'messages'" class="nats-workbench">
