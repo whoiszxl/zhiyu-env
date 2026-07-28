@@ -5,9 +5,9 @@ use devbox_core::{
         ETCD_SERIES, ETCD_VERSION, KAFKA_SERIES, KAFKA_VERSION, MAILPIT_SERIES, MAILPIT_VERSION,
         MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES,
         MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION, NGINX_RELEASES,
-        NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_SERIES,
-        RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES, RNACOS_VERSION,
-        RUSTFS_SERIES, RUSTFS_VERSION,
+        NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_SERIES, RABBITMQ_VERSION,
+        REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES, RNACOS_VERSION, RUSTFS_SERIES,
+        RUSTFS_VERSION,
     },
     report_install_progress, with_install_context, CaddyInstaller, CaddyService, ConfigManager,
     ConsulInstaller, ConsulService, EtcdInstaller, EtcdService, InstallCancellationToken,
@@ -40,6 +40,13 @@ static INSTALL_TASKS: OnceLock<Mutex<HashMap<String, ActiveInstallTask>>> = Once
 
 fn install_tasks() -> &'static Mutex<HashMap<String, ActiveInstallTask>> {
     INSTALL_TASKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn has_active_install_tasks() -> bool {
+    !install_tasks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .is_empty()
 }
 
 #[derive(Clone, Serialize)]
@@ -832,6 +839,14 @@ fn with_service<T>(
         ServiceKindInput::Caddy => operation(&CaddyService::new(config).map_err(stringify_error)?),
     }
     .map_err(stringify_error)
+}
+
+pub(crate) fn service_status(kind: ServiceKindInput) -> Result<ServiceStatus, String> {
+    with_service(kind, |service| service.status())
+}
+
+pub(crate) fn repair_service(kind: ServiceKindInput) -> Result<(), String> {
+    with_service(kind, |service| service.repair())
 }
 
 fn stringify_error(error: devbox_core::DevBoxError) -> String {
@@ -1868,7 +1883,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
     }
 }
 
-fn native_config_path(config: &ServiceConfig) -> PathBuf {
+pub(crate) fn native_config_path(config: &ServiceConfig) -> PathBuf {
     let name = match config.kind {
         ServiceKind::Redis => "redis.conf",
         ServiceKind::Mysql => "my.cnf",
@@ -2141,7 +2156,7 @@ mod tests {
         platform_label, postgres_service_config, redis_service_config, selected_mysql_release,
         selected_postgres_release, selected_redis_release, sum_process_metrics, ServiceKindInput,
     };
-    use devbox_core::{CaddyInstaller, CaddyService, ConfigManager, ServiceConfig};
+    use devbox_core::{ConfigManager, ServiceConfig};
     use std::fs;
     use std::path::Path;
 

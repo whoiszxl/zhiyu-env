@@ -67,6 +67,35 @@ export interface EnvironmentMetrics {
   runningServiceCount: number;
 }
 
+export type DiagnosticStatus = "passed" | "warning" | "error";
+
+export interface DiagnosticItem {
+  id: string;
+  scope: string;
+  title: string;
+  status: DiagnosticStatus;
+  message: string;
+  detail: string | null;
+  repairable: boolean;
+}
+
+export interface DiagnosticReport {
+  generatedAtMillis: number;
+  summary: {
+    passed: number;
+    warnings: number;
+    errors: number;
+    repairable: number;
+  };
+  items: DiagnosticItem[];
+}
+
+export interface DiagnosticRepairResult {
+  repairedCount: number;
+  messages: string[];
+  report: DiagnosticReport;
+}
+
 export type ThemeMode = "system" | "light" | "dark";
 
 export interface AppSettings {

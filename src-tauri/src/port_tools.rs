@@ -9,10 +9,10 @@ const LSOF_PATH: &str = "/usr/sbin/lsof";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortListener {
-    port: u16,
+    pub(crate) port: u16,
     address: String,
-    pid: u32,
-    process: String,
+    pub(crate) pid: u32,
+    pub(crate) process: String,
     managed_service: Option<String>,
     common_service: Option<&'static str>,
 }
@@ -24,7 +24,7 @@ pub async fn port_listeners() -> Result<Vec<PortListener>, String> {
         .map_err(|error| format!("端口检查任务异常结束: {error}"))?
 }
 
-fn read_port_listeners() -> Result<Vec<PortListener>, String> {
+pub(crate) fn read_port_listeners() -> Result<Vec<PortListener>, String> {
     if !Path::new(LSOF_PATH).is_file() {
         return Err("当前系统没有可用的 lsof 端口检查工具".into());
     }

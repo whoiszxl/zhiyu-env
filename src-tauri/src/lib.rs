@@ -1,6 +1,7 @@
 mod clipboard;
 mod commands;
 mod database_tools;
+mod diagnostics;
 mod duckdb_tools;
 mod kafka_tools;
 mod mailpit_tools;
@@ -78,6 +79,8 @@ pub fn run() {
             commands::service_disk_usage,
             commands::environment_metrics,
             commands::environment_disk_usage,
+            diagnostics::app_diagnostics_run,
+            diagnostics::app_diagnostics_repair,
             commands::open_url,
             settings::app_settings_get,
             settings::app_settings_save,

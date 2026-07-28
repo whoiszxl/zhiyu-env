@@ -4,6 +4,8 @@ import type {
   CacheCleanupResult,
   DatabaseInfo,
   DatabaseOverview,
+  DiagnosticRepairResult,
+  DiagnosticReport,
   DuckdbQueryResult,
   DuckdbStatus,
   EnvironmentMetrics,
@@ -85,6 +87,14 @@ export function getEnvironmentMetrics(): Promise<EnvironmentMetrics> {
 
 export function getEnvironmentDiskUsage(): Promise<number> {
   return invoke<number>("environment_disk_usage");
+}
+
+export function runAppDiagnostics(): Promise<DiagnosticReport> {
+  return invoke<DiagnosticReport>("app_diagnostics_run");
+}
+
+export function repairAppDiagnostics(): Promise<DiagnosticRepairResult> {
+  return invoke<DiagnosticRepairResult>("app_diagnostics_repair");
 }
 
 export function getAppSettings(): Promise<AppSettings> {

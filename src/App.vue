@@ -58,7 +58,9 @@ import {
   publishNatsMessage,
   readServiceConfig,
   receiveNatsMessage,
+  repairAppDiagnostics,
   repairServiceState,
+  runAppDiagnostics,
   runServiceAction,
   saveAppSettings,
   restoreServiceBackup,
@@ -77,6 +79,7 @@ import type {
   ThemeMode,
   DatabaseInfo,
   DatabaseOverview,
+  DiagnosticReport,
   EnvironmentMetrics,
   MailDetail,
   MailpitOverview,
@@ -224,6 +227,10 @@ const portListeners = ref<PortListener[]>([]);
 const activityRecords = ref<ActivityRecord[]>(loadActivityRecords());
 const stoppingAll = ref(false);
 const repairingServices = ref(false);
+const diagnosticsOpen = ref(false);
+const diagnosticsRunning = ref(false);
+const diagnosticsRepairing = ref(false);
+const diagnosticReport = ref<DiagnosticReport | null>(null);
 const appSettings = ref<AppSettings>({
   themeMode: "system",
   launchAtLogin: false,
@@ -1165,6 +1172,89 @@ async function openDashboard() {
     refreshDiskUsage(),
     refreshPortListeners(),
   ]);
+}
+
+async function openDiagnostics() {
+  diagnosticsOpen.value = true;
+  await runDiagnostics();
+}
+
+async function runDiagnostics() {
+  if (diagnosticsRunning.value || diagnosticsRepairing.value) return;
+  diagnosticsRunning.value = true;
+  try {
+    diagnosticReport.value = await runAppDiagnostics();
+    error.value = "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    diagnosticsRunning.value = false;
+  }
+}
+
+async function repairDiagnostics() {
+  if (
+    diagnosticsRunning.value ||
+    diagnosticsRepairing.value ||
+    !diagnosticReport.value?.summary.repairable
+  ) {
+    return;
+  }
+  diagnosticsRepairing.value = true;
+  try {
+    const result = await repairAppDiagnostics();
+    diagnosticReport.value = result.report;
+    notice.value =
+      result.repairedCount > 0
+        ? `诊断修复完成，共处理 ${result.repairedCount} 项`
+        : "诊断完成，没有需要自动修复的项目";
+    error.value = "";
+    await Promise.all([
+      refreshServices(true),
+      refreshPortListeners(),
+      refreshEnvironmentDiskUsage(),
+      refreshDiskUsage(),
+    ]);
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    diagnosticsRepairing.value = false;
+  }
+}
+
+async function copyDiagnosticReport() {
+  const report = diagnosticReport.value;
+  if (!report) return;
+  const homePrefix = appSettings.value.installRoot.replace(
+    /\/?\.devbox\/?$/,
+    "",
+  );
+  const redact = (value: string) =>
+    (homePrefix && homePrefix !== value
+      ? value.replaceAll(homePrefix, "~")
+      : value
+    )
+      .replace(/\/Users\/[^/\s]+/g, "~")
+      .replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, "~");
+  const lines = [
+    `智屿诊断报告 ${new Date(report.generatedAtMillis).toLocaleString()}`,
+    `通过 ${report.summary.passed} · 警告 ${report.summary.warnings} · 错误 ${report.summary.errors}`,
+    "",
+    ...report.items.flatMap((item) => [
+      `[${item.status.toUpperCase()}] ${item.scope} / ${item.title}: ${redact(item.message)}`,
+      ...(item.detail &&
+      !item.id.endsWith("-crashed") &&
+      !item.id.endsWith("-port-not-ready")
+        ? [redact(item.detail)]
+        : []),
+    ]),
+  ];
+  try {
+    await navigator.clipboard.writeText(lines.join("\n"));
+    notice.value = "诊断报告已复制，用户目录已脱敏";
+  } catch (cause) {
+    error.value = `复制诊断报告失败：${String(cause)}`;
+  }
 }
 
 async function loadAppSettings() {
@@ -3145,19 +3235,30 @@ onUnmounted(() => {
             <h1>全局概览</h1>
             <p>集中查看智屿管理的本地服务、资源和端口状态</p>
           </div>
-          <button
-            type="button"
-            class="dashboard-stop-all"
-            :disabled="runningServices.length === 0 || stoppingAll"
-            @click="stopAllServices"
-          >
-            <span v-if="stoppingAll" class="spinner"></span>
-            {{
-              stoppingAll
-                ? "正在停止"
-                : `停止全部${runningServices.length ? ` (${runningServices.length})` : ""}`
-            }}
-          </button>
+          <div class="dashboard-header-actions">
+            <button
+              type="button"
+              class="dashboard-diagnostics"
+              :disabled="diagnosticsRunning"
+              @click="openDiagnostics"
+            >
+              <span v-if="diagnosticsRunning" class="spinner"></span>
+              {{ diagnosticsRunning ? "正在诊断" : "诊断与修复" }}
+            </button>
+            <button
+              type="button"
+              class="dashboard-stop-all"
+              :disabled="runningServices.length === 0 || stoppingAll"
+              @click="stopAllServices"
+            >
+              <span v-if="stoppingAll" class="spinner"></span>
+              {{
+                stoppingAll
+                  ? "正在停止"
+                  : `停止全部${runningServices.length ? ` (${runningServices.length})` : ""}`
+              }}
+            </button>
+          </div>
         </header>
 
         <div v-if="notice" class="notice dashboard-notice">
@@ -5832,6 +5933,130 @@ S3_FORCE_PATH_STYLE=true</pre>
           <pre>{{ logs }}</pre>
         </section>
       </template>
+
+      <div
+        v-if="diagnosticsOpen"
+        class="diagnostics-backdrop"
+        role="presentation"
+        @click.self="diagnosticsOpen = false"
+      >
+        <section
+          class="diagnostics-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="diagnostics-title"
+        >
+          <header class="diagnostics-header">
+            <div>
+              <span>SYSTEM HEALTH</span>
+              <h2 id="diagnostics-title">一键诊断与修复</h2>
+              <p>检查安装目录、服务文件、PID、端口和安装残留</p>
+            </div>
+            <button
+              type="button"
+              class="diagnostics-close"
+              aria-label="关闭诊断"
+              @click="diagnosticsOpen = false"
+            >
+              ×
+            </button>
+          </header>
+
+          <div
+            v-if="diagnosticsRunning && !diagnosticReport"
+            class="diagnostics-loading"
+          >
+            <span class="spinner"></span>
+            <strong>正在检查本地环境</strong>
+            <small>通常只需要几秒钟</small>
+          </div>
+
+          <template v-else-if="diagnosticReport">
+            <div class="diagnostics-summary">
+              <article class="passed">
+                <span>通过</span>
+                <strong>{{ diagnosticReport.summary.passed }}</strong>
+              </article>
+              <article class="warning">
+                <span>警告</span>
+                <strong>{{ diagnosticReport.summary.warnings }}</strong>
+              </article>
+              <article class="error">
+                <span>错误</span>
+                <strong>{{ diagnosticReport.summary.errors }}</strong>
+              </article>
+              <article class="repairable">
+                <span>可自动修复</span>
+                <strong>{{ diagnosticReport.summary.repairable }}</strong>
+              </article>
+            </div>
+
+            <div class="diagnostics-results">
+              <article
+                v-for="item in diagnosticReport.items"
+                :key="item.id"
+                class="diagnostics-item"
+                :class="item.status"
+              >
+                <i></i>
+                <div>
+                  <div class="diagnostics-item-title">
+                    <span>{{ item.scope }}</span>
+                    <strong>{{ item.title }}</strong>
+                    <em v-if="item.repairable">可修复</em>
+                  </div>
+                  <p>{{ item.message }}</p>
+                  <details v-if="item.detail">
+                    <summary>查看详细信息</summary>
+                    <pre>{{ item.detail }}</pre>
+                  </details>
+                </div>
+              </article>
+            </div>
+
+            <footer class="diagnostics-footer">
+              <span>
+                {{
+                  new Date(
+                    diagnosticReport.generatedAtMillis,
+                  ).toLocaleTimeString()
+                }}
+                完成
+              </span>
+              <div>
+                <button type="button" @click="copyDiagnosticReport">
+                  复制报告
+                </button>
+                <button
+                  type="button"
+                  :disabled="diagnosticsRunning || diagnosticsRepairing"
+                  @click="runDiagnostics"
+                >
+                  <span v-if="diagnosticsRunning" class="spinner"></span>
+                  重新诊断
+                </button>
+                <button
+                  type="button"
+                  class="diagnostics-repair"
+                  :disabled="
+                    diagnosticsRepairing ||
+                    diagnosticsRunning ||
+                    diagnosticReport.summary.repairable === 0
+                  "
+                  @click="repairDiagnostics"
+                >
+                  <span v-if="diagnosticsRepairing" class="spinner"></span>
+                  {{
+                    diagnosticsRepairing
+                      ? "正在修复"
+                      : `一键修复 (${diagnosticReport.summary.repairable})`
+                  }}
+                </button>
+              </div>
+            </footer>
+          </template>
+        </section>
+      </div>
     </main>
   </div>
 </template>
