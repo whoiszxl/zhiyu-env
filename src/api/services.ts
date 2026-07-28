@@ -48,6 +48,7 @@ import type {
   TableDetail,
   TableInfo,
   UpdateStatus,
+  VersionUninstallResult,
 } from "../types";
 
 export function listServices(): Promise<ServiceInfo[]> {
@@ -225,6 +226,16 @@ export function selectNginxVersion(
   return invoke<ServiceInfo>("nginx_version_select", {
     version,
     operationId,
+  });
+}
+
+export function uninstallServiceVersion(
+  kind: ServiceKind,
+  version: string,
+): Promise<VersionUninstallResult> {
+  return invoke<VersionUninstallResult>("service_version_uninstall", {
+    kind,
+    version,
   });
 }
 

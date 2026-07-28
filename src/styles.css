@@ -2135,6 +2135,155 @@ button:disabled {
   font-size: 9px;
 }
 
+.redis-version-footer .version-remove-button,
+.version-remove-button {
+  border-color: #ca8b79;
+  background: var(--color-bg-panel);
+  color: var(--color-danger-text);
+}
+
+.redis-version-footer button:disabled,
+.version-remove-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.version-uninstall-backdrop {
+  position: fixed;
+  z-index: 1150;
+  inset: 0;
+  display: grid;
+  padding: 28px;
+  background: rgb(9 11 9 / 62%);
+  place-items: center;
+  backdrop-filter: blur(7px);
+}
+
+.version-uninstall-modal {
+  width: min(470px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 14px;
+  background: var(--color-bg-elevated);
+  box-shadow: 0 28px 80px rgb(0 0 0 / 32%);
+}
+
+.version-uninstall-modal > header {
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-header);
+}
+
+.version-uninstall-modal > header > span {
+  color: var(--color-danger-text);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+}
+
+.version-uninstall-modal h2 {
+  margin: 6px 0 4px;
+  font-size: 19px;
+  letter-spacing: -0.03em;
+}
+
+.version-uninstall-modal header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 9px;
+}
+
+.version-uninstall-size {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 17px 24px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.version-uninstall-size span {
+  color: var(--color-text-secondary);
+  font-size: 9px;
+}
+
+.version-uninstall-size strong {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 18px;
+}
+
+.version-uninstall-preserved {
+  padding: 17px 24px;
+}
+
+.version-uninstall-preserved > strong {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 9px;
+}
+
+.version-uninstall-preserved > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.version-uninstall-preserved span {
+  color: var(--color-success-text);
+  font-size: 9px;
+}
+
+.version-uninstall-fallback,
+.version-uninstall-note {
+  margin: 0 24px 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.version-uninstall-fallback strong {
+  color: var(--color-text-primary);
+}
+
+.version-uninstall-modal > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 13px 18px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-content);
+}
+
+.version-uninstall-modal > footer button {
+  display: inline-flex;
+  min-width: 76px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.version-uninstall-modal > footer .confirm {
+  min-width: 112px;
+  border-color: #b94c35;
+  background: #b94c35;
+  color: #fff;
+}
+
+.version-uninstall-modal > footer button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2151,14 +2300,16 @@ button:disabled {
   background: var(--color-bg-muted);
 }
 
-.cache-usage-cell span {
+.cache-usage-cell span,
+.program-usage-cell span {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 4px;
 }
 
-.cache-usage-cell button {
+.cache-usage-cell button,
+.program-usage-cell button {
   padding: 0;
   border: 0;
   background: transparent;
@@ -2167,8 +2318,14 @@ button:disabled {
   font-size: 8px;
 }
 
-.cache-usage-cell button:hover:not(:disabled) {
+.cache-usage-cell button:hover:not(:disabled),
+.program-usage-cell button:hover:not(:disabled) {
   text-decoration: underline;
+}
+
+.program-usage-cell button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .disk-usage-strip div {
@@ -5623,6 +5780,30 @@ button:disabled {
 .nginx-version-card em {
   grid-column: 1 / -1;
   color: var(--color-text-muted);
+  font-size: 9px;
+}
+
+.nginx-version-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-top: 0;
+  background: var(--color-bg-muted);
+}
+
+.nginx-version-actions > span {
+  color: var(--color-text-secondary);
+  font-size: 8px;
+}
+
+.nginx-version-actions .version-remove-button {
+  min-width: 92px;
+  padding: 7px 10px;
+  border-style: solid;
+  cursor: pointer;
   font-size: 9px;
 }
 

@@ -222,7 +222,7 @@ impl From<ServiceKindInput> for ServiceKind {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceInfo {
     pub(crate) kind: ServiceKind,
@@ -281,6 +281,7 @@ pub struct RedisVersionInfo {
     support_label: &'static str,
     legacy: bool,
     recommended: bool,
+    installation_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -293,6 +294,7 @@ pub struct MysqlVersionInfo {
     support_label: &'static str,
     legacy: bool,
     recommended: bool,
+    installation_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -305,6 +307,7 @@ pub struct PostgresVersionInfo {
     support_label: &'static str,
     legacy: bool,
     recommended: bool,
+    installation_bytes: u64,
 }
 
 fn devbox_root() -> Result<PathBuf, String> {
@@ -454,6 +457,33 @@ fn nginx_service_config(root: &Path, release: &NginxRelease) -> ServiceConfig {
         instance_dir: instance,
         wait_for_port: true,
     }
+}
+
+pub(crate) fn activate_installed_version(
+    kind: ServiceKindInput,
+    version: &str,
+) -> Result<(), String> {
+    let root = devbox_root()?;
+    let config = match kind {
+        ServiceKindInput::Redis => redis_service_config(
+            &root,
+            redis_release(version).ok_or_else(|| format!("不支持 Redis 版本 {version}"))?,
+        ),
+        ServiceKindInput::Mysql => mysql_service_config(
+            &root,
+            mysql_release(version).ok_or_else(|| format!("不支持 MySQL 版本 {version}"))?,
+        ),
+        ServiceKindInput::Postgres => postgres_service_config(
+            &root,
+            postgres_release(version).ok_or_else(|| format!("不支持 PostgreSQL 版本 {version}"))?,
+        ),
+        ServiceKindInput::Nginx => nginx_service_config(
+            &root,
+            nginx_release(version).ok_or_else(|| format!("不支持 Nginx 版本 {version}"))?,
+        ),
+        _ => return Err("当前服务不支持版本切换".into()),
+    };
+    ConfigManager.save(&config).map_err(stringify_error)
 }
 
 pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
@@ -863,7 +893,7 @@ fn status_parts(status: ServiceStatus) -> (&'static str, Option<u32>) {
     }
 }
 
-fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
+pub(crate) fn service_info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
     let config = service_config(kind.into())?;
     let status = with_service(kind, |service| service.status())?;
     let (status, pid) = status_parts(status);
@@ -969,7 +999,7 @@ fn run_action(
     action: impl FnOnce(&dyn ServiceManager) -> Result<(), devbox_core::DevBoxError>,
 ) -> Result<ServiceInfo, String> {
     with_service(kind, action)?;
-    info(kind)
+    service_info(kind)
 }
 
 #[derive(Clone, Copy)]
@@ -1020,7 +1050,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Caddy,
     ]
     .into_iter()
-    .map(info)
+    .map(service_info)
     .collect()
 }
 
@@ -1038,7 +1068,7 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             RedisService::new(config)
                 .and_then(|service| service.install())
                 .map_err(stringify_error)?;
-            info(kind)
+            service_info(kind)
         }
         ServiceKindInput::Mysql => {
             let root = devbox_root()?;
@@ -1052,7 +1082,7 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             installer
                 .initialize(&service.data_dir())
                 .map_err(stringify_error)?;
-            info(kind)
+            service_info(kind)
         }
         ServiceKindInput::Postgres => {
             let root = devbox_root()?;
@@ -1066,7 +1096,7 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             installer
                 .initialize(&service.data_dir())
                 .map_err(stringify_error)?;
-            info(kind)
+            service_info(kind)
         }
         ServiceKindInput::Mongodb => {
             MongodbInstaller::new(devbox_root()?)
@@ -1199,6 +1229,8 @@ pub async fn redis_versions() -> Result<Vec<RedisVersionInfo>, String> {
                     support_label: release.support_label,
                     legacy: release.legacy,
                     recommended: release.recommended,
+                    installation_bytes: path_disk_size(&installer.installation_dir())
+                        .unwrap_or_default(),
                 })
             })
             .collect()
@@ -1237,7 +1269,7 @@ pub async fn redis_version_select(
             RedisService::new(redis_service_config(&root, release))
                 .and_then(|service| service.install())
                 .map_err(stringify_error)?;
-            info(ServiceKindInput::Redis)
+            service_info(ServiceKindInput::Redis)
         })
     })
     .await
@@ -1262,6 +1294,8 @@ pub async fn mysql_versions() -> Result<Vec<MysqlVersionInfo>, String> {
                     support_label: release.support_label,
                     legacy: release.legacy,
                     recommended: release.recommended,
+                    installation_bytes: path_disk_size(&installer.installation_dir())
+                        .unwrap_or_default(),
                 })
             })
             .collect()
@@ -1302,7 +1336,7 @@ pub async fn mysql_version_select(
             installer
                 .initialize(&service.data_dir())
                 .map_err(stringify_error)?;
-            info(ServiceKindInput::Mysql)
+            service_info(ServiceKindInput::Mysql)
         })
     })
     .await
@@ -1327,6 +1361,8 @@ pub async fn postgres_versions() -> Result<Vec<PostgresVersionInfo>, String> {
                     support_label: release.support_label,
                     legacy: release.legacy,
                     recommended: release.recommended,
+                    installation_bytes: path_disk_size(&installer.installation_dir())
+                        .unwrap_or_default(),
                 })
             })
             .collect()
@@ -1367,7 +1403,7 @@ pub async fn postgres_version_select(
             installer
                 .initialize(&service.data_dir())
                 .map_err(stringify_error)?;
-            info(ServiceKindInput::Postgres)
+            service_info(ServiceKindInput::Postgres)
         })
     })
     .await
@@ -1384,6 +1420,7 @@ pub struct NginxVersionInfo {
     pub support_label: &'static str,
     pub legacy: bool,
     pub recommended: bool,
+    pub installation_bytes: u64,
 }
 
 #[tauri::command]
@@ -1404,6 +1441,8 @@ pub async fn nginx_versions() -> Result<Vec<NginxVersionInfo>, String> {
                     support_label: release.support_label,
                     legacy: release.legacy,
                     recommended: release.recommended,
+                    installation_bytes: path_disk_size(&installer.installation_dir())
+                        .unwrap_or_default(),
                 })
             })
             .collect()
@@ -1432,7 +1471,7 @@ pub async fn nginx_version_select(
             NginxService::new(config)
                 .and_then(|service| service.install())
                 .map_err(stringify_error)?;
-            info(ServiceKindInput::Nginx)
+            service_info(ServiceKindInput::Nginx)
         })
     })
     .await

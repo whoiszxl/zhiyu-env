@@ -16,6 +16,7 @@ mod sqlite_tools;
 mod storage_tools;
 mod tools;
 mod tray;
+mod uninstall;
 
 use tauri::Manager;
 
@@ -74,6 +75,7 @@ pub fn run() {
             commands::service_restart,
             commands::service_force_stop,
             commands::service_repair,
+            uninstall::service_version_uninstall,
             commands::service_stop_all,
             commands::service_metrics,
             commands::service_disk_usage,

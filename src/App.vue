@@ -72,6 +72,7 @@ import {
   selectPostgresVersion,
   selectNginxVersion,
   stopAllManagedServices,
+  uninstallServiceVersion,
 } from "./api/services";
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
@@ -116,6 +117,7 @@ import type {
   TableDetail,
   TableInfo,
   UpdateStatus,
+  VersionUninstallResult,
 } from "./types";
 
 type DetailTab =
@@ -200,6 +202,17 @@ type InstallTask = {
   stage: string;
   status: InstallTaskStatus;
   logs: InstallLogEntry[];
+};
+type ManagedVersionInfo =
+  | RedisVersionInfo
+  | MysqlVersionInfo
+  | PostgresVersionInfo
+  | NginxVersionInfo;
+type VersionUninstallTarget = {
+  kind: ServiceKind;
+  serviceName: string;
+  release: ManagedVersionInfo;
+  fallbackVersion: string | null;
 };
 
 const services = ref<ServiceInfo[]>([]);
@@ -294,6 +307,8 @@ const nginxVersions = ref<NginxVersionInfo[]>([]);
 const nginxVersionTarget = ref("");
 const nginxVersionsLoading = ref(false);
 const nginxVersionChanging = ref(false);
+const versionUninstallTarget = ref<VersionUninstallTarget | null>(null);
+const versionUninstalling = ref(false);
 
 interface NginxFileEntry {
   name: string;
@@ -518,7 +533,8 @@ const serviceControlBusy = computed(
     redisVersionChanging.value ||
     mysqlVersionChanging.value ||
     postgresVersionChanging.value ||
-    nginxVersionChanging.value,
+    nginxVersionChanging.value ||
+    versionUninstalling.value,
 );
 const latestInstallLog = computed(
   () => installTask.value?.logs.at(-1) ?? null,
@@ -1880,6 +1896,148 @@ async function changePostgresVersion() {
   }
 }
 
+function installedVersionsFor(
+  kind: ServiceKind,
+): ManagedVersionInfo[] {
+  if (kind === "redis") return redisVersions.value;
+  if (kind === "mysql") return mysqlVersions.value;
+  if (kind === "postgres") return postgresVersions.value;
+  if (kind === "nginx") return nginxVersions.value;
+  return [];
+}
+
+function requestVersionUninstall(
+  kind: VersionUninstallTarget["kind"],
+  serviceName: string,
+  release: ManagedVersionInfo,
+) {
+  const service = selectedService.value;
+  if (
+    versionUninstalling.value ||
+    !release.installed ||
+    !service ||
+    service.kind !== kind
+  ) {
+    return;
+  }
+  if (release.selected && service.status === "running") {
+    error.value = `请先停止 ${serviceName}，再卸载当前版本`;
+    return;
+  }
+  const fallback =
+    installedVersionsFor(kind).find(
+      (candidate) =>
+        candidate.installed &&
+        candidate.version !== release.version &&
+        candidate.recommended,
+    ) ??
+    installedVersionsFor(kind).find(
+      (candidate) =>
+        candidate.installed && candidate.version !== release.version,
+    );
+  versionUninstallTarget.value = {
+    kind,
+    serviceName,
+    release,
+    fallbackVersion: release.selected ? (fallback?.version ?? null) : null,
+  };
+}
+
+function requestCurrentProgramUninstall() {
+  const service = selectedService.value;
+  const usage = selectedDiskUsage.value;
+  if (
+    !service ||
+    !usage ||
+    service.status === "not_installed" ||
+    usage.installationBytes === 0
+  ) {
+    return;
+  }
+  const knownRelease = installedVersionsFor(service.kind).find(
+    (release) => release.version === service.version,
+  );
+  requestVersionUninstall(
+    service.kind,
+    service.name,
+    knownRelease ?? {
+      series: service.version,
+      version: service.version,
+      installed: true,
+      selected: true,
+      supportLabel: "",
+      legacy: false,
+      recommended: false,
+      installationBytes: usage.installationBytes,
+    },
+  );
+}
+
+async function confirmVersionUninstall() {
+  const target = versionUninstallTarget.value;
+  const service = selectedService.value;
+  if (!target || !service || versionUninstalling.value) return;
+  versionUninstalling.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    const result: VersionUninstallResult = await uninstallServiceVersion(
+      target.kind,
+      target.release.version,
+    );
+    const index = services.value.findIndex(
+      (item) => item.kind === result.service.kind,
+    );
+    if (index >= 0) services.value[index] = result.service;
+    versionUninstallTarget.value = null;
+    const versionRefresh =
+      target.kind === "redis"
+        ? loadRedisVersions()
+        : target.kind === "mysql"
+          ? loadMysqlVersions()
+          : target.kind === "postgres"
+            ? loadPostgresVersions()
+            : target.kind === "nginx"
+              ? loadNginxVersions()
+              : Promise.resolve();
+    await Promise.all([
+      versionRefresh,
+      refreshDiskUsage(target.kind),
+      refreshEnvironmentDiskUsage(),
+    ]);
+    notice.value = result.fallbackVersion
+      ? `已卸载 ${target.serviceName} ${result.version}，并切换到 ${result.fallbackVersion}；数据已保留`
+      : `已卸载 ${target.serviceName} ${result.version}，释放 ${formatBytes(result.freedBytes)}；数据已保留`;
+    recordActivity(
+      result.service,
+      "卸载版本",
+      true,
+      notice.value,
+    );
+  } catch (cause) {
+    error.value = String(cause);
+    recordActivity(service, "卸载版本", false, error.value);
+  } finally {
+    versionUninstalling.value = false;
+  }
+}
+
+async function loadNginxVersions() {
+  if (nginxVersionsLoading.value) return;
+  nginxVersionsLoading.value = true;
+  try {
+    nginxVersions.value = await listNginxVersions();
+    nginxVersionTarget.value =
+      nginxVersions.value.find((release) => release.selected)?.version ??
+      selectedService.value?.version ??
+      "";
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    nginxVersionsLoading.value = false;
+  }
+}
+
 async function execute(action: ServiceAction) {
   const service = selectedService.value;
   if (!service || serviceControlBusy.value) return;
@@ -1996,6 +2154,9 @@ async function openTab(tab: DetailTab) {
   }
   if (tab === "versions" && selectedKind.value === "postgres") {
     await loadPostgresVersions();
+  }
+  if (tab === "versions" && selectedKind.value === "nginx") {
+    await loadNginxVersions();
   }
   if (tab === "mail" && mailMessages.value.length === 0) {
     await loadMailMessages();
@@ -3678,6 +3839,25 @@ onUnmounted(() => {
                   请先停止 Redis
                 </span>
                 <button
+                  v-if="selectedRedisVersionInfo?.installed"
+                  type="button"
+                  class="version-remove-button"
+                  :disabled="
+                    serviceControlBusy ||
+                    (selectedRedisVersionInfo.selected &&
+                      selectedService.status === 'running')
+                  "
+                  @click="
+                    requestVersionUninstall(
+                      'redis',
+                      'Redis',
+                      selectedRedisVersionInfo,
+                    )
+                  "
+                >
+                  卸载程序
+                </button>
+                <button
                   type="button"
                   :disabled="
                     !selectedRedisVersionInfo ||
@@ -3771,6 +3951,25 @@ onUnmounted(() => {
                 >
                   请先停止 MySQL
                 </span>
+                <button
+                  v-if="selectedMysqlVersionInfo?.installed"
+                  type="button"
+                  class="version-remove-button"
+                  :disabled="
+                    serviceControlBusy ||
+                    (selectedMysqlVersionInfo.selected &&
+                      selectedService.status === 'running')
+                  "
+                  @click="
+                    requestVersionUninstall(
+                      'mysql',
+                      'MySQL',
+                      selectedMysqlVersionInfo,
+                    )
+                  "
+                >
+                  卸载程序
+                </button>
                 <button
                   type="button"
                   :disabled="
@@ -3868,6 +4067,25 @@ onUnmounted(() => {
                   请先停止 PostgreSQL
                 </span>
                 <button
+                  v-if="selectedPostgresVersionInfo?.installed"
+                  type="button"
+                  class="version-remove-button"
+                  :disabled="
+                    serviceControlBusy ||
+                    (selectedPostgresVersionInfo.selected &&
+                      selectedService.status === 'running')
+                  "
+                  @click="
+                    requestVersionUninstall(
+                      'postgres',
+                      'PostgreSQL',
+                      selectedPostgresVersionInfo,
+                    )
+                  "
+                >
+                  卸载程序
+                </button>
+                <button
                   type="button"
                   :disabled="
                     !selectedPostgresVersionInfo ||
@@ -3935,8 +4153,26 @@ onUnmounted(() => {
           </div>
 
           <div v-if="selectedDiskUsage" class="disk-usage-strip">
-            <div>
-              <span>程序文件</span>
+            <div class="program-usage-cell">
+              <span>
+                程序文件
+                <button
+                  v-if="selectedService.status !== 'not_installed'"
+                  type="button"
+                  :disabled="
+                    serviceControlBusy ||
+                    selectedService.status === 'running' ||
+                    selectedDiskUsage.installationBytes === 0
+                  "
+                  @click="requestCurrentProgramUninstall"
+                >
+                  {{
+                    selectedService.status === "running"
+                      ? "运行中"
+                      : "卸载"
+                  }}
+                </button>
+              </span>
               <strong>{{
                 formatBytes(selectedDiskUsage.installationBytes)
               }}</strong>
@@ -4399,6 +4635,35 @@ onUnmounted(() => {
           <p class="ns-ver-note">
             Nginx {{ selectedService.version }} 使用源码编译，关闭了 gzip、rewrite 模块以保持轻量。后续将支持多版本切换。
           </p>
+          <div
+            v-if="selectedNginxVersionInfo?.installed"
+            class="nginx-version-actions"
+          >
+            <span>
+              程序占用
+              {{ formatBytes(selectedNginxVersionInfo.installationBytes) }}，站点文件和配置不会被删除
+            </span>
+            <button
+              type="button"
+              class="version-remove-button"
+              :disabled="
+                serviceControlBusy || selectedService.status === 'running'
+              "
+              @click="
+                requestVersionUninstall(
+                  'nginx',
+                  'Nginx',
+                  selectedNginxVersionInfo,
+                )
+              "
+            >
+              {{
+                selectedService.status === "running"
+                  ? "请先停止服务"
+                  : "卸载程序"
+              }}
+            </button>
+          </div>
         </section>
 
         <section v-else-if="activeTab === 'keys'" class="redis-workbench">
@@ -5971,6 +6236,80 @@ S3_FORCE_PATH_STYLE=true</pre>
           <pre>{{ logs }}</pre>
         </section>
       </template>
+
+      <div
+        v-if="versionUninstallTarget"
+        class="version-uninstall-backdrop"
+      >
+        <section
+          class="version-uninstall-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="version-uninstall-title"
+        >
+          <header>
+            <span>SAFE UNINSTALL</span>
+            <h2 id="version-uninstall-title">
+              卸载 {{ versionUninstallTarget.serviceName }}
+              {{ versionUninstallTarget.release.version }}
+            </h2>
+            <p>只删除这个版本的官方程序文件</p>
+          </header>
+
+          <div class="version-uninstall-size">
+            <span>预计释放空间</span>
+            <strong>{{
+              formatBytes(
+                versionUninstallTarget.release.installationBytes,
+              )
+            }}</strong>
+          </div>
+
+          <div class="version-uninstall-preserved">
+            <strong>以下内容会完整保留</strong>
+            <div>
+              <span>✓ 数据目录</span>
+              <span>✓ 配置文件</span>
+              <span>✓ 运行日志</span>
+              <span>✓ 本地备份</span>
+            </div>
+          </div>
+
+          <p
+            v-if="versionUninstallTarget.fallbackVersion"
+            class="version-uninstall-fallback"
+          >
+            当前版本删除前会自动切换到已安装的
+            <strong>{{ versionUninstallTarget.fallbackVersion }}</strong>。
+          </p>
+          <p v-else class="version-uninstall-note">
+            {{
+              versionUninstallTarget.release.selected
+                ? "这是当前版本，卸载后服务将显示为未安装；以后可以重新下载安装，原数据仍然保留。"
+                : "卸载后仍可重新安装这个版本并继续使用原来的版本数据。"
+            }}
+          </p>
+
+          <footer>
+            <button
+              type="button"
+              :disabled="versionUninstalling"
+              @click="versionUninstallTarget = null"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              class="confirm"
+              :disabled="versionUninstalling"
+              @click="confirmVersionUninstall"
+            >
+              <span v-if="versionUninstalling" class="spinner"></span>
+              {{ versionUninstalling ? "正在卸载" : "确认卸载程序" }}
+            </button>
+          </footer>
+        </section>
+      </div>
 
       <div v-if="onboardingOpen" class="onboarding-backdrop">
         <section

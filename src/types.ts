@@ -154,6 +154,7 @@ export interface RedisVersionInfo {
   supportLabel: string;
   legacy: boolean;
   recommended: boolean;
+  installationBytes: number;
 }
 
 export interface MysqlVersionInfo {
@@ -164,6 +165,7 @@ export interface MysqlVersionInfo {
   supportLabel: string;
   legacy: boolean;
   recommended: boolean;
+  installationBytes: number;
 }
 
 export interface PostgresVersionInfo {
@@ -174,6 +176,7 @@ export interface PostgresVersionInfo {
   supportLabel: string;
   legacy: boolean;
   recommended: boolean;
+  installationBytes: number;
 }
 
 export interface NginxVersionInfo {
@@ -184,6 +187,16 @@ export interface NginxVersionInfo {
   supportLabel: string;
   legacy: boolean;
   recommended: boolean;
+  installationBytes: number;
+}
+
+export interface VersionUninstallResult {
+  kind: ServiceKind;
+  version: string;
+  freedBytes: number;
+  fallbackVersion: string | null;
+  dataPreserved: boolean;
+  service: ServiceInfo;
 }
 
 export interface RedisScanResult {
