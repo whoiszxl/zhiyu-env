@@ -199,22 +199,22 @@ const selectedSample = ref(0);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   margin-bottom: 18px;
-  border-top: 1px solid #d2d1c9;
-  border-left: 1px solid #d2d1c9;
+  border-top: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-border);
 }
 
 .connect-metric {
   position: relative;
   min-width: 0;
   padding: 18px 20px 42px;
-  border-right: 1px solid #d2d1c9;
-  border-bottom: 1px solid #d2d1c9;
-  background: rgba(250, 249, 245, 0.84);
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel-translucent);
 }
 
 .connect-metric p {
   margin: 0 0 12px;
-  color: #989a93;
+  color: var(--color-text-muted);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 8px;
   letter-spacing: 0.12em;
@@ -229,7 +229,7 @@ const selectedSample = ref(0);
   letter-spacing: -0.05em;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #353830;
+  color: var(--color-text-primary);
 }
 
 .connect-metric strong.password-val { font-size: 14px; letter-spacing: 0.14em; }
@@ -237,7 +237,7 @@ const selectedSample = ref(0);
 .connect-metric small {
   display: block;
   margin-top: 8px;
-  color: #989a93;
+  color: var(--color-text-muted);
   font-size: 9px;
 }
 
@@ -252,16 +252,16 @@ const selectedSample = ref(0);
 .metric-copy {
   min-width: 56px;
   padding: 3px 10px;
-  border: 1px solid #cfcec6;
-  background: #faf9f5;
-  color: #6f7269;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 8px;
   white-space: nowrap;
   text-align: center;
 }
-.metric-copy:hover { border-color: #898b83; color: #252920; }
-.metric-copy.copied { background: #e5efe4; border-color: #91b39a; color: #2f7047; }
+.metric-copy:hover { border-color: var(--color-border-strong); color: var(--color-text-primary); }
+.metric-copy.copied { background: var(--color-success-surface); border-color: #91b39a; color: var(--color-success-text); }
 
 .connect-layout {
   display: grid;
@@ -270,8 +270,8 @@ const selectedSample = ref(0);
 }
 
 .connect-main {
-  border: 1px solid #d2d1c9;
-  background: rgba(250, 249, 245, 0.9);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel-translucent);
 }
 
 .connect-section-head {
@@ -281,18 +281,18 @@ const selectedSample = ref(0);
   justify-content: space-between;
   gap: 16px;
   padding: 13px 16px;
-  border-bottom: 1px solid #d2d1c9;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .connect-section-head p {
   margin: 0 0 3px;
-  color: #989a93;
+  color: var(--color-text-muted);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 8px;
   letter-spacing: 0.12em;
 }
 
-.connect-section-head h2 { margin: 0; font-size: 14px; color: #252920; }
+.connect-section-head h2 { margin: 0; font-size: 14px; color: var(--color-text-primary); }
 
 .connect-section-actions {
   display: flex;
@@ -303,26 +303,26 @@ const selectedSample = ref(0);
   min-width: 64px;
   height: 30px;
   padding: 0 12px;
-  border: 1px solid #c8c7bf;
-  background: #fffefa;
-  color: #6f7269;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
   font-size: 9px;
   cursor: pointer;
   white-space: nowrap;
 }
-.connect-section-actions button:hover:not(:disabled) { border-color: #898b83; color: #252920; }
+.connect-section-actions button:hover:not(:disabled) { border-color: var(--color-border-strong); color: var(--color-text-primary); }
 .connect-section-actions button:disabled { opacity: 0.5; cursor: default; }
 
 .connect-section-actions button.test-ok {
-  background: #e5efe4;
+  background: var(--color-success-surface);
   border-color: #639a6a;
-  color: #2f7047;
+  color: var(--color-success-text);
 }
 
 .connect-section-actions button.test-fail {
-  background: #f7e9e4;
+  background: var(--color-danger-surface);
   border-color: #d2a396;
-  color: #a64c35;
+  color: var(--color-danger-text);
 }
 
 .uri-block { padding: 4px 16px 16px; }
@@ -332,13 +332,13 @@ const selectedSample = ref(0);
   align-items: center;
   gap: 12px;
   padding: 8px 0;
-  border-bottom: 1px solid #e8e6df;
+  border-bottom: 1px solid var(--color-border);
 }
 .uri-row:last-child { border-bottom: 0; }
 
 .uri-label {
   min-width: 80px;
-  color: #73766d;
+  color: var(--color-text-secondary);
   font-size: 9px;
   font-family: "SFMono-Regular", Consolas, monospace;
   text-transform: uppercase;
@@ -349,8 +349,8 @@ const selectedSample = ref(0);
   flex: 1;
   align-items: center;
   height: 30px;
-  border: 1px solid #c8c7bf;
-  background: #fffefa;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
 }
 
 .uri-field code {
@@ -359,7 +359,7 @@ const selectedSample = ref(0);
   overflow: hidden;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
-  color: #353830;
+  color: var(--color-text-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -369,27 +369,27 @@ const selectedSample = ref(0);
   height: 100%;
   padding: 0 10px;
   border: none;
-  border-left: 1px solid #e8e6df;
-  background: #f5f3ee;
-  color: #6f7269;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-content);
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 9px;
   white-space: nowrap;
   text-align: center;
 }
-.field-copy:hover { background: #edeae2; color: #252920; }
-.field-copy.copied { background: #e5efe4; color: #2f7047; }
+.field-copy:hover { background: var(--color-bg-muted); color: var(--color-text-primary); }
+.field-copy.copied { background: var(--color-success-surface); color: var(--color-success-text); }
 
 .extras-label {
-  color: #989a93;
+  color: var(--color-text-muted);
   font-size: 9px;
   margin: 12px 0 6px;
 }
 
 .samples-section {
   margin-top: 18px;
-  border: 1px solid #d2d1c9;
-  background: rgba(250, 249, 245, 0.9);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel-translucent);
 }
 
 .samples-body {
@@ -401,24 +401,24 @@ const selectedSample = ref(0);
   display: flex;
   gap: 0;
   padding: 10px 14px 0;
-  border-bottom: 1px solid #d2d1c9;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .sample-tabs button {
   padding: 5px 12px;
-  border: 1px solid #d2d1c9;
-  border-bottom: 1px solid #d2d1c9;
-  background: #f0ede5;
-  color: #8d8f87;
+  border: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-muted);
+  color: var(--color-text-muted);
   font-size: 8px;
   cursor: pointer;
   margin-right: -1px;
   margin-bottom: -1px;
 }
 .sample-tabs button.active {
-  background: #faf9f5;
-  color: #252920;
-  border-bottom-color: #faf9f5;
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+  border-bottom-color: var(--color-bg-panel);
 }
 
 .sample-content {
@@ -427,7 +427,7 @@ const selectedSample = ref(0);
 }
 
 .sample-caption {
-  color: #989a93;
+  color: var(--color-text-muted);
   font-size: 8px;
   margin-bottom: 8px;
 }
@@ -440,7 +440,7 @@ const selectedSample = ref(0);
 
 .sample-content code {
   font-family: "SFMono-Regular", Consolas, monospace;
-  color: #353830;
+  color: var(--color-text-primary);
   white-space: pre;
   line-height: 1.5;
 }
@@ -451,14 +451,14 @@ const selectedSample = ref(0);
   right: 14px;
   bottom: 12px;
   padding: 4px 12px;
-  border: 1px solid #c8c7bf;
-  background: #faf9f5;
-  color: #6f7269;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 8px;
   white-space: nowrap;
   text-align: center;
 }
-.sample-copy-btn:hover { border-color: #898b83; color: #252920; }
-.sample-copy-btn.copied { background: #e5efe4; border-color: #91b39a; color: #2f7047; }
+.sample-copy-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-primary); }
+.sample-copy-btn.copied { background: var(--color-success-surface); border-color: #91b39a; color: var(--color-success-text); }
 </style>

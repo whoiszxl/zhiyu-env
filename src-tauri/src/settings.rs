@@ -9,6 +9,7 @@ use tauri_plugin_autostart::ManagerExt;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
+    pub theme_mode: String,
     pub launch_at_login: bool,
     pub keep_services_running_on_close: bool,
     pub download_mirror: String,
@@ -24,6 +25,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            theme_mode: "system".into(),
             launch_at_login: false,
             keep_services_running_on_close: true,
             download_mirror: String::new(),
@@ -112,6 +114,7 @@ fn settings_path() -> Option<PathBuf> {
 }
 
 fn validate(settings: &mut AppSettings) -> Result<(), String> {
+    validate_theme_mode(&settings.theme_mode)?;
     settings.download_mirror = settings
         .download_mirror
         .trim()
@@ -135,6 +138,14 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
     validate_install_root(Path::new(&settings.install_root))
 }
 
+fn validate_theme_mode(theme_mode: &str) -> Result<(), String> {
+    if matches!(theme_mode, "system" | "light" | "dark") {
+        Ok(())
+    } else {
+        Err("主题模式只支持 system、light 或 dark".into())
+    }
+}
+
 fn validate_install_root(root: &Path) -> Result<(), String> {
     let home = dirs::home_dir().ok_or_else(|| "无法确定当前用户目录".to_string())?;
     if !root.is_absolute() || root == home || !root.starts_with(&home) {
@@ -144,18 +155,7 @@ fn validate_install_root(root: &Path) -> Result<(), String> {
 }
 
 fn persist(settings: &AppSettings) -> Result<(), String> {
-    let path = settings_path().ok_or_else(|| "无法确定应用配置目录".to_string())?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| "设置文件路径无效".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let temporary = path.with_extension("tmp");
-    fs::write(
-        &temporary,
-        serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+    persist_settings_document(settings)?;
 
     let root = PathBuf::from(&settings.install_root);
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
@@ -171,6 +171,22 @@ fn persist(settings: &AppSettings) -> Result<(), String> {
         serde_json::to_vec_pretty(&installer).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())
+}
+
+fn persist_settings_document(settings: &AppSettings) -> Result<(), String> {
+    let path = settings_path().ok_or_else(|| "无法确定应用配置目录".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "设置文件路径无效".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("tmp");
+    fs::write(
+        &temporary,
+        serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -330,5 +346,34 @@ mod tests {
     fn default_settings_are_bounded() {
         let mut settings = AppSettings::default();
         assert!(validate(&mut settings).is_ok());
+    }
+
+    #[test]
+    fn invalid_theme_mode_is_rejected() {
+        let mut settings = AppSettings {
+            theme_mode: "midnight".into(),
+            ..AppSettings::default()
+        };
+        assert!(validate(&mut settings).is_err());
+    }
+
+    #[test]
+    fn valid_theme_modes_are_accepted() {
+        for mode in ["system", "light", "dark"] {
+            assert!(validate_theme_mode(mode).is_ok());
+        }
+        assert!(validate_theme_mode("auto").is_err());
+    }
+
+    #[test]
+    fn settings_without_theme_keep_system_default() {
+        let settings: AppSettings = serde_json::from_str(
+            r#"{
+                "launchAtLogin": false,
+                "keepServicesRunningOnClose": true
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(settings.theme_mode, "system");
     }
 }

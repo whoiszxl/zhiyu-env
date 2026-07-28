@@ -771,26 +771,26 @@ function applyPreset(p: typeof presets[0]) {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
   height: calc(100vh - 88px);
-  border-top: 1px solid #d2d1c9;
+  border-top: 1px solid var(--color-border);
 }
 
 .s3-sidebar {
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #d2d1c9;
-  background: rgba(250, 249, 245, 0.84);
+  border-right: 1px solid var(--color-border);
+  background: var(--color-panel-translucent);
   overflow-y: auto;
 }
 
 .s3-sidebar-head {
   padding: 17px 16px 15px;
-  border-bottom: 1px solid #d2d1c9;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .s3-sidebar-head p,
 .s3-toolbar p {
   margin: 0 0 4px;
-  color: #989a93;
+  color: var(--color-text-muted);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 8px;
   letter-spacing: 0.12em;
@@ -800,7 +800,7 @@ function applyPreset(p: typeof presets[0]) {
 .s3-toolbar h2 {
   margin: 0;
   font-size: 14px;
-  color: #252920;
+  color: var(--color-text-primary);
 }
 
 .s3-sidebar-body {
@@ -817,12 +817,12 @@ function applyPreset(p: typeof presets[0]) {
 }
 
 .s3-sidebar-body label > span {
-  color: #73766d;
+  color: var(--color-text-secondary);
   font-size: 9px;
 }
 
 .s3-provider-hint {
-  color: #92958c;
+  color: var(--color-text-muted);
   font-size: 8px;
   line-height: 1.5;
 }
@@ -831,30 +831,30 @@ function applyPreset(p: typeof presets[0]) {
   display: flex;
   align-items: baseline;
   gap: 7px;
-  color: #73766d;
+  color: var(--color-text-secondary);
   font-size: 9px;
 }
 
 .s3-addressing-mode strong {
-  color: #315c3a;
+  color: var(--color-success-text);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 8px;
 }
 
 .s3-addressing-mode small {
-  color: #a0a299;
+  color: var(--color-text-muted);
   font-size: 8px;
 }
 
 .s3-sidebar-body input {
   width: 100%;
   padding: 6px 9px;
-  border: 1px solid #c8c7bf;
+  border: 1px solid var(--color-border-strong);
   outline: 0;
-  background: #fffefa;
+  background: var(--color-bg-elevated);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
-  color: #353830;
+  color: var(--color-text-primary);
 }
 
 .s3-sidebar-body input:focus {
@@ -871,22 +871,22 @@ function applyPreset(p: typeof presets[0]) {
 
 .preset-btn {
   padding: 3px 8px;
-  border: 1px solid #d2d1c9;
-  background: #faf9f5;
-  color: #73766d;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
   font-size: 8px;
   cursor: pointer;
 }
 
 .preset-btn:hover {
-  border-color: #898b83;
-  color: #252920;
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
 }
 
 .preset-btn.selected {
   border-color: #5d795f;
-  background: #e6eee4;
-  color: #315c3a;
+  background: var(--color-success-surface);
+  color: var(--color-success-text);
   font-weight: 600;
 }
 
@@ -895,12 +895,12 @@ function applyPreset(p: typeof presets[0]) {
   flex-direction: column;
   gap: 5px;
   padding-top: 3px;
-  border-top: 1px solid #e4e2da;
+  border-top: 1px solid var(--color-border);
 }
 
 .s3-history > p {
   margin: 0 0 2px;
-  color: #989a93;
+  color: var(--color-text-muted);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 8px;
   letter-spacing: 0.12em;
@@ -912,16 +912,16 @@ function applyPreset(p: typeof presets[0]) {
   flex-direction: column;
   gap: 2px;
   padding: 6px 8px;
-  border: 1px solid #deddd5;
-  background: #f7f6f1;
-  color: #55584f;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
   text-align: left;
   cursor: pointer;
 }
 
 .s3-history-item:hover {
   border-color: #9bb39b;
-  background: #edf3ea;
+  background: var(--color-success-surface);
 }
 
 .s3-history-item strong,
@@ -932,7 +932,7 @@ function applyPreset(p: typeof presets[0]) {
 }
 
 .s3-history-item strong { font-size: 9px; }
-.s3-history-item small { color: #96988f; font-size: 8px; }
+.s3-history-item small { color: var(--color-text-muted); font-size: 8px; }
 
 .connect-btn {
   width: 100%;
@@ -943,7 +943,7 @@ function applyPreset(p: typeof presets[0]) {
 .s3-main {
   min-height: 0;
   overflow-y: auto;
-  background: rgba(250, 249, 245, 0.6);
+  background: var(--color-panel-translucent);
 }
 
 .s3-toolbar {
@@ -951,8 +951,8 @@ function applyPreset(p: typeof presets[0]) {
   justify-content: space-between;
   align-items: center;
   padding: 13px 16px;
-  border-bottom: 1px solid #d2d1c9;
-  background: rgba(250, 249, 245, 0.9);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel-translucent);
 }
 
 .s3-toolbar h2 {
@@ -967,7 +967,7 @@ function applyPreset(p: typeof presets[0]) {
 }
 
 .s3-breadcrumbs > span {
-  color: #a1a39b;
+  color: var(--color-text-muted);
   font-size: 10px;
 }
 
@@ -975,19 +975,19 @@ function applyPreset(p: typeof presets[0]) {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #4f7051;
+  color: var(--color-success-text);
   font: 600 11px/1.4 "SFMono-Regular", Consolas, monospace;
 }
 
 .s3-breadcrumbs > button:disabled {
-  color: #252920;
+  color: var(--color-text-primary);
 }
 
 .s3-toolbar button {
   padding: 4px 12px;
-  border: 1px solid #d2d1c9;
-  background: #faf9f5;
-  color: #73766d;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
   font-size: 9px;
   cursor: pointer;
 }
@@ -1014,17 +1014,17 @@ function applyPreset(p: typeof presets[0]) {
   gap: 8px;
   align-items: center;
   padding: 8px 16px;
-  border-bottom: 1px solid #e8e6df;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .s3-row-head {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 8px;
-  color: #989a93;
+  color: var(--color-text-muted);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 6px 16px;
-  background: #f5f3ee;
+  background: var(--color-bg-content);
 }
 
 .s3-row.clickable {
@@ -1032,20 +1032,20 @@ function applyPreset(p: typeof presets[0]) {
 }
 
 .s3-row.clickable:hover {
-  background: #f0eee7;
+  background: var(--color-bg-muted);
 }
 
 .s3-folder-row {
   width: 100%;
   border: 0;
-  border-bottom: 1px solid #e8e6df;
-  background: rgba(244, 242, 235, 0.68);
-  color: #73766d;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
   text-align: left;
 }
 
 .s3-folder-row:hover {
-  background: #eceae2;
+  background: var(--color-bg-muted);
 }
 
 .s3-key {
@@ -1058,7 +1058,7 @@ function applyPreset(p: typeof presets[0]) {
   white-space: nowrap;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
-  color: #353830;
+  color: var(--color-text-primary);
 }
 
 .s3-file-badge {
@@ -1067,10 +1067,10 @@ function applyPreset(p: typeof presets[0]) {
   width: 28px;
   height: 18px;
   place-items: center;
-  border: 1px solid #c6c9bc;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
-  background: #eef1e9;
-  color: #5c765e;
+  background: var(--color-success-surface);
+  color: var(--color-success-text);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 7px;
   font-weight: 700;
@@ -1095,8 +1095,8 @@ function applyPreset(p: typeof presets[0]) {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 16px;
-  border-bottom: 1px solid #d2d1c9;
-  color: #8a8d84;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
   font-size: 9px;
 }
 
@@ -1107,9 +1107,9 @@ function applyPreset(p: typeof presets[0]) {
 
 .s3-pagination button {
   padding: 5px 10px;
-  border: 1px solid #d2d1c9;
-  background: #faf9f5;
-  color: #55584f;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
   font-size: 9px;
 }
 
@@ -1131,9 +1131,9 @@ function applyPreset(p: typeof presets[0]) {
   max-height: min(760px, calc(100vh - 64px));
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid #b9b8ae;
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
-  background: #faf9f5;
+  background: var(--color-bg-panel);
   box-shadow: 0 24px 80px rgba(20, 23, 18, 0.28);
 }
 
@@ -1166,8 +1166,8 @@ function applyPreset(p: typeof presets[0]) {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   line-height: 1.5;
-  color: #353830;
-  background: #fffefa;
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -1213,12 +1213,12 @@ function applyPreset(p: typeof presets[0]) {
   place-items: center;
   align-content: center;
   gap: 12px;
-  color: #73766d;
+  color: var(--color-text-secondary);
   font-size: 10px;
 }
 
 .s3-binary-preview a {
-  color: #416b49;
+  color: var(--color-success-text);
   font-weight: 600;
 }
 
@@ -1237,26 +1237,26 @@ function applyPreset(p: typeof presets[0]) {
   place-items: center;
   align-content: center;
   gap: 7px;
-  color: #92948c;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
-.panel-state strong { color: #55584f; font-size: 12px; }
-.panel-state small { color: #979990; font-size: 9px; }
+.panel-state strong { color: var(--color-text-secondary); font-size: 12px; }
+.panel-state small { color: var(--color-text-muted); font-size: 9px; }
 .empty-symbol {
   display: grid;
   width: 48px; height: 48px;
   margin-bottom: 4px;
   place-items: center;
-  border: 1px solid #cbc9c0;
+  border: 1px solid var(--color-border);
   border-radius: 50%;
-  background: #efede6;
-  color: #777970;
+  background: var(--color-bg-muted);
+  color: var(--color-text-muted);
   font-size: 20px;
 }
 
 .info {
-  background: #e5efe4;
+  background: var(--color-success-surface);
   border: 1px solid #91b39a;
-  color: #2f7047;
+  color: var(--color-success-text);
 }
 </style>

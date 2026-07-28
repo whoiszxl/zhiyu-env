@@ -1,0 +1,64 @@
+:root {
+  --color-bg-app: #f4f2ec;
+  --color-bg-content: #f5f3ed;
+  --color-bg-sidebar: #e8e6df;
+  --color-bg-panel: #faf9f5;
+  --color-bg-elevated: #fffefa;
+  --color-bg-muted: #efede6;
+  --color-text-primary: #24271f;
+  --color-text-secondary: #73766d;
+  --color-text-muted: #92948d;
+  --color-border: #d2d1c9;
+  --color-border-strong: #aaa9a1;
+  --color-accent: #dd5633;
+  --color-hover: rgba(255, 255, 255, 0.48);
+  --color-selected: #dedbd0;
+  --color-success: #579168;
+  --color-success-text: #2f7047;
+  --color-success-surface: #e2ece0;
+  --color-warning: #d39845;
+  --color-warning-text: #8a6522;
+  --color-warning-surface: #f5ecdc;
+  --color-danger: #c7573b;
+  --color-danger-text: #a8442c;
+  --color-danger-surface: #f3dfd8;
+  --color-info-surface: #e8ecf4;
+  --color-focus: rgba(221, 86, 51, 0.2);
+  --color-control-primary: #252920;
+  --color-control-primary-hover: #393d33;
+  --color-header: rgba(248, 247, 242, 0.88);
+  --color-panel-translucent: rgba(250, 249, 245, 0.9);
+  --color-grid-line: rgba(45, 48, 40, 0.025);
+}
+
+html[data-theme="dark"] {
+  --color-bg-app: #20231e;
+  --color-bg-content: #1b1e1a;
+  --color-bg-sidebar: #242720;
+  --color-bg-panel: #292c25;
+  --color-bg-elevated: #30342c;
+  --color-bg-muted: #252922;
+  --color-text-primary: #edf0e8;
+  --color-text-secondary: #b4b8ad;
+  --color-text-muted: #a0a59b;
+  --color-border: #3c4037;
+  --color-border-strong: #5a5f53;
+  --color-hover: rgba(255, 255, 255, 0.055);
+  --color-selected: #373b32;
+  --color-success: #6eae7d;
+  --color-success-text: #91c89d;
+  --color-success-surface: #273a2c;
+  --color-warning: #d8a657;
+  --color-warning-text: #e3b86d;
+  --color-warning-surface: #3a3224;
+  --color-danger: #df7058;
+  --color-danger-text: #ef8e78;
+  --color-danger-surface: #3c2924;
+  --color-info-surface: #283342;
+  --color-focus: rgba(221, 86, 51, 0.3);
+  --color-control-primary: #3a4035;
+  --color-control-primary-hover: #474e41;
+  --color-header: rgba(36, 39, 32, 0.9);
+  --color-panel-translucent: rgba(41, 44, 37, 0.94);
+  --color-grid-line: rgba(220, 225, 213, 0.035);
+}

@@ -152,8 +152,8 @@ onUnmounted(() => {});
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #faf9f5;
-  border: 1px solid #d2d1c9;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -162,15 +162,15 @@ onUnmounted(() => {});
 
 .qp-header {
   padding: 12px 16px 10px;
-  border-bottom: 1px solid #e8e6df;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .qp-search {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #f0eee7;
-  border: 1px solid #d8d6ce;
+  background: var(--color-bg-muted);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 0 12px;
   height: 36px;
@@ -179,7 +179,7 @@ onUnmounted(() => {});
 .qp-search-icon {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
-  color: #989a93;
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
@@ -189,16 +189,16 @@ onUnmounted(() => {});
   outline: none;
   background: transparent;
   font-size: 13px;
-  color: #2f332b;
+  color: var(--color-text-primary);
   font-family: inherit;
 }
 .qp-search input::placeholder {
-  color: #b0b2ab;
+  color: var(--color-text-muted);
 }
 
 .qp-hint {
   font-size: 9px;
-  color: #b0b2ab;
+  color: var(--color-text-muted);
   font-family: "SFMono-Regular", Consolas, monospace;
   flex-shrink: 0;
 }
@@ -214,7 +214,7 @@ onUnmounted(() => {});
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #989a93;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -229,8 +229,8 @@ onUnmounted(() => {});
 }
 
 .qp-item.selected {
-  background: #e8ecf4;
-  border-left-color: #5b7fc0;
+  background: var(--color-selected);
+  border-left-color: var(--color-accent);
 }
 
 .qp-item.pinned .qp-item-pin {
@@ -251,7 +251,7 @@ onUnmounted(() => {});
 
 .qp-item-preview {
   font-size: 12px;
-  color: #2f332b;
+  color: var(--color-text-primary);
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -263,7 +263,7 @@ onUnmounted(() => {});
   gap: 8px;
   margin-top: 3px;
   font-size: 9px;
-  color: #989a93;
+  color: var(--color-text-muted);
   font-family: "SFMono-Regular", Consolas, monospace;
   text-transform: uppercase;
 }
@@ -272,10 +272,10 @@ onUnmounted(() => {});
   display: flex;
   gap: 16px;
   padding: 6px 16px;
-  border-top: 1px solid #e8e6df;
+  border-top: 1px solid var(--color-border);
   font-size: 9px;
-  color: #b0b2ab;
+  color: var(--color-text-muted);
   font-family: "SFMono-Regular", Consolas, monospace;
-  background: #f5f3ee;
+  background: var(--color-bg-muted);
 }
 </style>
