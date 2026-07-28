@@ -485,6 +485,7 @@ fn service_kind(id: &str) -> Option<ServiceKindInput> {
         "rnacos" => ServiceKindInput::Rnacos,
         "rabbitmq" => ServiceKindInput::Rabbitmq,
         "nginx" => ServiceKindInput::Nginx,
+        "caddy" => ServiceKindInput::Caddy,
         _ => return None,
     })
 }
@@ -506,6 +507,7 @@ fn service_id(kind: ServiceKindInput) -> &'static str {
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "rabbitmq",
         ServiceKindInput::Nginx => "nginx",
+        ServiceKindInput::Caddy => "caddy",
     }
 }
 

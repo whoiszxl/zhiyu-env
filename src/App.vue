@@ -9,6 +9,7 @@ import ServiceConnectPanel from "./components/ServiceConnectPanel.vue";
 import { findTool, TOOLS } from "./tools/registry";
 import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
 import { formatBytes } from "./utils/format";
+import { setThemeMode } from "./theme";
 import {
   checkAppUpdate,
   cleanAllInstallCache,
@@ -73,6 +74,7 @@ import {
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
   AppSettings,
+  ThemeMode,
   DatabaseInfo,
   DatabaseOverview,
   EnvironmentMetrics,
@@ -223,6 +225,7 @@ const activityRecords = ref<ActivityRecord[]>(loadActivityRecords());
 const stoppingAll = ref(false);
 const repairingServices = ref(false);
 const appSettings = ref<AppSettings>({
+  themeMode: "system",
   launchAtLogin: false,
   keepServicesRunningOnClose: true,
   downloadMirror: "",
@@ -236,9 +239,19 @@ const appSettings = ref<AppSettings>({
 });
 const settingsDraft = ref<AppSettings>({ ...appSettings.value });
 const settingsSaving = ref(false);
+let settingsSaveQueued = false;
 const allCacheCleaning = ref(false);
 const updateChecking = ref(false);
 const updateStatus = ref<UpdateStatus | null>(null);
+
+function applyAppTheme(mode: ThemeMode, persist = true) {
+  setThemeMode(mode, persist);
+  void getCurrentWindow()
+    .setTheme(mode === "system" ? null : mode)
+    .catch(() => {
+      // 浏览器预览环境没有原生窗口时，仅应用 Web 主题。
+    });
+}
 const diskUsageByKind = ref<
   Partial<Record<ServiceKind, ServiceDiskUsage>>
 >({});
@@ -281,6 +294,7 @@ interface NginxFileEntry {
 
 const nginxFiles = ref<NginxFileEntry[]>([]);
 const nginxFilesDir = ref("");
+const htmlServicePrefix = computed(() => selectedKind.value === "caddy" ? "caddy" : "nginx");
 const nginxFilesLoading = ref(false);
 const nginxEditingFile = ref("");
 const nginxEditingContent = ref("");
@@ -291,7 +305,7 @@ const nginxNewFileName = ref("");
 async function loadNginxFiles(subdir?: string) {
   nginxFilesLoading.value = true;
   try {
-    nginxFiles.value = await invoke<NginxFileEntry[]>("nginx_html_list", {
+    nginxFiles.value = await invoke<NginxFileEntry[]>(`${htmlServicePrefix.value}_html_list`, {
       subdir: subdir || null,
     });
     nginxFilesDir.value = subdir || "";
@@ -305,7 +319,7 @@ async function loadNginxFiles(subdir?: string) {
 async function editNginxFile(path: string) {
   nginxEditingFile.value = path;
   try {
-    const content = await invoke<string>("nginx_html_read", { path });
+    const content = await invoke<string>(`${htmlServicePrefix.value}_html_read`, { path });
     nginxEditingContent.value = content;
     nginxEditingOriginal.value = content;
   } catch (e: any) {
@@ -327,7 +341,7 @@ async function saveNginxFile() {
   if (!nginxFileModified.value) return;
   nginxEditingSaving.value = true;
   try {
-    await invoke("nginx_html_write", {
+    await invoke(`${htmlServicePrefix.value}_html_write`, {
       path: nginxEditingFile.value,
       content: nginxEditingContent.value,
     });
@@ -344,7 +358,7 @@ async function createNginxFile() {
   if (!name) return;
   const path = nginxFilesDir.value ? `${nginxFilesDir.value}/${name}` : name;
   try {
-    await invoke("nginx_html_write", { path, content: "" });
+    await invoke(`${htmlServicePrefix.value}_html_write`, { path, content: "" });
     nginxNewFileName.value = "";
     await loadNginxFiles(nginxFilesDir.value || undefined);
     editNginxFile(path);
@@ -357,7 +371,7 @@ async function deleteNginxFile(path: string, isDir: boolean) {
   const label = isDir ? `目录 "${path}" 及其所有内容` : `文件 "${path}"`;
   if (!confirm(`确定删除 ${label}？此操作不可恢复。`)) return;
   try {
-    await invoke("nginx_html_delete", { path });
+    await invoke(`${htmlServicePrefix.value}_html_delete`, { path });
     if (path === nginxEditingFile.value) closeNginxEditor();
     await loadNginxFiles(nginxFilesDir.value || undefined);
   } catch (e: any) {
@@ -868,6 +882,18 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
+  if (selectedKind.value === "caddy") {
+    return [
+      ["overview", "概览"],
+      ["site", "站点"],
+      ["files", "文件管理"],
+      ["connect", "连接"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["docs", "使用文档"],
+    ];
+  }
   return [
     ["overview", "概览"],
     ["data", "数据浏览"],
@@ -903,6 +929,7 @@ const iconLetter: Record<ServiceKind, string> = {
   rnacos: "R",
   rabbitmq: "Q",
   nginx: "N",
+  caddy: "C",
 };
 
 function openExternal(url: string) {
@@ -1144,17 +1171,26 @@ async function loadAppSettings() {
   try {
     appSettings.value = await getAppSettings();
     settingsDraft.value = { ...appSettings.value };
+    applyAppTheme(appSettings.value.themeMode);
   } catch (cause) {
     error.value = String(cause);
   }
 }
 
+function previewTheme(mode: ThemeMode) {
+  settingsDraft.value.themeMode = mode;
+  applyAppTheme(mode);
+  void saveSettings();
+}
+
 async function openSettings() {
+  if (settingsActive.value) return;
   dashboardActive.value = false;
   settingsActive.value = true;
   activeTool.value = null;
   notice.value = "";
   error.value = "";
+  if (settingsSaving.value) return;
   await loadAppSettings();
   if (appSettings.value.autoCheckUpdates && !updateStatus.value) {
     void checkForUpdates();
@@ -1170,46 +1206,58 @@ async function chooseInstallRoot() {
   });
   if (typeof selected === "string") {
     settingsDraft.value.installRoot = selected;
+    void saveSettings();
   }
 }
 
 async function saveSettings() {
-  if (settingsSaving.value) return;
-  const rootChanged =
-    settingsDraft.value.installRoot !== appSettings.value.installRoot;
-  if (rootChanged && runningServices.value.length > 0) {
-    error.value = `请先停止当前运行的 ${runningServices.value.length} 个服务，再更换安装目录`;
-    return;
-  }
-  if (
-    rootChanged &&
-    !window.confirm(
-      "更换安装目录后，智屿会切换到一个新的环境。旧目录中的服务和数据不会自动迁移，确定保存吗？",
-    )
-  ) {
+  if (settingsSaving.value) {
+    settingsSaveQueued = true;
     return;
   }
   settingsSaving.value = true;
-  notice.value = "";
   error.value = "";
   try {
-    const saved = await saveAppSettings({ ...settingsDraft.value });
-    appSettings.value = saved;
-    settingsDraft.value = { ...saved };
-    notice.value = rootChanged
-      ? "设置已保存，已切换到新的安装目录"
-      : "设置已保存并生效";
-    if (rootChanged) {
-      diskUsageByKind.value = {};
-      await Promise.all([
-        refreshServices(true),
-        refreshEnvironmentDiskUsage(),
-        refreshDiskUsage(),
-        refreshPortListeners(),
-      ]);
-    }
+    do {
+      settingsSaveQueued = false;
+      const snapshot = { ...settingsDraft.value };
+      const rootChanged = snapshot.installRoot !== appSettings.value.installRoot;
+      if (rootChanged && runningServices.value.length > 0) {
+        settingsDraft.value.installRoot = appSettings.value.installRoot;
+        throw new Error(
+          `请先停止当前运行的 ${runningServices.value.length} 个服务，再更换安装目录`,
+        );
+      }
+      if (
+        rootChanged &&
+        !window.confirm(
+          "更换安装目录后，智屿会切换到一个新的环境。旧目录中的服务和数据不会自动迁移，确定保存吗？",
+        )
+      ) {
+        settingsDraft.value.installRoot = appSettings.value.installRoot;
+        return;
+      }
+
+      const saved = await saveAppSettings(snapshot);
+      appSettings.value = saved;
+      if (saved.themeMode === settingsDraft.value.themeMode) {
+        applyAppTheme(saved.themeMode);
+      }
+      if (rootChanged) {
+        notice.value = "已自动保存，并切换到新的安装目录";
+        diskUsageByKind.value = {};
+        await Promise.all([
+          refreshServices(true),
+          refreshEnvironmentDiskUsage(),
+          refreshDiskUsage(),
+          refreshPortListeners(),
+        ]);
+      }
+    } while (settingsSaveQueued);
   } catch (cause) {
     error.value = String(cause);
+    settingsDraft.value = { ...appSettings.value };
+    applyAppTheme(appSettings.value.themeMode);
   } finally {
     settingsSaving.value = false;
   }
@@ -2835,15 +2883,6 @@ onUnmounted(() => {
             <h1>设置中心</h1>
             <p>统一管理启动行为、下载安装、存储和维护策略</p>
           </div>
-          <button
-            type="button"
-            class="settings-save"
-            :disabled="settingsSaving"
-            @click="saveSettings"
-          >
-            <span v-if="settingsSaving" class="spinner"></span>
-            {{ settingsSaving ? "保存中" : "保存设置" }}
-          </button>
         </header>
 
         <div v-if="notice" class="notice settings-notice">
@@ -2856,6 +2895,50 @@ onUnmounted(() => {
         </div>
 
         <div class="settings-body">
+          <section class="settings-section settings-appearance">
+            <div class="settings-section-title">
+              <div>
+                <h2>外观</h2>
+                <p>选择智屿的界面显示方式</p>
+              </div>
+            </div>
+            <div class="theme-options" role="radiogroup" aria-label="主题模式">
+              <button
+                type="button"
+                :class="{ selected: settingsDraft.themeMode === 'system' }"
+                role="radio"
+                :aria-checked="settingsDraft.themeMode === 'system'"
+                @click="previewTheme('system')"
+              >
+                <span class="theme-preview system"><i></i><i></i></span>
+                <strong>跟随系统</strong>
+                <small>自动匹配 macOS 或 Windows</small>
+              </button>
+              <button
+                type="button"
+                :class="{ selected: settingsDraft.themeMode === 'light' }"
+                role="radio"
+                :aria-checked="settingsDraft.themeMode === 'light'"
+                @click="previewTheme('light')"
+              >
+                <span class="theme-preview light"><i></i></span>
+                <strong>浅色</strong>
+                <small>适合明亮环境</small>
+              </button>
+              <button
+                type="button"
+                :class="{ selected: settingsDraft.themeMode === 'dark' }"
+                role="radio"
+                :aria-checked="settingsDraft.themeMode === 'dark'"
+                @click="previewTheme('dark')"
+              >
+                <span class="theme-preview dark"><i></i></span>
+                <strong>深色</strong>
+                <small>降低夜间视觉亮度</small>
+              </button>
+            </div>
+          </section>
+
           <section class="settings-section">
             <div class="settings-section-title">
               <div>
@@ -2871,6 +2954,7 @@ onUnmounted(() => {
               <input
                 v-model="settingsDraft.launchAtLogin"
                 type="checkbox"
+                @change="saveSettings"
               />
               <i></i>
             </label>
@@ -2882,6 +2966,7 @@ onUnmounted(() => {
               <input
                 v-model="settingsDraft.keepServicesRunningOnClose"
                 type="checkbox"
+                @change="saveSettings"
               />
               <i></i>
             </label>
@@ -2902,6 +2987,7 @@ onUnmounted(() => {
                   v-model.trim="settingsDraft.downloadMirror"
                   type="url"
                   placeholder="https://your-cdn.example.com/zhiyu-packages"
+                  @change="saveSettings"
                 />
                 <small>留空时跳过自定义镜像；镜像文件需保留原始文件名</small>
               </div>
@@ -2914,13 +3000,17 @@ onUnmounted(() => {
               <input
                 v-model="settingsDraft.publicGithubMirror"
                 type="checkbox"
+                @change="saveSettings"
               />
               <i></i>
             </label>
             <div class="settings-field-grid">
               <label>
                 <span>最大并行下载</span>
-                <select v-model.number="settingsDraft.downloadConcurrency">
+                <select
+                  v-model.number="settingsDraft.downloadConcurrency"
+                  @change="saveSettings"
+                >
                   <option :value="1">1 个</option>
                   <option :value="2">2 个</option>
                   <option :value="3">3 个</option>
@@ -2935,6 +3025,7 @@ onUnmounted(() => {
                     type="number"
                     min="15"
                     max="600"
+                    @change="saveSettings"
                   />
                   <em>秒</em>
                 </div>
@@ -2970,6 +3061,7 @@ onUnmounted(() => {
                     type="number"
                     min="1"
                     max="365"
+                    @change="saveSettings"
                   />
                   <em>天</em>
                 </div>
@@ -2982,6 +3074,7 @@ onUnmounted(() => {
                     type="number"
                     min="1"
                     max="100"
+                    @change="saveSettings"
                   />
                   <em>份</em>
                 </div>
@@ -3018,6 +3111,7 @@ onUnmounted(() => {
               <input
                 v-model="settingsDraft.autoCheckUpdates"
                 type="checkbox"
+                @change="saveSettings"
               />
               <i></i>
             </label>
@@ -4006,7 +4100,7 @@ onUnmounted(() => {
         </section>
 
         <section
-          v-else-if="activeTab === 'site' && selectedKind === 'nginx'"
+          v-else-if="activeTab === 'site' && (selectedKind === 'nginx' || selectedKind === 'caddy')"
           class="nginx-site-panel"
         >
           <div class="ns-site-head">
@@ -4018,38 +4112,54 @@ onUnmounted(() => {
           <div class="ns-site-grid">
             <div class="ns-site-card">
               <strong>本地访问地址</strong>
-              <code>http://127.0.0.1:{{ selectedService.port }}</code>
+              <div class="ns-code-row">
+                <code>http://127.0.0.1:{{ selectedService.port }}</code>
+                <button class="ns-icon-btn" title="在浏览器打开" @click="openExternal('http://127.0.0.1:' + selectedService.port)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </button>
+              </div>
               <span>仅监听本地，不可公网访问</span>
-              <button type="button" class="ns-outline-btn" @click="openExternal('http://127.0.0.1:' + selectedService.port)">
-                在浏览器打开
-              </button>
             </div>
             <div class="ns-site-card">
               <strong>静态站点目录</strong>
-              <code>{{ selectedService.instanceDir }}/html</code>
+              <div class="ns-code-row">
+                <code>{{ selectedService.instanceDir }}/html</code>
+                <button class="ns-icon-btn" title="在 Finder 中打开" @click="openPath(selectedService.instanceDir + '/html')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                </button>
+              </div>
               <span>index.html 为默认首页</span>
-              <button type="button" class="ns-outline-btn" @click="openPath(selectedService.dataPath + '/html')">
-                在 Finder 中打开
-              </button>
             </div>
             <div class="ns-site-card">
               <strong>Access Log</strong>
-              <code>{{ selectedService.instanceDir }}/logs/access.log</code>
+              <div class="ns-code-row">
+                <code>{{ selectedService.instanceDir }}/logs/access.log</code>
+                <button class="ns-icon-btn" title="在 Finder 中打开" @click="openPath(selectedService.instanceDir + '/logs')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                </button>
+              </div>
               <span>HTTP 请求记录</span>
             </div>
             <div class="ns-site-card">
               <strong>Error Log</strong>
-              <code>{{ selectedService.instanceDir }}/logs/error.log</code>
+              <div class="ns-code-row">
+                <code>{{ selectedService.instanceDir }}/logs/error.log</code>
+                <button class="ns-icon-btn" title="在 Finder 中打开" @click="openPath(selectedService.instanceDir + '/logs')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                </button>
+              </div>
               <span>错误与警告信息</span>
             </div>
           </div>
           <p class="ns-site-note">
-            修改端口和反向代理请在「配置文件」标签页编辑 nginx.conf，保存后使用 nginx -t 自动校验。
+            修改端口和反向代理请在「配置文件」标签页编辑
+            {{ selectedKind === 'nginx' ? 'nginx.conf' : 'Caddyfile' }}，
+            {{ selectedKind === 'nginx' ? '保存后使用 nginx -t 自动校验。' : 'Caddy 会在启动时自动校验配置。' }}
           </p>
         </section>
 
         <section
-          v-else-if="activeTab === 'files' && selectedKind === 'nginx'"
+          v-else-if="activeTab === 'files' && (selectedKind === 'nginx' || selectedKind === 'caddy')"
           class="nginx-files-panel"
         >
           <div class="nf-head">
@@ -4065,10 +4175,10 @@ onUnmounted(() => {
             <button type="button" class="ns-outline-btn" @click="openPath((selectedService?.dataPath ?? '') + '/html')">在 Finder 打开</button>
           </div>
           <div v-if="nginxFilesLoading" class="panel-state">加载中…</div>
-          <div v-else-if="nginxFiles.length === 0" class="panel-state">
-            <span class="empty-symbol">📁</span>
-            <strong>暂无文件</strong>
-            <small>在 Finder 中打开目录添加文件，或点击"新建"创建</small>
+          <div v-else-if="nginxFiles.length === 0" class="nf-empty">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#b4b6ae" stroke-width="1.2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            <p>此目录暂无文件</p>
+            <span>通过上方工具栏新建，或在 Finder 中拖入文件</span>
           </div>
           <div v-else class="nf-table">
             <div class="nf-row nf-row-head">

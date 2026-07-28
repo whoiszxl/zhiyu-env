@@ -415,6 +415,12 @@ const RABBITMQ_OTP_URL: &str =
     "https://github.com/erlef/otp_builds/releases/download/OTP-27.3.4.6/otp-aarch64-apple-darwin.tar.gz";
 const RABBITMQ_OTP_SHA256: &str =
     "82b1aa23f4a40f391e6b42cb4e9607e1e360bc2fdcb88d032b040795bb6d349f";
+pub const CADDY_SERIES: &str = "2.11";
+pub const CADDY_VERSION: &str = "2.11.4";
+const CADDY_ARCHIVE: &str = "caddy_2.11.4_mac_arm64.tar.gz";
+const CADDY_URL: &str =
+    "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_mac_arm64.tar.gz";
+const CADDY_SHA256: &str = "9efb0af2d6cf09cfb5053c0e51721b9b3d4956d346234f39368d943d25a3c9a7";
 
 pub struct NginxRelease {
     pub series: &'static str,
@@ -1035,6 +1041,10 @@ pub struct NginxInstaller {
     release: &'static NginxRelease,
 }
 
+pub struct CaddyInstaller {
+    devbox_root: PathBuf,
+}
+
 impl RabbitmqInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
@@ -1330,6 +1340,91 @@ impl NginxInstaller {
         )?;
         report_install_progress(90, "完成安装", "Nginx 程序已写入版本目录");
         replace_installation(&stage, installation_dir)
+    }
+}
+
+impl CaddyInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(3, "准备安装", format!("准备安装 Caddy {}", CADDY_VERSION));
+        ensure_macos_arm64("Caddy")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
+
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/caddy");
+        if executable.is_file()
+            && installation_manifest_matches(
+                &installation_dir,
+                "caddy",
+                CADDY_VERSION,
+                CADDY_SHA256,
+            )
+        {
+            report_install_progress(90, "已安装", "目标版本已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let work_dir = self.devbox_root.join("tmp").join(format!(
+            "caddy-{}-{}-{}",
+            CADDY_VERSION,
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
+
+        let archive = downloads_dir.join(CADDY_ARCHIVE);
+        prepare_archive(&archive, CADDY_ARCHIVE, CADDY_URL, CADDY_SHA256)?;
+
+        report_install_progress(55, "解压程序", "正在解压 Caddy");
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xzf"])
+                .arg(&archive)
+                .arg("-C")
+                .arg(&work_dir),
+            "tar",
+        )?;
+
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        fs::create_dir_all(&bin_dir)?;
+        fs::rename(work_dir.join("caddy"), bin_dir.join("caddy"))?;
+
+        write_manifest(
+            &stage,
+            "caddy",
+            CADDY_SERIES,
+            CADDY_VERSION,
+            CADDY_URL,
+            CADDY_SHA256,
+            "official-binary",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        let _ = fs::remove_dir_all(&work_dir);
+        report_install_progress(90, "完成安装", "Caddy 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/caddy")
+            .join(CADDY_SERIES)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        self.installation_dir().join("bin/caddy").is_file()
     }
 }
 

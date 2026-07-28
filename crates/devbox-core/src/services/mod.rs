@@ -1,3 +1,4 @@
+mod caddy;
 mod common;
 mod consul;
 mod etcd;
@@ -15,6 +16,7 @@ mod redis;
 mod rnacos;
 mod rustfs;
 
+pub use caddy::CaddyService;
 pub use consul::ConsulService;
 pub use etcd::EtcdService;
 pub use kafka::KafkaService;

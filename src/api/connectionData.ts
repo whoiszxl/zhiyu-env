@@ -724,6 +724,19 @@ conn = pika.BlockingConnection(pika.URLParameters(
         [],
         [],
       );
+    case "caddy":
+      return r(
+        "Caddy",
+        "现代化 Web 服务器 · Caddyfile 配置",
+        8082,
+        false,
+        "",
+        "",
+        [{ label: "HTTP", value: "http://127.0.0.1:8082" }],
+        [],
+        [],
+        [],
+      );
     default:
       return r(
         "Unknown",

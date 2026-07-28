@@ -13,7 +13,8 @@ export type ServiceKind =
   | "consul"
   | "rnacos"
   | "rabbitmq"
-  | "nginx";
+  | "nginx"
+  | "caddy";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =
@@ -66,7 +67,10 @@ export interface EnvironmentMetrics {
   runningServiceCount: number;
 }
 
+export type ThemeMode = "system" | "light" | "dark";
+
 export interface AppSettings {
+  themeMode: ThemeMode;
   launchAtLogin: boolean;
   keepServicesRunningOnClose: boolean;
   downloadMirror: string;

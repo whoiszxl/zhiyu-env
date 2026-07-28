@@ -1,22 +1,22 @@
 use devbox_core::{
     installer::{
         mysql_release, nginx_release, postgres_release, redis_release, MysqlRelease, NginxRelease,
-        PostgresRelease, RedisRelease, CONSUL_SERIES, CONSUL_VERSION, ETCD_SERIES, ETCD_VERSION,
-        KAFKA_SERIES, KAFKA_VERSION, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES,
-        MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES, MONGODB_VERSION,
-        MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION, NGINX_RELEASES, NGINX_SERIES,
-        NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_SERIES, RABBITMQ_VERSION,
-        REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES, RNACOS_VERSION, RUSTFS_SERIES,
-        RUSTFS_VERSION,
+        PostgresRelease, RedisRelease, CADDY_SERIES, CADDY_VERSION, CONSUL_SERIES, CONSUL_VERSION,
+        ETCD_SERIES, ETCD_VERSION, KAFKA_SERIES, KAFKA_VERSION, MAILPIT_SERIES, MAILPIT_VERSION,
+        MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES,
+        MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION, NGINX_RELEASES,
+        NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_SERIES,
+        RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES, RNACOS_VERSION,
+        RUSTFS_SERIES, RUSTFS_VERSION,
     },
-    report_install_progress, with_install_context, ConfigManager, ConsulInstaller, ConsulService,
-    EtcdInstaller, EtcdService, InstallCancellationToken, InstallReporter, KafkaInstaller,
-    KafkaService, MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService,
-    MinioInstaller, MinioService, MongodbInstaller, MongodbService, MysqlInstaller, MysqlService,
-    NatsInstaller, NatsService, NginxInstaller, NginxService, PostgresInstaller, PostgresService,
-    RabbitmqInstaller, RabbitmqService, RedisInstaller, RedisService, RnacosInstaller,
-    RnacosService, RustfsInstaller, RustfsService, ServiceConfig, ServiceKind, ServiceManager,
-    ServiceStatus,
+    report_install_progress, with_install_context, CaddyInstaller, CaddyService, ConfigManager,
+    ConsulInstaller, ConsulService, EtcdInstaller, EtcdService, InstallCancellationToken,
+    InstallReporter, KafkaInstaller, KafkaService, MailpitInstaller, MailpitService,
+    MeilisearchInstaller, MeilisearchService, MinioInstaller, MinioService, MongodbInstaller,
+    MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService, NginxInstaller,
+    NginxService, PostgresInstaller, PostgresService, RabbitmqInstaller, RabbitmqService,
+    RedisInstaller, RedisService, RnacosInstaller, RnacosService, RustfsInstaller, RustfsService,
+    ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -189,6 +189,7 @@ pub enum ServiceKindInput {
     Rnacos,
     Rabbitmq,
     Nginx,
+    Caddy,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -209,6 +210,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Rnacos => Self::Rnacos,
             ServiceKindInput::Rabbitmq => Self::Rabbitmq,
             ServiceKindInput::Nginx => Self::Nginx,
+            ServiceKindInput::Caddy => Self::Caddy,
         }
     }
 }
@@ -464,10 +466,31 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
     if kind == ServiceKind::Nginx {
         return Ok(nginx_service_config(&root, selected_nginx_release(&root)));
     }
+    if kind == ServiceKind::Caddy {
+        return Ok(ServiceConfig {
+            name: "Caddy".into(),
+            kind: ServiceKind::Caddy,
+            version: CADDY_VERSION.into(),
+            port: 8082,
+            executable: root.join(format!("installations/caddy/{CADDY_SERIES}/bin/caddy")),
+            arguments: vec![
+                "run".into(),
+                "--config".into(),
+                root.join("instances/caddy/default/conf/Caddyfile")
+                    .display()
+                    .to_string(),
+            ],
+            environment: BTreeMap::new(),
+            instance_dir: root.join("instances/caddy/default"),
+            wait_for_port: true,
+        });
+    }
     let (name, version, port, executable, arguments) = match kind {
         ServiceKind::Redis => unreachable!(),
         ServiceKind::Mysql => unreachable!(),
         ServiceKind::Postgres => unreachable!(),
+        ServiceKind::Nginx => unreachable!(),
+        ServiceKind::Caddy => unreachable!(),
         ServiceKind::Mongodb => {
             let instance = root.join("instances/mongodb/default");
             (
@@ -611,21 +634,6 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
             )),
             Vec::new(),
         ),
-        ServiceKind::Nginx => {
-            let instance = root.join("instances/nginx/default");
-            (
-                "Nginx",
-                NGINX_VERSION,
-                8081,
-                root.join(format!("installations/nginx/{NGINX_SERIES}/bin/nginx")),
-                vec![
-                    "-p".into(),
-                    instance.display().to_string(),
-                    "-c".into(),
-                    "conf/nginx.conf".into(),
-                ],
-            )
-        }
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -821,6 +829,7 @@ fn with_service<T>(
             operation(&RabbitmqService::new(config).map_err(stringify_error)?)
         }
         ServiceKindInput::Nginx => operation(&NginxService::new(config).map_err(stringify_error)?),
+        ServiceKindInput::Caddy => operation(&CaddyService::new(config).map_err(stringify_error)?),
     }
     .map_err(stringify_error)
 }
@@ -859,6 +868,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "RabbitMQ",
         ServiceKindInput::Nginx => "Nginx",
+        ServiceKindInput::Caddy => "Caddy",
     };
     let (install_supported, install_support_label) = install_compatibility(kind);
     Ok(ServiceInfo {
@@ -914,7 +924,10 @@ fn install_compatibility(kind: ServiceKindInput) -> (bool, String) {
     } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
         matches!(
             kind,
-            ServiceKindInput::Redis | ServiceKindInput::Postgres | ServiceKindInput::Nginx
+            ServiceKindInput::Redis
+                | ServiceKindInput::Postgres
+                | ServiceKindInput::Nginx
+                | ServiceKindInput::Caddy
         )
     } else {
         false
@@ -989,6 +1002,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Rnacos,
         ServiceKindInput::Rabbitmq,
         ServiceKindInput::Nginx,
+        ServiceKindInput::Caddy,
     ]
     .into_iter()
     .map(info)
@@ -1121,6 +1135,14 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Nginx 实例配置");
+            run_action(kind, |service| service.install())
+        }
+
+        ServiceKindInput::Caddy => {
+            CaddyInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 Caddy 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -1451,6 +1473,7 @@ pub async fn service_stop_all() -> Result<Vec<ServiceInfo>, String> {
             ServiceKindInput::Rnacos,
             ServiceKindInput::Rabbitmq,
             ServiceKindInput::Nginx,
+            ServiceKindInput::Caddy,
         ] {
             match with_service(kind, |service| service.status()) {
                 Ok(ServiceStatus::Running { .. }) => {
@@ -1602,6 +1625,97 @@ pub fn nginx_html_delete(path: String) -> Result<(), String> {
     }
 }
 
+fn caddy_html_dir() -> Result<PathBuf, String> {
+    let root = devbox_root()?;
+    Ok(root.join("instances/caddy/default/html"))
+}
+
+fn caddy_html_path(relative: &str) -> Result<PathBuf, String> {
+    if relative.is_empty() || relative.contains("..") || relative.starts_with('/') {
+        return Err("无效的文件路径".into());
+    }
+    let base = caddy_html_dir()?;
+    let resolved = base.join(relative);
+    let canonical = resolved
+        .canonicalize()
+        .map_err(|_| "路径不存在".to_string())?;
+    if !canonical.starts_with(&base.canonicalize().unwrap_or_else(|_| base.clone())) {
+        return Err("路径越界".into());
+    }
+    Ok(canonical)
+}
+
+#[tauri::command]
+pub fn caddy_html_list(subdir: Option<String>) -> Result<Vec<NginxFileEntry>, String> {
+    let dir = if let Some(ref sub) = subdir {
+        caddy_html_path(sub)?
+    } else {
+        caddy_html_dir()?
+    };
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let meta = entry.metadata().map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = if let Some(ref sub) = subdir {
+            format!("{sub}/{name}")
+        } else {
+            name.clone()
+        };
+        entries.push(NginxFileEntry {
+            name,
+            path: rel,
+            is_dir: meta.is_dir(),
+            size_bytes: meta.len(),
+        });
+    }
+    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn caddy_html_read(path: String) -> Result<String, String> {
+    let resolved = caddy_html_path(&path)?;
+    let meta = resolved.metadata().map_err(|e| e.to_string())?;
+    if meta.is_dir() {
+        return Err("不能读取目录".into());
+    }
+    if meta.len() > 512 * 1024 {
+        return Err("文件超过 512 KiB".into());
+    }
+    String::from_utf8(std::fs::read(&resolved).map_err(|e| e.to_string())?)
+        .map_err(|_| "文件不是有效的 UTF-8 文本".into())
+}
+
+#[tauri::command]
+pub fn caddy_html_write(path: String, content: String) -> Result<(), String> {
+    if content.len() > 512 * 1024 {
+        return Err("内容不能超过 512 KiB".into());
+    }
+    let base = caddy_html_dir()?;
+    if path.contains("..") || path.starts_with('/') {
+        return Err("无效的文件路径".into());
+    }
+    let resolved = base.join(&path);
+    if let Some(parent) = resolved.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp = resolved.with_extension("html.tmp");
+    std::fs::write(&tmp, content.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &resolved).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn caddy_html_delete(path: String) -> Result<(), String> {
+    let resolved = caddy_html_path(&path)?;
+    let meta = resolved.metadata().map_err(|e| e.to_string())?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(&resolved).map_err(|e| e.to_string())
+    } else {
+        std::fs::remove_file(&resolved).map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -1716,6 +1830,7 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         ServiceKind::Rnacos => {}
         ServiceKind::Rabbitmq => {}
         ServiceKind::Nginx => {}
+        ServiceKind::Caddy => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -1749,6 +1864,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Rnacos => config.stdout_log_path(),
         ServiceKind::Rabbitmq => config.stdout_log_path(),
         ServiceKind::Nginx => config.stdout_log_path(),
+        ServiceKind::Caddy => config.stdout_log_path(),
     }
 }
 
@@ -1769,6 +1885,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Rnacos => "rnacos.env",
         ServiceKind::Rabbitmq => "rabbitmq.conf",
         ServiceKind::Nginx => "nginx.conf",
+        ServiceKind::Caddy => "Caddyfile",
     };
     config.config_dir().join(name)
 }
@@ -1945,6 +2062,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Rnacos => "rnacos-",
         ServiceKind::Rabbitmq => "rabbitmq-",
         ServiceKind::Nginx => "nginx",
+        ServiceKind::Caddy => "caddy",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {
@@ -2023,7 +2141,7 @@ mod tests {
         platform_label, postgres_service_config, redis_service_config, selected_mysql_release,
         selected_postgres_release, selected_redis_release, sum_process_metrics, ServiceKindInput,
     };
-    use devbox_core::{ConfigManager, ServiceConfig};
+    use devbox_core::{CaddyInstaller, CaddyService, ConfigManager, ServiceConfig};
     use std::fs;
     use std::path::Path;
 
@@ -2208,5 +2326,6 @@ fn connection_target(kind: &ServiceKind) -> (String, u64) {
         ServiceKind::Rnacos => ("127.0.0.1:8848".into(), 3),
         ServiceKind::Rabbitmq => ("127.0.0.1:5672".into(), 5),
         ServiceKind::Nginx => ("127.0.0.1:8081".into(), 3),
+        ServiceKind::Caddy => ("127.0.0.1:8082".into(), 3),
     }
 }
