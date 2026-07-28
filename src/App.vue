@@ -243,6 +243,7 @@ const appSettings = ref<AppSettings>({
   logRetentionDays: 14,
   backupRetentionCount: 10,
   autoCheckUpdates: true,
+  onboardingCompleted: false,
 });
 const settingsDraft = ref<AppSettings>({ ...appSettings.value });
 const settingsSaving = ref(false);
@@ -250,6 +251,8 @@ let settingsSaveQueued = false;
 const allCacheCleaning = ref(false);
 const updateChecking = ref(false);
 const updateStatus = ref<UpdateStatus | null>(null);
+const onboardingOpen = ref(false);
+const onboardingStep = ref(0);
 
 function applyAppTheme(mode: ThemeMode, persist = true) {
   setThemeMode(mode, persist);
@@ -1298,6 +1301,31 @@ async function chooseInstallRoot() {
     settingsDraft.value.installRoot = selected;
     void saveSettings();
   }
+}
+
+async function chooseOnboardingRoot() {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: settingsDraft.value.installRoot || undefined,
+    title: "选择智屿环境目录",
+  });
+  if (typeof selected !== "string") return;
+  settingsDraft.value.installRoot = selected;
+  await saveSettings();
+}
+
+function showOnboarding() {
+  onboardingStep.value = 0;
+  onboardingOpen.value = true;
+}
+
+async function finishOnboarding(kind?: ServiceKind) {
+  settingsDraft.value.onboardingCompleted = true;
+  onboardingOpen.value = false;
+  onboardingStep.value = 0;
+  await saveSettings();
+  if (kind) await selectService(kind);
 }
 
 async function saveSettings() {
@@ -2735,6 +2763,9 @@ onMounted(async () => {
     // Tray actions remain available even if the frontend event bridge is unavailable.
   }
   await refreshServices();
+  if (!appSettings.value.onboardingCompleted) {
+    onboardingOpen.value = true;
+  }
   await Promise.all([
     refreshMetrics(),
     refreshDiskUsage(),
@@ -3060,6 +3091,13 @@ onUnmounted(() => {
               />
               <i></i>
             </label>
+            <div class="settings-guide-row">
+              <span>
+                <strong>新手引导</strong>
+                <small>重新查看智屿的基本使用流程</small>
+              </span>
+              <button type="button" @click="showOnboarding">重新查看</button>
+            </div>
           </section>
 
           <section class="settings-section">
@@ -5933,6 +5971,144 @@ S3_FORCE_PATH_STYLE=true</pre>
           <pre>{{ logs }}</pre>
         </section>
       </template>
+
+      <div v-if="onboardingOpen" class="onboarding-backdrop">
+        <section
+          class="onboarding-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="onboarding-title"
+        >
+          <div class="onboarding-progress">
+            <i
+              v-for="index in 3"
+              :key="index"
+              :class="{ active: index - 1 <= onboardingStep }"
+            ></i>
+          </div>
+
+          <template v-if="onboardingStep === 0">
+            <div class="onboarding-content onboarding-welcome">
+              <span class="onboarding-mark">Z</span>
+              <p>WELCOME TO ZHIYU ENVIRONMENT</p>
+              <h2 id="onboarding-title">轻量管理你的本地开发环境</h2>
+              <p>
+                不使用 Docker，不启动虚拟机。Redis、MySQL、PostgreSQL
+                等服务直接运行在用户目录中。
+              </p>
+              <div class="onboarding-features">
+                <span><i>01</i>独立安装，不污染系统环境</span>
+                <span><i>02</i>支持多个服务版本共存</span>
+                <span><i>03</i>随用随开，保持低资源占用</span>
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="onboardingStep === 1">
+            <div class="onboarding-content">
+              <p>STEP 02 · LOCAL WORKSPACE</p>
+              <h2 id="onboarding-title">所有文件都由你掌控</h2>
+              <p>
+                程序、配置、数据、日志和备份统一保存在下面的目录。卸载智屿不会自动删除你的服务数据。
+              </p>
+              <div class="onboarding-path">
+                <span>环境目录</span>
+                <code>{{ settingsDraft.installRoot }}</code>
+                <button type="button" @click="chooseOnboardingRoot">
+                  更换目录
+                </button>
+              </div>
+              <div class="onboarding-directory-tree">
+                <span>installations/ <em>官方程序</em></span>
+                <span>instances/ <em>配置、数据与日志</em></span>
+                <span>backups/ <em>本地备份</em></span>
+                <span>downloads/ <em>可清理的安装缓存</em></span>
+              </div>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="onboarding-content">
+              <p>STEP 03 · FIRST SERVICE</p>
+              <h2 id="onboarding-title">从一个常用服务开始</h2>
+              <p>
+                选择后会进入服务详情页，你可以查看版本并点击“下载并安装”。智屿不会自动下载安装任何内容。
+              </p>
+              <div class="onboarding-services">
+                <button type="button" @click="finishOnboarding('redis')">
+                  <span class="nav-icon redis">R</span>
+                  <strong>Redis</strong>
+                  <small>缓存与 Key-Value</small>
+                  <em>{{
+                    services.find((item) => item.kind === "redis")?.status !==
+                    "not_installed"
+                      ? "已安装"
+                      : "推荐入门"
+                  }}</em>
+                </button>
+                <button type="button" @click="finishOnboarding('mysql')">
+                  <span class="nav-icon mysql">M</span>
+                  <strong>MySQL</strong>
+                  <small>关系型数据库</small>
+                  <em>{{
+                    services.find((item) => item.kind === "mysql")?.status !==
+                    "not_installed"
+                      ? "已安装"
+                      : "按需安装"
+                  }}</em>
+                </button>
+                <button type="button" @click="finishOnboarding('postgres')">
+                  <span class="nav-icon postgres">P</span>
+                  <strong>PostgreSQL</strong>
+                  <small>关系型数据库</small>
+                  <em>{{
+                    services.find((item) => item.kind === "postgres")?.status !==
+                    "not_installed"
+                      ? "已安装"
+                      : "按需安装"
+                  }}</em>
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <footer class="onboarding-footer">
+            <button
+              v-if="onboardingStep === 0"
+              type="button"
+              class="onboarding-skip"
+              @click="finishOnboarding()"
+            >
+              暂时跳过
+            </button>
+            <button
+              v-else
+              type="button"
+              class="onboarding-skip"
+              @click="onboardingStep--"
+            >
+              上一步
+            </button>
+            <span>{{ onboardingStep + 1 }} / 3</span>
+            <button
+              v-if="onboardingStep < 2"
+              type="button"
+              class="onboarding-next"
+              @click="onboardingStep++"
+            >
+              下一步
+            </button>
+            <button
+              v-else
+              type="button"
+              class="onboarding-next"
+              @click="finishOnboarding()"
+            >
+              稍后再安装
+            </button>
+          </footer>
+        </section>
+      </div>
 
       <div
         v-if="diagnosticsOpen"

@@ -110,6 +110,7 @@ export interface AppSettings {
   logRetentionDays: number;
   backupRetentionCount: number;
   autoCheckUpdates: boolean;
+  onboardingCompleted: boolean;
 }
 
 export interface UpdateStatus {

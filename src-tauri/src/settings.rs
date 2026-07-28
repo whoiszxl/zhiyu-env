@@ -20,6 +20,7 @@ pub struct AppSettings {
     pub log_retention_days: u32,
     pub backup_retention_count: u32,
     pub auto_check_updates: bool,
+    pub onboarding_completed: bool,
 }
 
 impl Default for AppSettings {
@@ -36,6 +37,7 @@ impl Default for AppSettings {
             log_retention_days: 14,
             backup_retention_count: 10,
             auto_check_updates: true,
+            onboarding_completed: false,
         }
     }
 }
@@ -375,5 +377,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.theme_mode, "system");
+        assert!(!settings.onboarding_completed);
     }
 }
