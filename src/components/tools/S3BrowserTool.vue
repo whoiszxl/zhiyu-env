@@ -50,19 +50,40 @@ const presignedResult = ref("");
 const isCos = computed(() =>
   config.value.endpoint.toLowerCase().includes(".myqcloud.com"),
 );
+const isR2 = computed(
+  () =>
+    selectedPreset.value === "Cloudflare R2" ||
+    config.value.endpoint.toLowerCase().includes(".r2.cloudflarestorage.com"),
+);
 const isVirtualHostOnly = computed(() => {
   const endpoint = config.value.endpoint.toLowerCase();
   return isCos.value || endpoint.includes(".aliyuncs.com");
 });
+const endpointPlaceholder = computed(() =>
+  isR2.value
+    ? "https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
+    : "https://...",
+);
 
 function detectPathStyle(endpoint: string, fallback = true) {
   const value = endpoint.toLowerCase();
   if (value.includes(".myqcloud.com") || value.includes(".aliyuncs.com")) return false;
   if (value.includes("amazonaws.com")) return false;
+  if (value.includes(".r2.cloudflarestorage.com")) return true;
   if (value.includes("qiniucs.com") || value.includes("127.0.0.1") || value.includes("localhost")) {
     return true;
   }
   return fallback;
+}
+
+function inferProvider(endpoint: string) {
+  const value = endpoint.toLowerCase();
+  if (value.includes(".r2.cloudflarestorage.com")) return "Cloudflare R2";
+  if (value.includes(".aliyuncs.com")) return "阿里云 OSS";
+  if (value.includes(".myqcloud.com")) return "腾讯云 COS";
+  if (value.includes("qiniucs.com")) return "七牛云 Kodo";
+  if (value.includes("amazonaws.com")) return "AWS S3";
+  return "";
 }
 
 const addressingMode = computed(() =>
@@ -120,9 +141,9 @@ onMounted(async () => {
         (preset) =>
           preset.endpoint === saved.endpoint &&
           preset.region === saved.region &&
-          preset.pathStyle === saved.pathStyle,
+          preset.pathStyle === config.value.pathStyle,
       );
-      if (matchingPreset) selectedPreset.value = matchingPreset.label;
+      selectedPreset.value = matchingPreset?.label || inferProvider(saved.endpoint);
       if (saved && connectionHistory.value.length === 0) saveConnectionHistory();
     }
   } catch {
@@ -411,15 +432,24 @@ const presets = [
   { label: "腾讯云 COS", endpoint: "https://cos.ap-guangzhou.myqcloud.com", region: "ap-guangzhou", pathStyle: false },
   { label: "七牛云 Kodo", endpoint: "https://s3-cn-east-1.qiniucs.com", region: "cn-east-1", pathStyle: true },
   { label: "AWS S3", endpoint: "https://s3.amazonaws.com", region: "us-east-1", pathStyle: false },
+  { label: "Cloudflare R2", endpoint: "", region: "auto", pathStyle: true },
   { label: "MinIO", endpoint: "http://127.0.0.1:9000", region: "us-east-1", pathStyle: true },
   { label: "RustFS", endpoint: "http://127.0.0.1:9000", region: "us-east-1", pathStyle: true },
 ];
 
 function applyPreset(p: typeof presets[0]) {
-  config.value.endpoint = p.endpoint;
-  config.value.region = p.region;
-  config.value.pathStyle = p.pathStyle;
+  disconnect();
+  const keepsLocalEndpoint = p.label === "MinIO" || p.label === "RustFS";
+  config.value = {
+    endpoint: keepsLocalEndpoint ? p.endpoint : "",
+    accessKey: "",
+    secretKey: "",
+    region: p.region,
+    bucket: "",
+    pathStyle: p.pathStyle,
+  };
   selectedPreset.value = p.label;
+  presignedResult.value = "";
   error.value = "";
 }
 </script>
@@ -463,7 +493,15 @@ function applyPreset(p: typeof presets[0]) {
         </div>
         <label>
           <span>Endpoint</span>
-          <input v-model="config.endpoint" type="text" placeholder="https://..." spellcheck="false" />
+          <input
+            v-model="config.endpoint"
+            type="text"
+            :placeholder="endpointPlaceholder"
+            spellcheck="false"
+          />
+          <small v-if="isR2" class="s3-provider-hint">
+            填写 R2 S3 API Endpoint，需包含 Account ID；EU、FedRAMP 可直接填写对应辖区 Endpoint
+          </small>
         </label>
         <label>
           <span>Access Key</span>
@@ -475,7 +513,14 @@ function applyPreset(p: typeof presets[0]) {
         </label>
         <label>
           <span>Region</span>
-          <input v-model="config.region" type="text" placeholder="oss-cn-hangzhou" spellcheck="false" />
+          <input
+            v-model="config.region"
+            type="text"
+            :placeholder="isR2 ? 'auto' : 'oss-cn-hangzhou'"
+            :readonly="isR2"
+            spellcheck="false"
+          />
+          <small v-if="isR2" class="s3-provider-hint">Cloudflare R2 固定使用 auto</small>
         </label>
         <label>
           <span>Bucket{{ isVirtualHostOnly ? "（必填）" : "（可选）" }}</span>
@@ -774,6 +819,12 @@ function applyPreset(p: typeof presets[0]) {
 .s3-sidebar-body label > span {
   color: #73766d;
   font-size: 9px;
+}
+
+.s3-provider-hint {
+  color: #92958c;
+  font-size: 8px;
+  line-height: 1.5;
 }
 
 .s3-addressing-mode {

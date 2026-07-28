@@ -213,6 +213,10 @@ fn is_cos_endpoint(host: &str) -> bool {
     host == "myqcloud.com" || host.ends_with(".myqcloud.com")
 }
 
+fn is_r2_endpoint(host: &str) -> bool {
+    host == "r2.cloudflarestorage.com" || host.ends_with(".r2.cloudflarestorage.com")
+}
+
 fn requires_virtual_host(host: &str) -> bool {
     is_cos_endpoint(host) || host == "aliyuncs.com" || host.ends_with(".aliyuncs.com")
 }
@@ -235,6 +239,20 @@ fn validate_config(config: &S3Config) -> Result<reqwest::Url, String> {
     }
     if endpoint.host_str().is_some_and(is_cos_endpoint) && config.bucket.trim().is_empty() {
         return Err("腾讯云 COS 必须填写包含 APPID 的 Bucket，例如 bucket-name-123456".into());
+    }
+    if let Some(host) = endpoint.host_str().filter(|host| is_r2_endpoint(host)) {
+        let account_prefix = host
+            .strip_suffix(".r2.cloudflarestorage.com")
+            .unwrap_or_default();
+        if account_prefix.is_empty() || account_prefix == "eu" || account_prefix == "fedramp" {
+            return Err(
+                "Cloudflare R2 Endpoint 缺少 Account ID，例如 https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
+                    .into(),
+            );
+        }
+        if config.region.trim() != "auto" {
+            return Err("Cloudflare R2 的 Region 必须填写 auto".into());
+        }
     }
     Ok(endpoint)
 }
@@ -808,5 +826,64 @@ mod tests {
         assert!(target.cos_uri.contains("林一航"));
         assert!(target.canonical_uri.contains("%E6%9E%97"));
         assert!(target.canonical_uri.contains("%2A"));
+    }
+
+    fn r2_config(endpoint: &str, region: &str) -> S3Config {
+        S3Config {
+            endpoint: endpoint.into(),
+            access_key: "id".into(),
+            secret_key: "secret".into(),
+            region: region.into(),
+            bucket: "demo".into(),
+            path_style: true,
+        }
+    }
+
+    #[test]
+    fn r2_requires_account_endpoint_and_auto_region() {
+        assert!(
+            validate_config(&r2_config("https://r2.cloudflarestorage.com", "auto"))
+                .unwrap_err()
+                .contains("Account ID")
+        );
+        assert!(
+            validate_config(&r2_config("https://eu.r2.cloudflarestorage.com", "auto"))
+                .unwrap_err()
+                .contains("Account ID")
+        );
+        assert!(validate_config(&r2_config(
+            "https://account-id.r2.cloudflarestorage.com",
+            "us-east-1"
+        ))
+        .unwrap_err()
+        .contains("auto"));
+    }
+
+    #[test]
+    fn r2_accepts_standard_and_jurisdiction_endpoints() {
+        assert!(validate_config(&r2_config(
+            "https://account-id.r2.cloudflarestorage.com",
+            "auto"
+        ))
+        .is_ok());
+        assert!(validate_config(&r2_config(
+            "https://account-id.eu.r2.cloudflarestorage.com",
+            "auto"
+        ))
+        .is_ok());
+        assert!(validate_config(&r2_config(
+            "https://account-id.fedramp.r2.cloudflarestorage.com",
+            "auto"
+        ))
+        .is_ok());
+    }
+
+    #[test]
+    fn r2_path_style_keeps_bucket_in_request_path() {
+        let config = r2_config("https://account-id.r2.cloudflarestorage.com", "auto");
+        let endpoint = validate_config(&config).unwrap();
+        let target = request_target(&config, &endpoint, "demo/folder/readme.txt").unwrap();
+        assert_eq!(target.host, "account-id.r2.cloudflarestorage.com");
+        assert_eq!(target.canonical_uri, "/demo/folder/readme.txt");
     }
 }
