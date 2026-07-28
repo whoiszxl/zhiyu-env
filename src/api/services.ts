@@ -41,6 +41,7 @@ import type {
   MysqlVersionInfo,
   PostgresVersionInfo,
   NginxVersionInfo,
+  ManagedServiceVersionInfo,
   RestoreResult,
   ServiceBackup,
   SqlResult,
@@ -224,6 +225,24 @@ export function selectNginxVersion(
   operationId: string,
 ): Promise<ServiceInfo> {
   return invoke<ServiceInfo>("nginx_version_select", {
+    version,
+    operationId,
+  });
+}
+
+export function listManagedServiceVersions(
+  kind: ServiceKind,
+): Promise<ManagedServiceVersionInfo[]> {
+  return invoke<ManagedServiceVersionInfo[]>("service_versions", { kind });
+}
+
+export function selectManagedServiceVersion(
+  kind: ServiceKind,
+  version: string,
+  operationId: string,
+): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("service_version_select", {
+    kind,
     version,
     operationId,
   });

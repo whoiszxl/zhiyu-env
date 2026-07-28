@@ -422,6 +422,160 @@ const CADDY_URL: &str =
     "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_mac_arm64.tar.gz";
 const CADDY_SHA256: &str = "9efb0af2d6cf09cfb5053c0e51721b9b3d4956d346234f39368d943d25a3c9a7";
 
+#[derive(Debug, Clone, Copy)]
+pub struct VerifiedBinaryRelease {
+    pub series: &'static str,
+    pub version: &'static str,
+    pub archive: &'static str,
+    pub source_url: &'static str,
+    pub sha256: &'static str,
+    pub support_label: &'static str,
+    pub legacy: bool,
+    pub recommended: bool,
+}
+
+pub const MAILPIT_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "1.28",
+        version: "1.28.4",
+        archive: "mailpit-darwin-arm64-v1.28.4.tar.gz",
+        source_url:
+            "https://github.com/axllent/mailpit/releases/download/v1.28.4/mailpit-darwin-arm64.tar.gz",
+        sha256: "eb3312168cb593c91b1de81d6f1c4ec134d5da7031c6c9f7d3b423d366293088",
+        support_label: "历史稳定版",
+        legacy: true,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: "1.29",
+        version: "1.29.2",
+        archive: "mailpit-darwin-arm64-v1.29.2.tar.gz",
+        source_url:
+            "https://github.com/axllent/mailpit/releases/download/v1.29.2/mailpit-darwin-arm64.tar.gz",
+        sha256: "4cc025b6e4757020d030ab892e7b42dec3e6a10ba49bf8ed93677890d13e86e5",
+        support_label: "兼容版本",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: MAILPIT_SERIES,
+        version: MAILPIT_VERSION,
+        archive: MAILPIT_ARCHIVE,
+        source_url: MAILPIT_URL,
+        sha256: MAILPIT_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const NATS_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "2.11",
+        version: "2.11.17",
+        archive: "nats-server-v2.11.17-darwin-arm64.tar.gz",
+        source_url:
+            "https://github.com/nats-io/nats-server/releases/download/v2.11.17/nats-server-v2.11.17-darwin-arm64.tar.gz",
+        sha256: "e17d11c5e9cb0824e003013304ba3d96ca24adbff9998084c746869c0347be9b",
+        support_label: "长期维护分支",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: "2.12",
+        version: "2.12.8",
+        archive: "nats-server-v2.12.8-darwin-arm64.tar.gz",
+        source_url:
+            "https://github.com/nats-io/nats-server/releases/download/v2.12.8/nats-server-v2.12.8-darwin-arm64.tar.gz",
+        sha256: "4556a7f617eb532587790344629a6a95261099b236524b764d1f10d6c14aba1a",
+        support_label: "稳定维护版",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: NATS_SERIES,
+        version: NATS_VERSION,
+        archive: NATS_ARCHIVE,
+        source_url: NATS_URL,
+        sha256: NATS_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const ETCD_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "3.5",
+        version: "3.5.21",
+        archive: "etcd-v3.5.21-darwin-arm64.zip",
+        source_url:
+            "https://github.com/etcd-io/etcd/releases/download/v3.5.21/etcd-v3.5.21-darwin-arm64.zip",
+        sha256: "d0ffb98e3671b1de1ca82b1fb6d7548661573519174470a33b6efccacb494f06",
+        support_label: "长期维护分支",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: ETCD_SERIES,
+        version: ETCD_VERSION,
+        archive: ETCD_ARCHIVE,
+        source_url: ETCD_URL,
+        sha256: ETCD_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const CADDY_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "2.10",
+        version: "2.10.2",
+        archive: "caddy_2.10.2_mac_arm64.tar.gz",
+        source_url:
+            "https://github.com/caddyserver/caddy/releases/download/v2.10.2/caddy_2.10.2_mac_arm64.tar.gz",
+        sha256: "cc9ad20742ea7bfee5dd1d435d42ab7fcf8592294f9ec43bf08fd21cbe448bc4",
+        support_label: "兼容稳定版",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: CADDY_SERIES,
+        version: CADDY_VERSION,
+        archive: CADDY_ARCHIVE,
+        source_url: CADDY_URL,
+        sha256: CADDY_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub fn mailpit_release(version_or_series: &str) -> Option<&'static VerifiedBinaryRelease> {
+    MAILPIT_RELEASES
+        .iter()
+        .find(|release| release.version == version_or_series || release.series == version_or_series)
+}
+
+pub fn nats_release(version_or_series: &str) -> Option<&'static VerifiedBinaryRelease> {
+    NATS_RELEASES
+        .iter()
+        .find(|release| release.version == version_or_series || release.series == version_or_series)
+}
+
+pub fn etcd_release(version_or_series: &str) -> Option<&'static VerifiedBinaryRelease> {
+    ETCD_RELEASES
+        .iter()
+        .find(|release| release.version == version_or_series || release.series == version_or_series)
+}
+
+pub fn caddy_release(version_or_series: &str) -> Option<&'static VerifiedBinaryRelease> {
+    CADDY_RELEASES
+        .iter()
+        .find(|release| release.version == version_or_series || release.series == version_or_series)
+}
+
 pub struct NginxRelease {
     pub series: &'static str,
     pub version: &'static str,
@@ -880,6 +1034,7 @@ pub struct MongodbInstaller {
 #[derive(Debug, Clone)]
 pub struct MailpitInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
@@ -994,6 +1149,7 @@ impl DuckdbInstaller {
 #[derive(Debug, Clone)]
 pub struct NatsInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
@@ -1019,6 +1175,7 @@ pub struct RustfsInstaller {
 #[derive(Debug, Clone)]
 pub struct EtcdInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
@@ -1043,6 +1200,7 @@ pub struct NginxInstaller {
 
 pub struct CaddyInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 impl RabbitmqInstaller {
@@ -1347,11 +1505,30 @@ impl CaddyInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: caddy_release(CADDY_VERSION).expect("default Caddy release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = caddy_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported Caddy version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn release(&self) -> &'static VerifiedBinaryRelease {
+        self.release
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 Caddy {}", CADDY_VERSION));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 Caddy {}", self.release.version),
+        );
         ensure_macos_arm64("Caddy")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
 
@@ -1361,8 +1538,8 @@ impl CaddyInstaller {
             && installation_manifest_matches(
                 &installation_dir,
                 "caddy",
-                CADDY_VERSION,
-                CADDY_SHA256,
+                self.release.version,
+                self.release.sha256,
             )
         {
             report_install_progress(90, "已安装", "目标版本已经安装");
@@ -1374,7 +1551,7 @@ impl CaddyInstaller {
         let downloads_dir = self.devbox_root.join("downloads");
         let work_dir = self.devbox_root.join("tmp").join(format!(
             "caddy-{}-{}-{}",
-            CADDY_VERSION,
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
@@ -1382,8 +1559,13 @@ impl CaddyInstaller {
         fs::create_dir_all(&work_dir)?;
         let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
 
-        let archive = downloads_dir.join(CADDY_ARCHIVE);
-        prepare_archive(&archive, CADDY_ARCHIVE, CADDY_URL, CADDY_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
 
         report_install_progress(55, "解压程序", "正在解压 Caddy");
         run(
@@ -1403,10 +1585,10 @@ impl CaddyInstaller {
         write_manifest(
             &stage,
             "caddy",
-            CADDY_SERIES,
-            CADDY_VERSION,
-            CADDY_URL,
-            CADDY_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         replace_installation(&stage, &installation_dir)?;
@@ -1420,11 +1602,18 @@ impl CaddyInstaller {
     pub fn installation_dir(&self) -> PathBuf {
         self.devbox_root
             .join("installations/caddy")
-            .join(CADDY_SERIES)
+            .join(self.release.series)
     }
 
     pub fn is_installed(&self) -> bool {
-        self.installation_dir().join("bin/caddy").is_file()
+        let installation_dir = self.installation_dir();
+        installation_dir.join("bin/caddy").is_file()
+            && installation_manifest_matches(
+                &installation_dir,
+                "caddy",
+                self.release.version,
+                self.release.sha256,
+            )
     }
 }
 
@@ -1594,16 +1783,42 @@ impl EtcdInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: etcd_release(ETCD_VERSION).expect("default etcd release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = etcd_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported etcd version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn release(&self) -> &'static VerifiedBinaryRelease {
+        self.release
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 etcd {ETCD_VERSION}"));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 etcd {}", self.release.version),
+        );
         ensure_macos_arm64("etcd")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/unzip"])?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/etcd");
-        if binary_contains(&executable, &["--version"], ETCD_VERSION) {
+        if binary_contains(&executable, &["--version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "etcd",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
             report_install_progress(90, "已安装", "etcd 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -1612,15 +1827,21 @@ impl EtcdInstaller {
 
         let downloads_dir = self.devbox_root.join("downloads");
         let work_dir = self.devbox_root.join("tmp").join(format!(
-            "etcd-{ETCD_VERSION}-{}-{}",
+            "etcd-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
         let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
-        let archive = downloads_dir.join(ETCD_ARCHIVE);
-        prepare_archive(&archive, ETCD_ARCHIVE, ETCD_URL, ETCD_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         run(
             Command::new("/usr/bin/unzip")
                 .args(["-q", "-o"])
@@ -1630,7 +1851,7 @@ impl EtcdInstaller {
             "unzip",
         )?;
 
-        let source = work_dir.join(format!("etcd-v{ETCD_VERSION}-darwin-arm64"));
+        let source = work_dir.join(format!("etcd-v{}-darwin-arm64", self.release.version));
         let stage = work_dir.join("installation");
         let bin_dir = stage.join("bin");
         fs::create_dir_all(&bin_dir)?;
@@ -1643,7 +1864,7 @@ impl EtcdInstaller {
                 fs::set_permissions(bin_dir.join(binary), fs::Permissions::from_mode(0o755))?;
             }
         }
-        if !binary_contains(&bin_dir.join("etcd"), &["--version"], ETCD_VERSION) {
+        if !binary_contains(&bin_dir.join("etcd"), &["--version"], self.release.version) {
             let _ = fs::remove_dir_all(&work_dir);
             return Err(DevBoxError::CommandFailed {
                 command: "etcd --version".into(),
@@ -1653,10 +1874,10 @@ impl EtcdInstaller {
         write_manifest(
             &stage,
             "etcd",
-            ETCD_SERIES,
-            ETCD_VERSION,
-            ETCD_URL,
-            ETCD_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         replace_installation(&stage, &installation_dir)?;
@@ -1670,7 +1891,21 @@ impl EtcdInstaller {
     pub fn installation_dir(&self) -> PathBuf {
         self.devbox_root
             .join("installations/etcd")
-            .join(ETCD_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation_dir = self.installation_dir();
+        binary_contains(
+            &installation_dir.join("bin/etcd"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation_dir,
+            "etcd",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 }
 
@@ -1943,18 +2178,42 @@ impl NatsInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: nats_release(NATS_VERSION).expect("default NATS release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = nats_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported NATS version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn release(&self) -> &'static VerifiedBinaryRelease {
+        self.release
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 NATS {NATS_VERSION}"));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 NATS {}", self.release.version),
+        );
         ensure_macos_arm64("NATS")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/nats-server");
-        if binary_contains(&executable, &["--version"], NATS_VERSION)
-            && installation_manifest_matches(&installation_dir, "nats", NATS_VERSION, NATS_SHA256)
+        if binary_contains(&executable, &["--version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "nats",
+                self.release.version,
+                self.release.sha256,
+            )
         {
             report_install_progress(90, "已安装", "NATS 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
@@ -1972,10 +2231,16 @@ impl NatsInstaller {
                 .expect("NATS installation has a parent"),
         )?;
 
-        let archive = downloads_dir.join(NATS_ARCHIVE);
-        prepare_archive(&archive, NATS_ARCHIVE, NATS_URL, NATS_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         let work_dir = temp_root.join(format!(
-            "nats-{NATS_VERSION}-{}-{}",
+            "nats-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
@@ -1994,7 +2259,21 @@ impl NatsInstaller {
         self.devbox_root
             .join("installations")
             .join("nats")
-            .join(NATS_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation_dir = self.installation_dir();
+        binary_contains(
+            &installation_dir.join("bin/nats-server"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation_dir,
+            "nats",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 
     fn extract_and_commit(
@@ -2014,7 +2293,10 @@ impl NatsInstaller {
         )?;
 
         let source = work_dir
-            .join(format!("nats-server-v{NATS_VERSION}-darwin-arm64"))
+            .join(format!(
+                "nats-server-v{}-darwin-arm64",
+                self.release.version
+            ))
             .join("nats-server");
         let stage = work_dir.join("installation");
         let bin_dir = stage.join("bin");
@@ -2031,19 +2313,23 @@ impl NatsInstaller {
             )?;
         }
 
-        if !binary_contains(&bin_dir.join("nats-server"), &["--version"], NATS_VERSION) {
+        if !binary_contains(
+            &bin_dir.join("nats-server"),
+            &["--version"],
+            self.release.version,
+        ) {
             return Err(DevBoxError::CommandFailed {
                 command: "nats-server --version".into(),
-                message: format!("downloaded binary is not NATS {NATS_VERSION}"),
+                message: format!("downloaded binary is not NATS {}", self.release.version),
             });
         }
         write_manifest(
             &stage,
             "nats",
-            NATS_SERIES,
-            NATS_VERSION,
-            NATS_URL,
-            NATS_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         report_install_progress(90, "完成安装", "NATS 安装完成");
@@ -2170,17 +2456,44 @@ impl MailpitInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: mailpit_release(MAILPIT_VERSION)
+                .expect("default Mailpit release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = mailpit_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported Mailpit version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn release(&self) -> &'static VerifiedBinaryRelease {
+        self.release
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 Mailpit {MAILPIT_VERSION}"));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 Mailpit {}", self.release.version),
+        );
         ensure_macos_arm64("Mailpit")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/mailpit");
-        if binary_contains(&executable, &["version"], MAILPIT_VERSION) {
+        if binary_contains(&executable, &["version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "mailpit",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
             report_install_progress(90, "已安装", "Mailpit 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -2197,10 +2510,16 @@ impl MailpitInstaller {
                 .expect("Mailpit installation has a parent"),
         )?;
 
-        let archive = downloads_dir.join(MAILPIT_ARCHIVE);
-        prepare_archive(&archive, MAILPIT_ARCHIVE, MAILPIT_URL, MAILPIT_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         let work_dir = temp_root.join(format!(
-            "mailpit-{MAILPIT_VERSION}-{}-{}",
+            "mailpit-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
@@ -2219,7 +2538,21 @@ impl MailpitInstaller {
         self.devbox_root
             .join("installations")
             .join("mailpit")
-            .join(MAILPIT_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation_dir = self.installation_dir();
+        binary_contains(
+            &installation_dir.join("bin/mailpit"),
+            &["version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation_dir,
+            "mailpit",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 
     fn extract_and_commit(
@@ -2244,19 +2577,19 @@ impl MailpitInstaller {
         fs::create_dir_all(&bin_dir)?;
         fs::copy(source, bin_dir.join("mailpit"))?;
 
-        if !binary_contains(&bin_dir.join("mailpit"), &["version"], MAILPIT_VERSION) {
+        if !binary_contains(&bin_dir.join("mailpit"), &["version"], self.release.version) {
             return Err(DevBoxError::CommandFailed {
                 command: "mailpit version".into(),
-                message: format!("downloaded binary is not Mailpit {MAILPIT_VERSION}"),
+                message: format!("downloaded binary is not Mailpit {}", self.release.version),
             });
         }
         write_manifest(
             &stage,
             "mailpit",
-            MAILPIT_SERIES,
-            MAILPIT_VERSION,
-            MAILPIT_URL,
-            MAILPIT_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         report_install_progress(90, "完成安装", "Mailpit 安装完成");
@@ -3510,5 +3843,70 @@ mod tests {
         assert!(mysql_84.installation_dir().ends_with("mysql/8.4"));
         assert!(mysql_97.installation_dir().ends_with("mysql/9.7"));
         assert!(MysqlInstaller::for_version(root, "7.0").is_err());
+    }
+
+    #[test]
+    fn verified_binary_catalogs_have_valid_unique_releases() {
+        for releases in [
+            MAILPIT_RELEASES,
+            NATS_RELEASES,
+            ETCD_RELEASES,
+            CADDY_RELEASES,
+        ] {
+            assert!(releases.len() >= 2);
+            assert_eq!(
+                releases
+                    .iter()
+                    .filter(|release| release.recommended)
+                    .count(),
+                1
+            );
+            for (index, release) in releases.iter().enumerate() {
+                assert_eq!(release.sha256.len(), 64);
+                assert!(release.source_url.starts_with("https://github.com/"));
+                assert!(release.source_url.contains(release.version));
+                assert!(releases[..index]
+                    .iter()
+                    .all(|known| known.series != release.series));
+            }
+        }
+        assert!(mailpit_release("0.0").is_none());
+        assert!(nats_release("1.0").is_none());
+        assert!(etcd_release("2.0").is_none());
+        assert!(caddy_release("1.0").is_none());
+    }
+
+    #[test]
+    fn verified_binary_installers_use_independent_series_directories() {
+        let root = Path::new("/tmp/zhiyu-verified-binary-versions");
+
+        assert!(MailpitInstaller::for_version(root, "1.28.4")
+            .unwrap()
+            .installation_dir()
+            .ends_with("mailpit/1.28"));
+        assert!(MailpitInstaller::new(root)
+            .installation_dir()
+            .ends_with(format!("mailpit/{MAILPIT_SERIES}")));
+        assert!(NatsInstaller::for_version(root, "2.11.17")
+            .unwrap()
+            .installation_dir()
+            .ends_with("nats/2.11"));
+        assert!(NatsInstaller::new(root)
+            .installation_dir()
+            .ends_with(format!("nats/{NATS_SERIES}")));
+        assert!(EtcdInstaller::for_version(root, "3.5.21")
+            .unwrap()
+            .installation_dir()
+            .ends_with("etcd/3.5"));
+        assert!(EtcdInstaller::new(root)
+            .installation_dir()
+            .ends_with(format!("etcd/{ETCD_SERIES}")));
+        assert!(CaddyInstaller::for_version(root, "2.10.2")
+            .unwrap()
+            .installation_dir()
+            .ends_with("caddy/2.10"));
+        assert!(CaddyInstaller::new(root)
+            .installation_dir()
+            .ends_with(format!("caddy/{CADDY_SERIES}")));
     }
 }

@@ -97,9 +97,11 @@ export interface DiagnosticRepairResult {
 }
 
 export type ThemeMode = "system" | "light" | "dark";
+export type UiScale = 90 | 100 | 110 | 120;
 
 export interface AppSettings {
   themeMode: ThemeMode;
+  uiScale: UiScale;
   launchAtLogin: boolean;
   keepServicesRunningOnClose: boolean;
   downloadMirror: string;
@@ -180,6 +182,17 @@ export interface PostgresVersionInfo {
 }
 
 export interface NginxVersionInfo {
+  series: string;
+  version: string;
+  installed: boolean;
+  selected: boolean;
+  supportLabel: string;
+  legacy: boolean;
+  recommended: boolean;
+  installationBytes: number;
+}
+
+export interface ManagedServiceVersionInfo {
   series: string;
   version: string;
   installed: boolean;

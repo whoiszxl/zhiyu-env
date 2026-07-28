@@ -10,6 +10,7 @@ use tauri_plugin_autostart::ManagerExt;
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub theme_mode: String,
+    pub ui_scale: u8,
     pub launch_at_login: bool,
     pub keep_services_running_on_close: bool,
     pub download_mirror: String,
@@ -27,6 +28,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme_mode: "system".into(),
+            ui_scale: 100,
             launch_at_login: false,
             keep_services_running_on_close: true,
             download_mirror: String::new(),
@@ -117,6 +119,9 @@ fn settings_path() -> Option<PathBuf> {
 
 fn validate(settings: &mut AppSettings) -> Result<(), String> {
     validate_theme_mode(&settings.theme_mode)?;
+    if !matches!(settings.ui_scale, 90 | 100 | 110 | 120) {
+        return Err("界面字号只支持 90%、100%、110% 或 120%".into());
+    }
     settings.download_mirror = settings
         .download_mirror
         .trim()
@@ -377,6 +382,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.theme_mode, "system");
+        assert_eq!(settings.ui_scale, 100);
         assert!(!settings.onboarding_completed);
+    }
+
+    #[test]
+    fn ui_scale_only_accepts_supported_steps() {
+        for scale in [90, 100, 110, 120] {
+            let mut settings = AppSettings {
+                ui_scale: scale,
+                ..AppSettings::default()
+            };
+            assert!(validate(&mut settings).is_ok());
+        }
+        let mut settings = AppSettings {
+            ui_scale: 135,
+            ..AppSettings::default()
+        };
+        assert!(validate(&mut settings).is_err());
     }
 }

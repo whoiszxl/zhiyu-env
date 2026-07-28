@@ -98,6 +98,8 @@ pub fn run() {
             commands::postgres_version_select,
             commands::nginx_versions,
             commands::nginx_version_select,
+            commands::service_versions,
+            commands::service_version_select,
             commands::open_url,
             commands::open_path,
             commands::nginx_html_list,

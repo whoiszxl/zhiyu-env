@@ -1,10 +1,12 @@
 use crate::commands::{self, ServiceInfo, ServiceKindInput};
 use devbox_core::{
     installer::{
-        mysql_release, nginx_release, postgres_release, redis_release, MYSQL_RELEASES,
-        NGINX_RELEASES, POSTGRES_RELEASES, REDIS_RELEASES,
+        caddy_release, etcd_release, mailpit_release, mysql_release, nats_release, nginx_release,
+        postgres_release, redis_release, CADDY_RELEASES, ETCD_RELEASES, MAILPIT_RELEASES,
+        MYSQL_RELEASES, NATS_RELEASES, NGINX_RELEASES, POSTGRES_RELEASES, REDIS_RELEASES,
     },
-    MysqlInstaller, NginxInstaller, PostgresInstaller, RedisInstaller, ServiceKind, ServiceStatus,
+    CaddyInstaller, EtcdInstaller, MailpitInstaller, MysqlInstaller, NatsInstaller, NginxInstaller,
+    PostgresInstaller, RedisInstaller, ServiceKind, ServiceStatus,
 };
 use serde::Serialize;
 use std::fs;
@@ -153,6 +155,46 @@ fn version_target(
                 release.version.to_string(),
             )
         }
+        ServiceKindInput::Mailpit => {
+            let release =
+                mailpit_release(version).ok_or_else(|| format!("不支持 Mailpit 版本 {version}"))?;
+            (
+                MailpitInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Nats => {
+            let release =
+                nats_release(version).ok_or_else(|| format!("不支持 NATS 版本 {version}"))?;
+            (
+                NatsInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Etcd => {
+            let release =
+                etcd_release(version).ok_or_else(|| format!("不支持 etcd 版本 {version}"))?;
+            (
+                EtcdInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Caddy => {
+            let release =
+                caddy_release(version).ok_or_else(|| format!("不支持 Caddy 版本 {version}"))?;
+            (
+                CaddyInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
         _ => {
             let config = commands::service_config(kind.into())?;
             if config.version != version {
@@ -223,6 +265,42 @@ fn installed_fallback(
             .filter(|release| release.version != removed_version)
             .filter(|release| {
                 NginxInstaller::for_version(root, release.version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+            .max_by_key(|release| release.recommended)
+            .map(|release| release.version.into()),
+        ServiceKindInput::Mailpit => MAILPIT_RELEASES
+            .iter()
+            .filter(|release| release.version != removed_version)
+            .filter(|release| {
+                MailpitInstaller::for_version(root, release.version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+            .max_by_key(|release| release.recommended)
+            .map(|release| release.version.into()),
+        ServiceKindInput::Nats => NATS_RELEASES
+            .iter()
+            .filter(|release| release.version != removed_version)
+            .filter(|release| {
+                NatsInstaller::for_version(root, release.version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+            .max_by_key(|release| release.recommended)
+            .map(|release| release.version.into()),
+        ServiceKindInput::Etcd => ETCD_RELEASES
+            .iter()
+            .filter(|release| release.version != removed_version)
+            .filter(|release| {
+                EtcdInstaller::for_version(root, release.version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+            .max_by_key(|release| release.recommended)
+            .map(|release| release.version.into()),
+        ServiceKindInput::Caddy => CADDY_RELEASES
+            .iter()
+            .filter(|release| release.version != removed_version)
+            .filter(|release| {
+                CaddyInstaller::for_version(root, release.version)
                     .is_ok_and(|installer| installer.is_installed())
             })
             .max_by_key(|release| release.recommended)

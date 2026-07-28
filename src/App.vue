@@ -10,6 +10,7 @@ import { findTool, TOOLS } from "./tools/registry";
 import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
 import { formatBytes } from "./utils/format";
 import { setThemeMode } from "./theme";
+import { applyUiScale } from "./display";
 import {
   checkAppUpdate,
   cleanAllInstallCache,
@@ -51,6 +52,7 @@ import {
   listServices,
   listServiceBackups,
   listNginxVersions,
+  listManagedServiceVersions,
   listKafkaTopics,
   createKafkaTopic,
   deleteKafkaTopic,
@@ -71,6 +73,7 @@ import {
   selectMysqlVersion,
   selectPostgresVersion,
   selectNginxVersion,
+  selectManagedServiceVersion,
   stopAllManagedServices,
   uninstallServiceVersion,
 } from "./api/services";
@@ -78,6 +81,7 @@ import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
   AppSettings,
   ThemeMode,
+  UiScale,
   DatabaseInfo,
   DatabaseOverview,
   DiagnosticReport,
@@ -101,6 +105,7 @@ import type {
   MysqlVersionInfo,
   PostgresVersionInfo,
   NginxVersionInfo,
+  ManagedServiceVersionInfo,
   PortListener,
   RedisKeyDetail,
   RedisOverview,
@@ -207,7 +212,8 @@ type ManagedVersionInfo =
   | RedisVersionInfo
   | MysqlVersionInfo
   | PostgresVersionInfo
-  | NginxVersionInfo;
+  | NginxVersionInfo
+  | ManagedServiceVersionInfo;
 type VersionUninstallTarget = {
   kind: ServiceKind;
   serviceName: string;
@@ -246,6 +252,7 @@ const diagnosticsRepairing = ref(false);
 const diagnosticReport = ref<DiagnosticReport | null>(null);
 const appSettings = ref<AppSettings>({
   themeMode: "system",
+  uiScale: 100,
   launchAtLogin: false,
   keepServicesRunningOnClose: true,
   downloadMirror: "",
@@ -259,6 +266,12 @@ const appSettings = ref<AppSettings>({
   onboardingCompleted: false,
 });
 const settingsDraft = ref<AppSettings>({ ...appSettings.value });
+const uiScaleOptions: Array<{ value: UiScale; label: string }> = [
+  { value: 90, label: "小" },
+  { value: 100, label: "标准" },
+  { value: 110, label: "大" },
+  { value: 120, label: "特大" },
+];
 const settingsSaving = ref(false);
 let settingsSaveQueued = false;
 const allCacheCleaning = ref(false);
@@ -307,6 +320,10 @@ const nginxVersions = ref<NginxVersionInfo[]>([]);
 const nginxVersionTarget = ref("");
 const nginxVersionsLoading = ref(false);
 const nginxVersionChanging = ref(false);
+const managedVersions = ref<ManagedServiceVersionInfo[]>([]);
+const managedVersionTarget = ref("");
+const managedVersionsLoading = ref(false);
+const managedVersionChanging = ref(false);
 const versionUninstallTarget = ref<VersionUninstallTarget | null>(null);
 const versionUninstalling = ref(false);
 
@@ -526,6 +543,18 @@ const selectedNginxVersionInfo = computed(
       (release) => release.version === nginxVersionTarget.value,
     ) ?? null,
 );
+const selectedManagedVersionInfo = computed(
+  () =>
+    managedVersions.value.find(
+      (release) => release.version === managedVersionTarget.value,
+    ) ?? null,
+);
+const genericMultiVersionKinds: ServiceKind[] = [
+  "mailpit",
+  "nats",
+  "etcd",
+  "caddy",
+];
 
 const serviceControlBusy = computed(
   () =>
@@ -534,6 +563,7 @@ const serviceControlBusy = computed(
     mysqlVersionChanging.value ||
     postgresVersionChanging.value ||
     nginxVersionChanging.value ||
+    managedVersionChanging.value ||
     versionUninstalling.value,
 );
 const latestInstallLog = computed(
@@ -726,17 +756,6 @@ function recordInstallSuccess(operationId: string) {
   ) {
     return;
   }
-  if (selectedKind.value === "rabbitmq") {
-    return [
-      ["overview", "概览"],
-      ["broker", "连接与控制台"],
-      ["connect", "连接"],
-      ["backup", "备份恢复"],
-      ["config", "配置文件"],
-      ["logs", "运行日志"],
-      ["docs", "使用文档"],
-    ];
-  }
   task.status = "completed";
   task.percent = 100;
   task.stage = "安装完成";
@@ -774,6 +793,18 @@ const configChanged = computed(
 );
 
 const detailTabs = computed<Array<[DetailTab, string]>>(() => {
+  if (selectedKind.value === "rabbitmq") {
+    return [
+      ["overview", "概览"],
+      ["broker", "连接与控制台"],
+      ["connect", "连接"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["versions", "版本管理"],
+      ["docs", "使用文档"],
+    ];
+  }
   if (selectedKind.value === "redis") {
     return [
       ["overview", "概览"],
@@ -822,6 +853,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
       ["docs", "使用文档"],
     ];
   }
@@ -833,6 +865,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
       ["docs", "使用文档"],
     ];
   }
@@ -844,6 +877,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
       ["docs", "使用文档"],
     ];
   }
@@ -855,6 +889,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
       ["docs", "使用文档"],
     ];
   }
@@ -866,6 +901,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
       ["docs", "使用文档"],
     ];
   }
@@ -877,6 +913,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
       ["docs", "使用文档"],
     ];
   }
@@ -892,6 +929,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
       ["docs", "使用文档"],
     ];
   }
@@ -917,6 +955,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["backup", "备份恢复"],
       ["config", "配置文件"],
       ["logs", "运行日志"],
+      ["versions", "版本管理"],
       ["docs", "使用文档"],
     ];
   }
@@ -928,6 +967,8 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     ["backup", "备份恢复"],
     ["config", "配置文件"],
     ["logs", "运行日志"],
+    ["versions", "版本管理"],
+    ["docs", "使用文档"],
   ];
 });
 
@@ -1281,6 +1322,7 @@ async function loadAppSettings() {
     appSettings.value = await getAppSettings();
     settingsDraft.value = { ...appSettings.value };
     applyAppTheme(appSettings.value.themeMode);
+    applyUiScale(appSettings.value.uiScale);
   } catch (cause) {
     error.value = String(cause);
   }
@@ -1289,6 +1331,12 @@ async function loadAppSettings() {
 function previewTheme(mode: ThemeMode) {
   settingsDraft.value.themeMode = mode;
   applyAppTheme(mode);
+  void saveSettings();
+}
+
+function previewUiScale(scale: UiScale) {
+  settingsDraft.value.uiScale = scale;
+  applyUiScale(scale);
   void saveSettings();
 }
 
@@ -1377,6 +1425,9 @@ async function saveSettings() {
       if (saved.themeMode === settingsDraft.value.themeMode) {
         applyAppTheme(saved.themeMode);
       }
+      if (saved.uiScale === settingsDraft.value.uiScale) {
+        applyUiScale(saved.uiScale);
+      }
       if (rootChanged) {
         notice.value = "已自动保存，并切换到新的安装目录";
         diskUsageByKind.value = {};
@@ -1392,6 +1443,7 @@ async function saveSettings() {
     error.value = String(cause);
     settingsDraft.value = { ...appSettings.value };
     applyAppTheme(appSettings.value.themeMode);
+    applyUiScale(appSettings.value.uiScale);
   } finally {
     settingsSaving.value = false;
   }
@@ -1645,6 +1697,8 @@ async function selectService(kind: ServiceKind) {
   tables.value = [];
   selectedTable.value = null;
   tableDetail.value = null;
+  managedVersions.value = [];
+  managedVersionTarget.value = "";
   await Promise.all([
     refreshMetrics(),
     refreshDiskUsage(kind),
@@ -1903,6 +1957,7 @@ function installedVersionsFor(
   if (kind === "mysql") return mysqlVersions.value;
   if (kind === "postgres") return postgresVersions.value;
   if (kind === "nginx") return nginxVersions.value;
+  if (genericMultiVersionKinds.includes(kind)) return managedVersions.value;
   return [];
 }
 
@@ -1999,7 +2054,9 @@ async function confirmVersionUninstall() {
             ? loadPostgresVersions()
             : target.kind === "nginx"
               ? loadNginxVersions()
-              : Promise.resolve();
+              : genericMultiVersionKinds.includes(target.kind)
+                ? loadManagedVersions()
+                : Promise.resolve();
     await Promise.all([
       versionRefresh,
       refreshDiskUsage(target.kind),
@@ -2035,6 +2092,136 @@ async function loadNginxVersions() {
     error.value = String(cause);
   } finally {
     nginxVersionsLoading.value = false;
+  }
+}
+
+async function changeNginxVersion() {
+  const service = selectedService.value;
+  const target = selectedNginxVersionInfo.value;
+  if (
+    !service ||
+    !target ||
+    target.selected ||
+    serviceControlBusy.value
+  ) {
+    return;
+  }
+  if (service.status === "running") {
+    error.value = "请先停止 Nginx，再切换运行版本";
+    return;
+  }
+  nginxVersionChanging.value = true;
+  notice.value = "";
+  error.value = "";
+  const operationId = startInstallTask("nginx", `Nginx ${target.version}`);
+  try {
+    const wasInstalled = target.installed;
+    const updated = await selectNginxVersion(target.version, operationId);
+    recordInstallSuccess(operationId);
+    const index = services.value.findIndex(
+      (item) => item.kind === updated.kind,
+    );
+    if (index >= 0) services.value[index] = updated;
+    await Promise.all([
+      loadNginxVersions(),
+      refreshDiskUsage("nginx"),
+      refreshEnvironmentDiskUsage(),
+    ]);
+    notice.value = wasInstalled
+      ? `已切换到 Nginx ${target.version}`
+      : `Nginx ${target.version} 编译安装并切换成功`;
+    recordActivity(
+      updated,
+      wasInstalled ? "切换版本" : "安装版本",
+      true,
+      notice.value,
+    );
+  } catch (cause) {
+    recordInstallFailure(operationId, cause);
+    error.value = String(cause);
+    recordActivity(service, "切换版本", false, error.value);
+  } finally {
+    nginxVersionChanging.value = false;
+  }
+}
+
+async function loadManagedVersions() {
+  const service = selectedService.value;
+  if (
+    !service ||
+    !genericMultiVersionKinds.includes(service.kind) ||
+    managedVersionsLoading.value
+  ) {
+    return;
+  }
+  managedVersionsLoading.value = true;
+  try {
+    managedVersions.value = await listManagedServiceVersions(service.kind);
+    managedVersionTarget.value =
+      managedVersions.value.find((release) => release.selected)?.version ??
+      service.version;
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    managedVersionsLoading.value = false;
+  }
+}
+
+async function changeManagedVersion() {
+  const service = selectedService.value;
+  const target = selectedManagedVersionInfo.value;
+  if (
+    !service ||
+    !target ||
+    target.selected ||
+    serviceControlBusy.value ||
+    !genericMultiVersionKinds.includes(service.kind)
+  ) {
+    return;
+  }
+  if (service.status === "running") {
+    error.value = `请先停止 ${service.name}，再切换运行版本`;
+    return;
+  }
+  managedVersionChanging.value = true;
+  notice.value = "";
+  error.value = "";
+  const operationId = startInstallTask(
+    service.kind,
+    `${service.name} ${target.version}`,
+  );
+  try {
+    const wasInstalled = target.installed;
+    const updated = await selectManagedServiceVersion(
+      service.kind,
+      target.version,
+      operationId,
+    );
+    recordInstallSuccess(operationId);
+    const index = services.value.findIndex(
+      (item) => item.kind === updated.kind,
+    );
+    if (index >= 0) services.value[index] = updated;
+    await Promise.all([
+      loadManagedVersions(),
+      refreshDiskUsage(service.kind),
+      refreshEnvironmentDiskUsage(),
+    ]);
+    notice.value = wasInstalled
+      ? `已切换到 ${service.name} ${target.version}`
+      : `${service.name} ${target.version} 安装并切换成功`;
+    recordActivity(
+      updated,
+      wasInstalled ? "切换版本" : "安装版本",
+      true,
+      notice.value,
+    );
+  } catch (cause) {
+    recordInstallFailure(operationId, cause);
+    error.value = String(cause);
+    recordActivity(service, "切换版本", false, error.value);
+  } finally {
+    managedVersionChanging.value = false;
   }
 }
 
@@ -2082,6 +2269,11 @@ async function execute(action: ServiceAction) {
           ? loadMysqlVersions()
           : service.kind === "postgres" && activeTab.value === "versions"
             ? loadPostgresVersions()
+            : service.kind === "nginx" && activeTab.value === "versions"
+              ? loadNginxVersions()
+            : genericMultiVersionKinds.includes(service.kind) &&
+                activeTab.value === "versions"
+              ? loadManagedVersions()
             : Promise.resolve(),
     ]);
   } catch (cause) {
@@ -2157,6 +2349,12 @@ async function openTab(tab: DetailTab) {
   }
   if (tab === "versions" && selectedKind.value === "nginx") {
     await loadNginxVersions();
+  }
+  if (
+    tab === "versions" &&
+    genericMultiVersionKinds.includes(selectedKind.value)
+  ) {
+    await loadManagedVersions();
   }
   if (tab === "mail" && mailMessages.value.length === 0) {
     await loadMailMessages();
@@ -3219,6 +3417,37 @@ onUnmounted(() => {
                 <small>降低夜间视觉亮度</small>
               </button>
             </div>
+            <div class="ui-scale-setting">
+              <div>
+                <strong>界面字号</strong>
+                <small>同步调整文字和控件，修改后立即生效</small>
+              </div>
+              <div
+                class="ui-scale-options"
+                role="radiogroup"
+                aria-label="界面字号"
+              >
+                <button
+                  v-for="option in uiScaleOptions"
+                  :key="option.value"
+                  type="button"
+                  :class="{
+                    selected: settingsDraft.uiScale === option.value,
+                  }"
+                  role="radio"
+                  :aria-checked="settingsDraft.uiScale === option.value"
+                  @click="previewUiScale(option.value)"
+                >
+                  <span
+                    :style="{ fontSize: `${option.value / 10}px` }"
+                  >
+                    字
+                  </span>
+                  <strong>{{ option.label }}</strong>
+                  <small>{{ option.value }}%</small>
+                </button>
+              </div>
+            </div>
           </section>
 
           <section class="settings-section">
@@ -4115,6 +4344,210 @@ onUnmounted(() => {
           </div>
         </section>
 
+        <section
+          v-else-if="
+            activeTab === 'versions' &&
+            !['redis', 'mysql', 'postgres', 'nginx'].includes(selectedKind)
+          "
+          class="version-panel"
+        >
+          <div class="redis-version-manager">
+            <div class="redis-version-head">
+              <div>
+                <p>VERSION MANAGER</p>
+                <h2>{{ selectedService.name }} 版本管理</h2>
+              </div>
+              <span>{{ selectedService.platformLabel }}</span>
+            </div>
+
+            <div
+              v-if="
+                genericMultiVersionKinds.includes(selectedKind) &&
+                managedVersionsLoading
+              "
+              class="panel-state"
+            >
+              正在读取已验证版本…
+            </div>
+
+            <template
+              v-else-if="genericMultiVersionKinds.includes(selectedKind)"
+            >
+              <div class="redis-version-grid">
+                <button
+                  v-for="release in managedVersions"
+                  :key="release.version"
+                  type="button"
+                  :class="{
+                    selected: managedVersionTarget === release.version,
+                    active: release.selected,
+                    legacy: release.legacy,
+                  }"
+                  :disabled="managedVersionChanging"
+                  @click="managedVersionTarget = release.version"
+                >
+                  <span class="redis-version-radio"></span>
+                  <span class="redis-version-copy">
+                    <strong>{{ selectedService.name }} {{ release.series }}</strong>
+                    <small>v{{ release.version }}</small>
+                  </span>
+                  <span class="redis-version-badges">
+                    <i v-if="release.selected">当前</i>
+                    <i v-else-if="release.installed">已安装</i>
+                    <i v-if="release.recommended" class="recommended">推荐</i>
+                  </span>
+                  <em>
+                    {{ release.supportLabel }}
+                    <template v-if="release.installationBytes > 0">
+                      · {{ formatBytes(release.installationBytes) }}
+                    </template>
+                  </em>
+                </button>
+              </div>
+
+              <div class="generic-version-explanation">
+                <span>版本切换说明</span>
+                <p>
+                  所有条目均已验证官方发布地址、文件结构和 SHA-256。切换前需要停止服务；配置和本地数据会保留。
+                </p>
+              </div>
+
+              <footer class="redis-version-footer">
+                <p>
+                  多个程序版本独立存放，卸载版本不会删除配置、数据、日志和备份。
+                </p>
+                <div>
+                  <button
+                    v-if="selectedManagedVersionInfo?.installed"
+                    type="button"
+                    class="version-remove-button"
+                    :disabled="
+                      serviceControlBusy ||
+                      (selectedManagedVersionInfo.selected &&
+                        selectedService.status === 'running')
+                    "
+                    @click="
+                      requestVersionUninstall(
+                        selectedService.kind,
+                        selectedService.name,
+                        selectedManagedVersionInfo,
+                      )
+                    "
+                  >
+                    卸载此版本
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="
+                      !selectedManagedVersionInfo ||
+                      selectedManagedVersionInfo.selected ||
+                      selectedService.status === 'running' ||
+                      !selectedService.installSupported ||
+                      serviceControlBusy
+                    "
+                    @click="changeManagedVersion"
+                  >
+                    <span
+                      v-if="managedVersionChanging"
+                      class="spinner"
+                    ></span>
+                    {{
+                      selectedManagedVersionInfo?.selected
+                        ? "当前版本"
+                        : managedVersionChanging
+                          ? "安装切换中"
+                          : selectedManagedVersionInfo?.installed
+                            ? "切换版本"
+                            : "安装并切换"
+                    }}
+                  </button>
+                </div>
+              </footer>
+            </template>
+
+            <template v-else>
+              <article
+                class="generic-version-card"
+                :class="{
+                  installed: selectedService.status !== 'not_installed',
+                }"
+              >
+                <span class="generic-version-icon">{{
+                  iconLetter[selectedService.kind]
+                }}</span>
+                <div>
+                  <span>当前验证版本</span>
+                  <strong>{{ selectedService.version }}</strong>
+                  <small>{{ selectedService.installSupportLabel }}</small>
+                </div>
+                <div class="generic-version-state">
+                  <em>{{
+                    selectedService.status === "not_installed"
+                      ? "未安装"
+                      : "已安装"
+                  }}</em>
+                  <strong>{{
+                    formatBytes(
+                      selectedDiskUsage?.installationBytes ?? 0,
+                    )
+                  }}</strong>
+                  <small>程序文件</small>
+                </div>
+              </article>
+
+              <div class="generic-version-explanation">
+                <span>为什么目前只有一个版本？</span>
+                <p>
+                  智屿只展示已经验证下载地址、文件结构和 SHA-256
+                  的版本，避免安装未经校验的程序。后续增加版本时会直接出现在这里。
+                </p>
+              </div>
+
+              <footer class="generic-version-footer">
+                <p>
+                  卸载程序不会删除配置、数据、日志和备份；重新安装后可以继续使用原数据。
+                </p>
+                <div>
+                  <span v-if="selectedService.status === 'running'">
+                    请先停止服务再卸载
+                  </span>
+                  <button
+                    v-if="selectedService.status !== 'not_installed'"
+                    type="button"
+                    class="version-remove-button"
+                    :disabled="
+                      serviceControlBusy ||
+                      selectedService.status === 'running'
+                    "
+                    @click="requestCurrentProgramUninstall"
+                  >
+                    卸载程序
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    :disabled="
+                      serviceControlBusy ||
+                      !selectedService.installSupported
+                    "
+                    @click="execute('install')"
+                  >
+                    <span
+                      v-if="pendingAction === 'install'"
+                      class="spinner"
+                    ></span>
+                    {{
+                      pendingAction === "install"
+                        ? "安装中"
+                        : "下载并安装"
+                    }}
+                  </button>
+                </div>
+              </footer>
+            </template>
+          </div>
+        </section>
+
         <section v-else-if="activeTab === 'overview'" class="overview">
           <div class="metric-grid">
             <article class="metric-card">
@@ -4610,59 +5043,104 @@ onUnmounted(() => {
           v-else-if="activeTab === 'versions' && selectedKind === 'nginx'"
           class="version-panel"
         >
-          <div class="nginx-version-header">
+          <div class="redis-version-manager">
+          <div class="redis-version-head">
             <div>
               <p>VERSION MANAGER</p>
               <h2>Nginx 运行版本</h2>
             </div>
-            <span>源码编译安装 · 第一个稳定版</span>
+            <span>官方源码 · 独立版本目录</span>
           </div>
-          <div class="nginx-version-card">
-            <span class="ns-ver-dot active"></span>
-            <span class="ns-ver-copy">
-              <strong>Nginx {{ selectedService.version }}</strong>
-              <small>当前版本</small>
-            </span>
-            <span class="ns-ver-badges">
-              <i v-if="selectedService.status !== 'not_installed'" class="installed">已安装</i>
-              <i v-else class="not-installed">未安装</i>
-            </span>
-            <em>
-              稳定版 · macOS Apple Silicon
-              <template v-if="!selectedService.installSupported">· 当前平台不支持</template>
-            </em>
+          <div v-if="nginxVersionsLoading" class="panel-state">
+            正在读取已验证版本…
           </div>
-          <p class="ns-ver-note">
-            Nginx {{ selectedService.version }} 使用源码编译，关闭了 gzip、rewrite 模块以保持轻量。后续将支持多版本切换。
-          </p>
-          <div
-            v-if="selectedNginxVersionInfo?.installed"
-            class="nginx-version-actions"
-          >
-            <span>
-              程序占用
-              {{ formatBytes(selectedNginxVersionInfo.installationBytes) }}，站点文件和配置不会被删除
-            </span>
-            <button
-              type="button"
-              class="version-remove-button"
-              :disabled="
-                serviceControlBusy || selectedService.status === 'running'
-              "
-              @click="
-                requestVersionUninstall(
-                  'nginx',
-                  'Nginx',
-                  selectedNginxVersionInfo,
-                )
-              "
-            >
-              {{
-                selectedService.status === "running"
-                  ? "请先停止服务"
-                  : "卸载程序"
-              }}
-            </button>
+          <template v-else>
+            <div class="redis-version-grid">
+              <button
+                v-for="release in nginxVersions"
+                :key="release.version"
+                type="button"
+                :class="{
+                  selected: nginxVersionTarget === release.version,
+                  active: release.selected,
+                  legacy: release.legacy,
+                }"
+                :disabled="nginxVersionChanging"
+                @click="nginxVersionTarget = release.version"
+              >
+                <span class="redis-version-radio"></span>
+                <span class="redis-version-copy">
+                  <strong>Nginx {{ release.series }}</strong>
+                  <small>v{{ release.version }}</small>
+                </span>
+                <span class="redis-version-badges">
+                  <i v-if="release.selected">当前</i>
+                  <i v-else-if="release.installed">已安装</i>
+                  <i v-if="release.recommended" class="recommended">推荐</i>
+                </span>
+                <em>
+                  {{ release.supportLabel }}
+                  <template v-if="release.installationBytes > 0">
+                    · {{ formatBytes(release.installationBytes) }}
+                  </template>
+                </em>
+              </button>
+            </div>
+            <p class="ns-ver-note">
+              两个版本都使用官方源码编译并校验 SHA-256；站点文件和配置在切换时保持不变。
+            </p>
+            <div class="redis-version-footer">
+              <p>
+                各版本程序独立存放，站点文件和配置共用。切换前需要先停止 Nginx。
+              </p>
+              <div>
+              <span v-if="selectedService.status === 'running'">
+                请先停止 Nginx 再切换或卸载当前版本
+              </span>
+              <button
+                v-if="selectedNginxVersionInfo?.installed"
+                type="button"
+                class="version-remove-button"
+                :disabled="
+                  serviceControlBusy ||
+                  (selectedNginxVersionInfo.selected &&
+                    selectedService.status === 'running')
+                "
+                @click="
+                  requestVersionUninstall(
+                    'nginx',
+                    'Nginx',
+                    selectedNginxVersionInfo,
+                  )
+                "
+              >
+                卸载此版本
+              </button>
+              <button
+                type="button"
+                :disabled="
+                  !selectedNginxVersionInfo ||
+                  selectedNginxVersionInfo.selected ||
+                  selectedService.status === 'running' ||
+                  !selectedService.installSupported ||
+                  serviceControlBusy
+                "
+                @click="changeNginxVersion"
+              >
+                <span v-if="nginxVersionChanging" class="spinner"></span>
+                {{
+                  selectedNginxVersionInfo?.selected
+                    ? "当前版本"
+                    : nginxVersionChanging
+                      ? "编译切换中"
+                      : selectedNginxVersionInfo?.installed
+                        ? "切换版本"
+                        : "安装并切换"
+                }}
+              </button>
+              </div>
+            </div>
+          </template>
           </div>
         </section>
 

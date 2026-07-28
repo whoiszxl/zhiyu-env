@@ -1,13 +1,14 @@
 use devbox_core::{
     installer::{
-        mysql_release, nginx_release, postgres_release, redis_release, MysqlRelease, NginxRelease,
-        PostgresRelease, RedisRelease, CADDY_SERIES, CADDY_VERSION, CONSUL_SERIES, CONSUL_VERSION,
-        ETCD_SERIES, ETCD_VERSION, KAFKA_SERIES, KAFKA_VERSION, MAILPIT_SERIES, MAILPIT_VERSION,
-        MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES,
-        MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION, NGINX_RELEASES,
-        NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_SERIES, RABBITMQ_VERSION,
-        REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES, RNACOS_VERSION, RUSTFS_SERIES,
-        RUSTFS_VERSION,
+        caddy_release, etcd_release, mailpit_release, mysql_release, nats_release, nginx_release,
+        postgres_release, redis_release, MysqlRelease, NginxRelease, PostgresRelease, RedisRelease,
+        VerifiedBinaryRelease, CADDY_RELEASES, CADDY_VERSION, CONSUL_SERIES, CONSUL_VERSION,
+        ETCD_RELEASES, ETCD_VERSION, KAFKA_SERIES, KAFKA_VERSION, MAILPIT_RELEASES,
+        MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION,
+        MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_RELEASES,
+        NATS_VERSION, NGINX_RELEASES, NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION,
+        RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES,
+        RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
     },
     report_install_progress, with_install_context, CaddyInstaller, CaddyService, ConfigManager,
     ConsulInstaller, ConsulService, EtcdInstaller, EtcdService, InstallCancellationToken,
@@ -459,6 +460,106 @@ fn nginx_service_config(root: &Path, release: &NginxRelease) -> ServiceConfig {
     }
 }
 
+fn selected_verified_release(
+    root: &Path,
+    kind: ServiceKind,
+    resolve: fn(&str) -> Option<&'static VerifiedBinaryRelease>,
+    default_version: &str,
+) -> &'static VerifiedBinaryRelease {
+    let metadata = root
+        .join("instances")
+        .join(kind.as_str())
+        .join("default/service.json");
+    ConfigManager
+        .load(metadata)
+        .ok()
+        .filter(|config| config.kind == kind)
+        .and_then(|config| resolve(&config.version))
+        .unwrap_or_else(|| resolve(default_version).expect("default release is registered"))
+}
+
+fn mailpit_service_config(root: &Path, release: &VerifiedBinaryRelease) -> ServiceConfig {
+    let instance = root.join("instances/mailpit/default");
+    ServiceConfig {
+        name: "Mailpit".into(),
+        kind: ServiceKind::Mailpit,
+        version: release.version.into(),
+        port: 1025,
+        executable: root
+            .join("installations/mailpit")
+            .join(release.series)
+            .join("bin/mailpit"),
+        arguments: Vec::new(),
+        environment: mailpit_environment(&instance),
+        instance_dir: instance,
+        wait_for_port: true,
+    }
+}
+
+fn nats_service_config(root: &Path, release: &VerifiedBinaryRelease) -> ServiceConfig {
+    let instance = root.join("instances/nats/default");
+    ServiceConfig {
+        name: "NATS".into(),
+        kind: ServiceKind::Nats,
+        version: release.version.into(),
+        port: 4222,
+        executable: root
+            .join("installations/nats")
+            .join(release.series)
+            .join("bin/nats-server"),
+        arguments: vec![
+            "-c".into(),
+            instance.join("conf/nats.conf").display().to_string(),
+        ],
+        environment: BTreeMap::new(),
+        instance_dir: instance,
+        wait_for_port: true,
+    }
+}
+
+fn etcd_service_config(root: &Path, release: &VerifiedBinaryRelease) -> ServiceConfig {
+    let instance = root.join("instances/etcd/default");
+    ServiceConfig {
+        name: "etcd".into(),
+        kind: ServiceKind::Etcd,
+        version: release.version.into(),
+        port: 2379,
+        executable: root
+            .join("installations/etcd")
+            .join(release.series)
+            .join("bin/etcd"),
+        arguments: vec![
+            "--config-file".into(),
+            instance.join("conf/etcd.yaml").display().to_string(),
+        ],
+        environment: BTreeMap::new(),
+        instance_dir: instance,
+        wait_for_port: true,
+    }
+}
+
+fn caddy_service_config(root: &Path, release: &VerifiedBinaryRelease) -> ServiceConfig {
+    let instance = root.join("instances/caddy/default");
+    ServiceConfig {
+        name: "Caddy".into(),
+        kind: ServiceKind::Caddy,
+        version: release.version.into(),
+        port: 8082,
+        executable: root
+            .join("installations/caddy")
+            .join(release.series)
+            .join("bin/caddy"),
+        arguments: vec![
+            "run".into(),
+            "--config".into(),
+            instance.join("conf/Caddyfile").display().to_string(),
+        ],
+        environment: BTreeMap::new(),
+        instance_dir: instance,
+        wait_for_port: true,
+    }
+}
+
 pub(crate) fn activate_installed_version(
     kind: ServiceKindInput,
     version: &str,
@@ -480,6 +581,22 @@ pub(crate) fn activate_installed_version(
         ServiceKindInput::Nginx => nginx_service_config(
             &root,
             nginx_release(version).ok_or_else(|| format!("不支持 Nginx 版本 {version}"))?,
+        ),
+        ServiceKindInput::Mailpit => mailpit_service_config(
+            &root,
+            mailpit_release(version).ok_or_else(|| format!("不支持 Mailpit 版本 {version}"))?,
+        ),
+        ServiceKindInput::Nats => nats_service_config(
+            &root,
+            nats_release(version).ok_or_else(|| format!("不支持 NATS 版本 {version}"))?,
+        ),
+        ServiceKindInput::Etcd => etcd_service_config(
+            &root,
+            etcd_release(version).ok_or_else(|| format!("不支持 etcd 版本 {version}"))?,
+        ),
+        ServiceKindInput::Caddy => caddy_service_config(
+            &root,
+            caddy_release(version).ok_or_else(|| format!("不支持 Caddy 版本 {version}"))?,
         ),
         _ => return Err("当前服务不支持版本切换".into()),
     };
@@ -503,31 +620,31 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
     if kind == ServiceKind::Nginx {
         return Ok(nginx_service_config(&root, selected_nginx_release(&root)));
     }
+    if kind == ServiceKind::Mailpit {
+        let release =
+            selected_verified_release(&root, kind, mailpit_release, MAILPIT_VERSION);
+        return Ok(mailpit_service_config(&root, release));
+    }
+    if kind == ServiceKind::Nats {
+        let release = selected_verified_release(&root, kind, nats_release, NATS_VERSION);
+        return Ok(nats_service_config(&root, release));
+    }
+    if kind == ServiceKind::Etcd {
+        let release = selected_verified_release(&root, kind, etcd_release, ETCD_VERSION);
+        return Ok(etcd_service_config(&root, release));
+    }
     if kind == ServiceKind::Caddy {
-        return Ok(ServiceConfig {
-            name: "Caddy".into(),
-            kind: ServiceKind::Caddy,
-            version: CADDY_VERSION.into(),
-            port: 8082,
-            executable: root.join(format!("installations/caddy/{CADDY_SERIES}/bin/caddy")),
-            arguments: vec![
-                "run".into(),
-                "--config".into(),
-                root.join("instances/caddy/default/conf/Caddyfile")
-                    .display()
-                    .to_string(),
-            ],
-            environment: BTreeMap::new(),
-            instance_dir: root.join("instances/caddy/default"),
-            wait_for_port: true,
-        });
+        let release = selected_verified_release(&root, kind, caddy_release, CADDY_VERSION);
+        return Ok(caddy_service_config(&root, release));
     }
     let (name, version, port, executable, arguments) = match kind {
         ServiceKind::Redis => unreachable!(),
         ServiceKind::Mysql => unreachable!(),
         ServiceKind::Postgres => unreachable!(),
         ServiceKind::Nginx => unreachable!(),
-        ServiceKind::Caddy => unreachable!(),
+        ServiceKind::Caddy | ServiceKind::Mailpit | ServiceKind::Nats | ServiceKind::Etcd => {
+            unreachable!()
+        }
         ServiceKind::Mongodb => {
             let instance = root.join("instances/mongodb/default");
             (
@@ -538,28 +655,6 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
                 vec![
                     "--config".into(),
                     instance.join("conf/mongod.conf").display().to_string(),
-                ],
-            )
-        }
-        ServiceKind::Mailpit => (
-            "Mailpit",
-            MAILPIT_VERSION,
-            1025,
-            root.join(format!(
-                "installations/mailpit/{MAILPIT_SERIES}/bin/mailpit"
-            )),
-            Vec::new(),
-        ),
-        ServiceKind::Nats => {
-            let instance = root.join("instances/nats/default");
-            (
-                "NATS",
-                NATS_VERSION,
-                4222,
-                root.join(format!("installations/nats/{NATS_SERIES}/bin/nats-server")),
-                vec![
-                    "-c".into(),
-                    instance.join("conf/nats.conf").display().to_string(),
                 ],
             )
         }
@@ -622,19 +717,6 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
             root.join(format!("installations/rustfs/{RUSTFS_SERIES}/bin/rustfs")),
             Vec::new(),
         ),
-        ServiceKind::Etcd => {
-            let instance = root.join("instances/etcd/default");
-            (
-                "etcd",
-                ETCD_VERSION,
-                2379,
-                root.join(format!("installations/etcd/{ETCD_SERIES}/bin/etcd")),
-                vec![
-                    "--config-file".into(),
-                    instance.join("conf/etcd.yaml").display().to_string(),
-                ],
-            )
-        }
         ServiceKind::Consul => {
             let instance = root.join("instances/consul/default");
             (
@@ -1106,18 +1188,30 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             run_action(kind, |service| service.install())
         }
         ServiceKindInput::Mailpit => {
-            MailpitInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Mailpit)?;
+            MailpitInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Mailpit 实例配置");
-            run_action(kind, |service| service.install())
+            MailpitService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Nats => {
-            NatsInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Nats)?;
+            NatsInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 NATS 实例配置");
-            run_action(kind, |service| service.install())
+            NatsService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Kafka => {
             KafkaInstaller::new(devbox_root()?)
@@ -1148,11 +1242,17 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             run_action(kind, |service| service.install())
         }
         ServiceKindInput::Etcd => {
-            EtcdInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Etcd)?;
+            EtcdInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 etcd 实例配置");
-            run_action(kind, |service| service.install())
+            EtcdService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Consul => {
             ConsulInstaller::new(devbox_root()?)
@@ -1176,19 +1276,31 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             run_action(kind, |service| service.install())
         }
         ServiceKindInput::Nginx => {
-            NginxInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Nginx)?;
+            NginxInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Nginx 实例配置");
-            run_action(kind, |service| service.install())
+            NginxService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
 
         ServiceKindInput::Caddy => {
-            CaddyInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Caddy)?;
+            CaddyInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Caddy 实例配置");
-            run_action(kind, |service| service.install())
+            CaddyService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
     }
 }
@@ -1463,6 +1575,12 @@ pub async fn nginx_version_select(
             let root = devbox_root()?;
             let release =
                 nginx_release(&version).ok_or_else(|| format!("不支持 Nginx 版本 {version}"))?;
+            if matches!(
+                service_status(ServiceKindInput::Nginx)?,
+                ServiceStatus::Running { .. }
+            ) {
+                return Err("请先停止 Nginx，再切换运行版本".into());
+            }
             let installer =
                 NginxInstaller::for_version(&root, release.version).map_err(stringify_error)?;
             installer.install().map_err(stringify_error)?;
@@ -1476,6 +1594,169 @@ pub async fn nginx_version_select(
     })
     .await
     .map_err(|error| format!("Nginx 版本切换任务异常结束: {error}"))?
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedServiceVersionInfo {
+    pub series: &'static str,
+    pub version: &'static str,
+    pub installed: bool,
+    pub selected: bool,
+    pub support_label: &'static str,
+    pub legacy: bool,
+    pub recommended: bool,
+    pub installation_bytes: u64,
+}
+
+fn verified_releases(kind: ServiceKindInput) -> Result<&'static [VerifiedBinaryRelease], String> {
+    match kind {
+        ServiceKindInput::Mailpit => Ok(MAILPIT_RELEASES),
+        ServiceKindInput::Nats => Ok(NATS_RELEASES),
+        ServiceKindInput::Etcd => Ok(ETCD_RELEASES),
+        ServiceKindInput::Caddy => Ok(CADDY_RELEASES),
+        _ => Err("当前服务暂未接入通用多版本管理".into()),
+    }
+}
+
+fn verified_service_name(kind: ServiceKindInput) -> &'static str {
+    match kind {
+        ServiceKindInput::Mailpit => "Mailpit",
+        ServiceKindInput::Nats => "NATS",
+        ServiceKindInput::Etcd => "etcd",
+        ServiceKindInput::Caddy => "Caddy",
+        _ => "服务",
+    }
+}
+
+fn verified_installer_state(
+    root: &Path,
+    kind: ServiceKindInput,
+    version: &str,
+) -> Result<(bool, PathBuf), String> {
+    macro_rules! state {
+        ($installer:ty) => {{
+            let installer = <$installer>::for_version(root, version).map_err(stringify_error)?;
+            (installer.is_installed(), installer.installation_dir())
+        }};
+    }
+    Ok(match kind {
+        ServiceKindInput::Mailpit => state!(MailpitInstaller),
+        ServiceKindInput::Nats => state!(NatsInstaller),
+        ServiceKindInput::Etcd => state!(EtcdInstaller),
+        ServiceKindInput::Caddy => state!(CaddyInstaller),
+        _ => return Err("当前服务暂未接入通用多版本管理".into()),
+    })
+}
+
+#[tauri::command]
+pub async fn service_versions(
+    kind: ServiceKindInput,
+) -> Result<Vec<ManagedServiceVersionInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = devbox_root()?;
+        let selected = service_config(kind.into())?.version;
+        verified_releases(kind)?
+            .iter()
+            .map(|release| {
+                let (installed, directory) =
+                    verified_installer_state(&root, kind, release.version)?;
+                Ok(ManagedServiceVersionInfo {
+                    series: release.series,
+                    version: release.version,
+                    installed,
+                    selected: release.version == selected,
+                    support_label: release.support_label,
+                    legacy: release.legacy,
+                    recommended: release.recommended,
+                    installation_bytes: path_disk_size(&directory).unwrap_or_default(),
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| format!("服务版本列表任务异常结束: {error}"))?
+}
+
+fn install_verified_version(
+    root: &Path,
+    kind: ServiceKindInput,
+    version: &str,
+) -> Result<ServiceInfo, String> {
+    let release = verified_releases(kind)?
+        .iter()
+        .find(|release| release.version == version || release.series == version)
+        .ok_or_else(|| format!("不支持 {} 版本 {version}", verified_service_name(kind)))?;
+    match kind {
+        ServiceKindInput::Mailpit => {
+            MailpitInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            MailpitService::new(mailpit_service_config(root, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Nats => {
+            NatsInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            NatsService::new(nats_service_config(root, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Etcd => {
+            EtcdInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            EtcdService::new(etcd_service_config(root, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Caddy => {
+            CaddyInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            CaddyService::new(caddy_service_config(root, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        _ => return Err("当前服务暂未接入通用多版本管理".into()),
+    }
+    service_info(kind)
+}
+
+#[tauri::command]
+pub async fn service_version_select(
+    app: AppHandle,
+    kind: ServiceKindInput,
+    version: String,
+    operation_id: String,
+) -> Result<ServiceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_install_task(
+            app,
+            operation_id,
+            ServiceKind::from(kind).as_str().into(),
+            || {
+                ensure_install_compatible(kind)?;
+                if matches!(service_status(kind)?, ServiceStatus::Running { .. }) {
+                    return Err(format!(
+                        "请先停止 {}，再切换运行版本",
+                        verified_service_name(kind)
+                    ));
+                }
+                let root = devbox_root()?;
+                report_install_progress(4, "准备版本", "正在验证目标版本和运行状态");
+                install_verified_version(&root, kind, &version)
+            },
+        )
+    })
+    .await
+    .map_err(|error| format!("服务版本切换任务异常结束: {error}"))?
 }
 
 #[tauri::command]
