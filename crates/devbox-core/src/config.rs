@@ -21,6 +21,7 @@ pub enum ServiceKind {
     Consul,
     Rnacos,
     Rabbitmq,
+    Nginx,
 }
 
 impl ServiceKind {
@@ -40,6 +41,7 @@ impl ServiceKind {
             Self::Consul => "consul",
             Self::Rnacos => "rnacos",
             Self::Rabbitmq => "rabbitmq",
+            Self::Nginx => "nginx",
         }
     }
 }

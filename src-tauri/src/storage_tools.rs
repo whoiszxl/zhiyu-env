@@ -108,6 +108,7 @@ fn service_prefix(kind: ServiceKind) -> &'static str {
         ServiceKind::Rnacos => "rnacos-",
         ServiceKind::Rabbitmq => "rabbitmq-",
         ServiceKind::Kafka => "kafka-",
+        ServiceKind::Nginx => "nginx",
     }
 }
 

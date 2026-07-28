@@ -4,17 +4,18 @@ use devbox_core::{
         RedisRelease, CONSUL_SERIES, CONSUL_VERSION, ETCD_SERIES, ETCD_VERSION, KAFKA_SERIES,
         KAFKA_VERSION, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION,
         MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES,
-        MYSQL_VERSION, NATS_SERIES, NATS_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION,
-        RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES,
-        RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
+        MYSQL_VERSION, NATS_SERIES, NATS_VERSION, NGINX_SERIES, NGINX_VERSION, POSTGRES_RELEASES,
+        POSTGRES_VERSION, RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION,
+        RNACOS_SERIES, RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
     },
     report_install_progress, with_install_context, ConfigManager, ConsulInstaller, ConsulService,
     EtcdInstaller, EtcdService, InstallCancellationToken, InstallReporter, KafkaInstaller,
     KafkaService, MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService,
     MinioInstaller, MinioService, MongodbInstaller, MongodbService, MysqlInstaller, MysqlService,
-    NatsInstaller, NatsService, PostgresInstaller, PostgresService, RabbitmqInstaller,
-    RabbitmqService, RedisInstaller, RedisService, RnacosInstaller, RnacosService, RustfsInstaller,
-    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    NatsInstaller, NatsService, NginxInstaller, NginxService, PostgresInstaller, PostgresService,
+    RabbitmqInstaller, RabbitmqService, RedisInstaller, RedisService, RnacosInstaller,
+    RnacosService, RustfsInstaller, RustfsService, ServiceConfig, ServiceKind, ServiceManager,
+    ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -186,6 +187,7 @@ pub enum ServiceKindInput {
     Consul,
     Rnacos,
     Rabbitmq,
+    Nginx,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -205,6 +207,7 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Consul => Self::Consul,
             ServiceKindInput::Rnacos => Self::Rnacos,
             ServiceKindInput::Rabbitmq => Self::Rabbitmq,
+            ServiceKindInput::Nginx => Self::Nginx,
         }
     }
 }
@@ -569,6 +572,21 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
             )),
             Vec::new(),
         ),
+        ServiceKind::Nginx => {
+            let instance = root.join("instances/nginx/default");
+            (
+                "Nginx",
+                NGINX_VERSION,
+                8081,
+                root.join(format!("installations/nginx/{NGINX_SERIES}/bin/nginx")),
+                vec![
+                    "-p".into(),
+                    instance.display().to_string(),
+                    "-c".into(),
+                    "conf/nginx.conf".into(),
+                ],
+            )
+        }
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -763,6 +781,7 @@ fn with_service<T>(
         ServiceKindInput::Rabbitmq => {
             operation(&RabbitmqService::new(config).map_err(stringify_error)?)
         }
+        ServiceKindInput::Nginx => operation(&NginxService::new(config).map_err(stringify_error)?),
     }
     .map_err(stringify_error)
 }
@@ -800,6 +819,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Consul => "Consul",
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "RabbitMQ",
+        ServiceKindInput::Nginx => "Nginx",
     };
     let (install_supported, install_support_label) = install_compatibility(kind);
     Ok(ServiceInfo {
@@ -853,7 +873,10 @@ fn install_compatibility(kind: ServiceKindInput) -> (bool, String) {
     let supported = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         true
     } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        matches!(kind, ServiceKindInput::Redis | ServiceKindInput::Postgres)
+        matches!(
+            kind,
+            ServiceKindInput::Redis | ServiceKindInput::Postgres | ServiceKindInput::Nginx
+        )
     } else {
         false
     };
@@ -926,6 +949,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Consul,
         ServiceKindInput::Rnacos,
         ServiceKindInput::Rabbitmq,
+        ServiceKindInput::Nginx,
     ]
     .into_iter()
     .map(info)
@@ -1051,6 +1075,13 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 RabbitMQ 实例配置");
+            run_action(kind, |service| service.install())
+        }
+        ServiceKindInput::Nginx => {
+            NginxInstaller::new(devbox_root()?)
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 Nginx 实例配置");
             run_action(kind, |service| service.install())
         }
     }
@@ -1389,11 +1420,39 @@ pub fn service_config_save(kind: ServiceKindInput, content: String) -> Result<()
         .ok_or_else(|| "配置文件路径无效".to_string())?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
 
+    let temporary = path.with_extension("tmp");
+    fs::write(&temporary, content.clone()).map_err(|error| error.to_string())?;
+
+    if matches!(config.kind, ServiceKind::Nginx) {
+        let output = std::process::Command::new(&config.executable)
+            .args([
+                "-t",
+                "-c",
+                &temporary.display().to_string(),
+                "-p",
+                &config.instance_dir.display().to_string(),
+            ])
+            .output()
+            .map_err(|error| format!("无法验证 Nginx 配置：{error}"))?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            let max_len = 8 * 1024;
+            let message = if detail.chars().count() > max_len {
+                format!(
+                    "配置校验失败：{}…",
+                    detail.chars().take(max_len - 6).collect::<String>()
+                )
+            } else {
+                format!("配置校验失败：{detail}")
+            };
+            let _ = fs::remove_file(&temporary);
+            return Err(message);
+        }
+    }
+
     if path.is_file() {
         fs::copy(&path, path.with_extension("bak")).map_err(|error| error.to_string())?;
     }
-    let temporary = path.with_extension("tmp");
-    fs::write(&temporary, content).map_err(|error| error.to_string())?;
     fs::rename(temporary, path).map_err(|error| error.to_string())
 }
 
@@ -1424,6 +1483,7 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         ServiceKind::Consul => {}
         ServiceKind::Rnacos => {}
         ServiceKind::Rabbitmq => {}
+        ServiceKind::Nginx => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -1456,6 +1516,7 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Consul => config.stdout_log_path(),
         ServiceKind::Rnacos => config.stdout_log_path(),
         ServiceKind::Rabbitmq => config.stdout_log_path(),
+        ServiceKind::Nginx => config.stdout_log_path(),
     }
 }
 
@@ -1475,6 +1536,7 @@ fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Consul => "consul.hcl",
         ServiceKind::Rnacos => "rnacos.env",
         ServiceKind::Rabbitmq => "rabbitmq.conf",
+        ServiceKind::Nginx => "nginx.conf",
     };
     config.config_dir().join(name)
 }
@@ -1650,6 +1712,7 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Consul => "consul_",
         ServiceKind::Rnacos => "rnacos-",
         ServiceKind::Rabbitmq => "rabbitmq-",
+        ServiceKind::Nginx => "nginx",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {
@@ -1912,5 +1975,6 @@ fn connection_target(kind: &ServiceKind) -> (String, u64) {
         ServiceKind::Consul => ("127.0.0.1:8500".into(), 3),
         ServiceKind::Rnacos => ("127.0.0.1:8848".into(), 3),
         ServiceKind::Rabbitmq => ("127.0.0.1:5672".into(), 5),
+        ServiceKind::Nginx => ("127.0.0.1:8081".into(), 3),
     }
 }

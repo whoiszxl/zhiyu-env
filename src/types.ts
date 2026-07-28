@@ -12,7 +12,8 @@ export type ServiceKind =
   | "etcd"
   | "consul"
   | "rnacos"
-  | "rabbitmq";
+  | "rabbitmq"
+  | "nginx";
 export type SqlServiceKind = "mysql" | "postgres";
 
 export type ServiceState =

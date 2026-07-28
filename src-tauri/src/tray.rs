@@ -484,6 +484,7 @@ fn service_kind(id: &str) -> Option<ServiceKindInput> {
         "consul" => ServiceKindInput::Consul,
         "rnacos" => ServiceKindInput::Rnacos,
         "rabbitmq" => ServiceKindInput::Rabbitmq,
+        "nginx" => ServiceKindInput::Nginx,
         _ => return None,
     })
 }
@@ -504,6 +505,7 @@ fn service_id(kind: ServiceKindInput) -> &'static str {
         ServiceKindInput::Consul => "consul",
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "rabbitmq",
+        ServiceKindInput::Nginx => "nginx",
     }
 }
 

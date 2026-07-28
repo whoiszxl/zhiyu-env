@@ -105,6 +105,7 @@ impl TryFrom<ServiceKindInput> for DatabaseEngine {
             ServiceKindInput::Consul => Err("Consul 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Rnacos => Err("rnacos 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Rabbitmq => Err("RabbitMQ 不使用 SQL 数据库接口".into()),
+            ServiceKindInput::Nginx => Err("Nginx 不使用 SQL 数据库接口".into()),
         }
     }
 }

@@ -14,6 +14,7 @@ import { buildEtcdDocs } from "./etcdDocs";
 import { buildConsulDocs } from "./consulDocs";
 import { buildRnacosDocs } from "./rnacosDocs";
 import { buildRabbitmqDocs } from "./rabbitmqDocs";
+import { buildNginxDocs } from "./nginxDocs";
 
 export type { DocBlock, DocChapter, DocCodeSample } from "./docTypes";
 
@@ -32,6 +33,7 @@ const BUILDERS: Record<ServiceKind, (port: number) => DocChapter[]> = {
   consul: buildConsulDocs,
   rnacos: buildRnacosDocs,
   rabbitmq: buildRabbitmqDocs,
+  nginx: buildNginxDocs,
 };
 
 /** 文档标题栏上展示的一句话定位。 */
@@ -50,6 +52,7 @@ const TAGLINES: Record<ServiceKind, string> = {
   consul: "服务发现与配置 · 内置 Web UI",
   rnacos: "Nacos 兼容服务 · 无需 Java Runtime",
   rabbitmq: "AMQP 消息代理 · 队列与交换机",
+  nginx: "轻量 Web 服务器 · 静态文件与反向代理",
 };
 
 export function buildServiceDocs(kind: ServiceKind, port: number): DocChapter[] {

@@ -415,6 +415,11 @@ const RABBITMQ_OTP_URL: &str =
     "https://github.com/erlef/otp_builds/releases/download/OTP-27.3.4.6/otp-aarch64-apple-darwin.tar.gz";
 const RABBITMQ_OTP_SHA256: &str =
     "82b1aa23f4a40f391e6b42cb4e9607e1e360bc2fdcb88d032b040795bb6d349f";
+pub const NGINX_SERIES: &str = "1.30";
+pub const NGINX_VERSION: &str = "1.30.4";
+const NGINX_ARCHIVE: &str = "nginx-1.30.4.tar.gz";
+const NGINX_URL: &str = "https://nginx.org/download/nginx-1.30.4.tar.gz";
+const NGINX_SHA256: &str = "4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -987,6 +992,10 @@ pub struct RabbitmqInstaller {
     devbox_root: PathBuf,
 }
 
+pub struct NginxInstaller {
+    devbox_root: PathBuf,
+}
+
 impl RabbitmqInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
@@ -1088,6 +1097,180 @@ impl RabbitmqInstaller {
         self.devbox_root
             .join("installations/rabbitmq")
             .join(RABBITMQ_SERIES)
+    }
+}
+
+impl NginxInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+        }
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备编译安装 Nginx {}", NGINX_VERSION),
+        );
+        ensure_macos_arm64("Nginx")?;
+        ensure_tools(&[
+            "/usr/bin/curl",
+            "/usr/bin/tar",
+            "/usr/bin/make",
+            "/usr/bin/cc",
+        ])?;
+
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/nginx");
+        if self.is_expected_version(&executable)
+            && installation_manifest_matches(
+                &installation_dir,
+                "nginx",
+                NGINX_VERSION,
+                NGINX_SHA256,
+            )
+        {
+            report_install_progress(90, "已安装", "目标版本已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let temp_root = self.devbox_root.join("tmp");
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&temp_root)?;
+        fs::create_dir_all(
+            installation_dir
+                .parent()
+                .expect("Nginx installation has a parent"),
+        )?;
+
+        let archive = downloads_dir.join(NGINX_ARCHIVE);
+        prepare_archive(&archive, NGINX_ARCHIVE, NGINX_URL, NGINX_SHA256)?;
+
+        let work_dir = temp_root.join(format!(
+            "nginx-{}-{}-{}",
+            NGINX_VERSION,
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
+
+        let result = self.build_and_commit(&archive, &work_dir, &installation_dir);
+        let _ = fs::remove_dir_all(&work_dir);
+        result?;
+
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/nginx")
+            .join(NGINX_SERIES)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation_dir = self.installation_dir();
+        self.is_expected_version(&installation_dir.join("bin/nginx"))
+            && installation_manifest_matches(
+                &installation_dir,
+                "nginx",
+                NGINX_VERSION,
+                NGINX_SHA256,
+            )
+    }
+
+    fn is_expected_version(&self, executable: &Path) -> bool {
+        Command::new(executable)
+            .arg("-v")
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stderr).contains(NGINX_VERSION))
+            .unwrap_or(false)
+    }
+
+    fn build_and_commit(
+        &self,
+        archive: &Path,
+        work_dir: &Path,
+        installation_dir: &Path,
+    ) -> Result<()> {
+        report_install_progress(42, "解压源码", "正在解压 Nginx 源码");
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xzf"])
+                .arg(archive)
+                .arg("-C")
+                .arg(work_dir),
+            "tar",
+        )?;
+
+        let source_dir = work_dir.join(format!("nginx-{}", NGINX_VERSION));
+
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        let modules_dir = stage.join("modules");
+        fs::create_dir_all(&bin_dir)?;
+        fs::create_dir_all(&modules_dir)?;
+
+        let jobs = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(2)
+            .min(8);
+
+        report_install_progress(48, "配置编译", "正在运行 ./configure");
+        let prefix_path = stage.display().to_string();
+        run(
+            Command::new(&source_dir.join("configure"))
+                .args([
+                    format!("--prefix={prefix_path}"),
+                    format!("--sbin-path={prefix_path}/bin/nginx"),
+                    format!("--modules-path={prefix_path}/modules"),
+                    "--without-http_gzip_module".into(),
+                    "--without-http_rewrite_module".into(),
+                ])
+                .current_dir(&source_dir),
+            "configure",
+        )?;
+
+        report_install_progress(55, "编译程序", format!("使用 {jobs} 个并行任务编译 Nginx"));
+        run(
+            Command::new("/usr/bin/make")
+                .arg(format!("-j{jobs}"))
+                .current_dir(&source_dir),
+            "make",
+        )?;
+
+        report_install_progress(75, "安装程序", "正在安装 Nginx 到版本目录");
+        run(
+            Command::new("/usr/bin/make")
+                .arg("install")
+                .current_dir(&source_dir),
+            "make install",
+        )?;
+
+        if !self.is_expected_version(&bin_dir.join("nginx")) {
+            return Err(DevBoxError::CommandFailed {
+                command: "nginx -v".into(),
+                message: format!("编译后的程序版本不是 Nginx {}", NGINX_VERSION),
+            });
+        }
+
+        write_manifest(
+            &stage,
+            "nginx",
+            NGINX_SERIES,
+            NGINX_VERSION,
+            NGINX_URL,
+            NGINX_SHA256,
+            "official-source",
+        )?;
+        report_install_progress(90, "完成安装", "Nginx 程序已写入版本目录");
+        replace_installation(&stage, installation_dir)
     }
 }
 

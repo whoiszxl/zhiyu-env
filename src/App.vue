@@ -112,6 +112,7 @@ import type {
 type DetailTab =
   | "overview"
   | "keys"
+  | "site"
   | "console"
   | "data"
   | "sql"
@@ -744,6 +745,18 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
+  if (selectedKind.value === "nginx") {
+    return [
+      ["overview", "概览"],
+      ["site", "站点"],
+      ["connect", "连接"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["versions", "版本管理"],
+      ["docs", "使用文档"],
+    ];
+  }
   return [
     ["overview", "概览"],
     ["data", "数据浏览"],
@@ -778,7 +791,12 @@ const iconLetter: Record<ServiceKind, string> = {
   consul: "C",
   rnacos: "R",
   rabbitmq: "Q",
+  nginx: "N",
 };
+
+function openExternal(url: string) {
+  window.open(url, "_blank");
+}
 
 const governanceProfile = computed(() =>
   selectedKind.value === "rnacos"
@@ -3870,6 +3888,77 @@ onUnmounted(() => {
               </dl>
             </article>
           </div>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'site' && selectedKind === 'nginx'"
+          class="nginx-site-panel"
+        >
+          <div class="ns-site-head">
+            <div>
+              <p>SITE</p>
+              <h2>站点管理</h2>
+            </div>
+          </div>
+          <div class="ns-site-grid">
+            <div class="ns-site-card">
+              <strong>本地访问地址</strong>
+              <code>http://127.0.0.1:{{ selectedService.port }}</code>
+              <span>仅监听本地，不可公网访问</span>
+              <button type="button" class="ns-outline-btn" @click="openExternal('http://127.0.0.1:' + selectedService.port)">
+                在浏览器打开
+              </button>
+            </div>
+            <div class="ns-site-card">
+              <strong>静态站点目录</strong>
+              <code>{{ selectedService.dataPath }}/html</code>
+              <span>index.html 为默认首页</span>
+            </div>
+            <div class="ns-site-card">
+              <strong>Access Log</strong>
+              <code>{{ selectedService.instanceDir }}/logs/access.log</code>
+              <span>HTTP 请求记录</span>
+            </div>
+            <div class="ns-site-card">
+              <strong>Error Log</strong>
+              <code>{{ selectedService.instanceDir }}/logs/error.log</code>
+              <span>错误与警告信息</span>
+            </div>
+          </div>
+          <p class="ns-site-note">
+            修改端口和反向代理请在「配置文件」标签页编辑 nginx.conf，保存后使用 nginx -t 自动校验。
+          </p>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'versions' && selectedKind === 'nginx'"
+          class="version-panel"
+        >
+          <div class="nginx-version-header">
+            <div>
+              <p>VERSION MANAGER</p>
+              <h2>Nginx 运行版本</h2>
+            </div>
+            <span>源码编译安装 · 第一个稳定版</span>
+          </div>
+          <div class="nginx-version-card">
+            <span class="ns-ver-dot active"></span>
+            <span class="ns-ver-copy">
+              <strong>Nginx {{ selectedService.version }}</strong>
+              <small>当前版本</small>
+            </span>
+            <span class="ns-ver-badges">
+              <i v-if="selectedService.status !== 'not_installed'" class="installed">已安装</i>
+              <i v-else class="not-installed">未安装</i>
+            </span>
+            <em>
+              稳定版 · macOS Apple Silicon
+              <template v-if="!selectedService.installSupported">· 当前平台不支持</template>
+            </em>
+          </div>
+          <p class="ns-ver-note">
+            Nginx {{ selectedService.version }} 使用源码编译，关闭了 gzip、rewrite 模块以保持轻量。后续将支持多版本切换。
+          </p>
         </section>
 
         <section v-else-if="activeTab === 'keys'" class="redis-workbench">

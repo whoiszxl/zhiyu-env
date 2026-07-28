@@ -711,5 +711,31 @@ conn = pika.BlockingConnection(pika.URLParameters(
           },
         ],
       );
+    case "nginx":
+      return r(
+        "Nginx",
+        "轻量 Web 服务器 · 静态文件与反向代理",
+        8081,
+        false,
+        "",
+        "",
+        [{ label: "HTTP", value: "http://127.0.0.1:8081" }],
+        [],
+        [],
+        [],
+      );
+    default:
+      return r(
+        "Unknown",
+        "",
+        0,
+        false,
+        "",
+        "",
+        [],
+        [],
+        [],
+        [],
+      );
   }
 }
