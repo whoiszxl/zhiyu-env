@@ -63,7 +63,10 @@ http {{
         );
         self.inner.install("nginx.conf", &contents)?;
 
-        let installation_dir = self.inner.config.executable
+        let installation_dir = self
+            .inner
+            .config
+            .executable
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.to_path_buf());
@@ -75,7 +78,7 @@ http {{
             }
         }
 
-        let html_dir = config.data_dir().join("html");
+        let html_dir = config.instance_dir.join("html");
         std::fs::create_dir_all(&html_dir).map_err(DevBoxError::Io)?;
         let index_path = html_dir.join("index.html");
         if !index_path.exists() {

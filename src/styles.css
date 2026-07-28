@@ -4900,3 +4900,35 @@ button:disabled {
   font-size: 9px;
   line-height: 1.5;
 }
+
+/* ── Nginx 文件管理 ───────────────────────────────────────── */
+
+.nginx-files-panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 180px);
+}
+.nf-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #d2d1c9;
+}
+.nf-head p { margin: 0 0 4px; color: #989a93; font-family: "SFMono-Regular", Consolas, monospace; font-size: 8px; }
+.nf-head h2 { margin: 0; font-size: 14px; color: #252920; }
+.nf-toolbar { display: flex; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #e8e6df; }
+.nf-toolbar input { flex: 1; padding: 5px 9px; border: 1px solid #c8c7bf; background: #fffefa; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; color: #353830; }
+.nf-table { flex: 1; overflow-y: auto; font-size: 11px; }
+.nf-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 140px; gap: 8px; align-items: center; padding: 7px 16px; border-bottom: 1px solid #e8e6df; }
+.nf-row-head { font-family: "SFMono-Regular", Consolas, monospace; font-size: 8px; color: #989a93; background: #f5f3ee; }
+.nf-folder-row { width: 100%; border: 0; border-bottom: 1px solid #e8e6df; background: rgba(244,242,235,0.68); color: #73766d; text-align: left; }
+.nf-folder-row:hover { background: #eceae2; }
+.nf-name { font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nf-actions { display: flex; gap: 4px; }
+.nf-editor { display: flex; flex-direction: column; border-top: 1px solid #999a92; background: #f8f8f4; }
+.nf-editor-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; border-bottom: 1px solid #d2d1c9; }
+.nf-editor-head strong { font-size: 11px; color: #353830; font-family: "SFMono-Regular", Consolas, monospace; }
+.nf-editor-head div { display: flex; gap: 6px; }
+.nf-editor-textarea { width: 100%; min-height: 200px; flex: 1; padding: 14px; border: 0; background: #fffefa; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; line-height: 1.6; color: #353830; resize: vertical; }
+.nf-editor-textarea:focus { outline: 0; }

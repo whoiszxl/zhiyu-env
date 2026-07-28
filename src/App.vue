@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -46,8 +47,9 @@ import {
   listPostgresVersions,
   listPortListeners,
   listRedisVersions,
-  listServiceBackups,
   listServices,
+  listServiceBackups,
+  listNginxVersions,
   listKafkaTopics,
   createKafkaTopic,
   deleteKafkaTopic,
@@ -65,6 +67,7 @@ import {
   selectRedisVersion,
   selectMysqlVersion,
   selectPostgresVersion,
+  selectNginxVersion,
   stopAllManagedServices,
 } from "./api/services";
 import { databaseTypeInfo } from "./databaseTypeInfo";
@@ -91,6 +94,7 @@ import type {
   KafkaTopic,
   MysqlVersionInfo,
   PostgresVersionInfo,
+  NginxVersionInfo,
   PortListener,
   RedisKeyDetail,
   RedisOverview,
@@ -128,6 +132,7 @@ type DetailTab =
   | "config"
   | "logs"
   | "versions"
+  | "files"
   | "docs";
 type MetricPoint = { cpu: number; memory: number };
 type ActivityRecord = {
@@ -262,6 +267,103 @@ const postgresVersions = ref<PostgresVersionInfo[]>([]);
 const postgresVersionTarget = ref("");
 const postgresVersionsLoading = ref(false);
 const postgresVersionChanging = ref(false);
+const nginxVersions = ref<NginxVersionInfo[]>([]);
+const nginxVersionTarget = ref("");
+const nginxVersionsLoading = ref(false);
+const nginxVersionChanging = ref(false);
+
+interface NginxFileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  sizeBytes: number;
+}
+
+const nginxFiles = ref<NginxFileEntry[]>([]);
+const nginxFilesDir = ref("");
+const nginxFilesLoading = ref(false);
+const nginxEditingFile = ref("");
+const nginxEditingContent = ref("");
+const nginxEditingOriginal = ref("");
+const nginxEditingSaving = ref(false);
+const nginxNewFileName = ref("");
+
+async function loadNginxFiles(subdir?: string) {
+  nginxFilesLoading.value = true;
+  try {
+    nginxFiles.value = await invoke<NginxFileEntry[]>("nginx_html_list", {
+      subdir: subdir || null,
+    });
+    nginxFilesDir.value = subdir || "";
+  } catch (e: any) {
+    error.value = String(e);
+  } finally {
+    nginxFilesLoading.value = false;
+  }
+}
+
+async function editNginxFile(path: string) {
+  nginxEditingFile.value = path;
+  try {
+    const content = await invoke<string>("nginx_html_read", { path });
+    nginxEditingContent.value = content;
+    nginxEditingOriginal.value = content;
+  } catch (e: any) {
+    error.value = String(e);
+  }
+}
+
+function closeNginxEditor() {
+  nginxEditingFile.value = "";
+  nginxEditingContent.value = "";
+  nginxEditingOriginal.value = "";
+}
+
+const nginxFileModified = computed(
+  () => nginxEditingContent.value !== nginxEditingOriginal.value,
+);
+
+async function saveNginxFile() {
+  if (!nginxFileModified.value) return;
+  nginxEditingSaving.value = true;
+  try {
+    await invoke("nginx_html_write", {
+      path: nginxEditingFile.value,
+      content: nginxEditingContent.value,
+    });
+    nginxEditingOriginal.value = nginxEditingContent.value;
+  } catch (e: any) {
+    error.value = String(e);
+  } finally {
+    nginxEditingSaving.value = false;
+  }
+}
+
+async function createNginxFile() {
+  const name = nginxNewFileName.value.trim();
+  if (!name) return;
+  const path = nginxFilesDir.value ? `${nginxFilesDir.value}/${name}` : name;
+  try {
+    await invoke("nginx_html_write", { path, content: "" });
+    nginxNewFileName.value = "";
+    await loadNginxFiles(nginxFilesDir.value || undefined);
+    editNginxFile(path);
+  } catch (e: any) {
+    error.value = String(e);
+  }
+}
+
+async function deleteNginxFile(path: string, isDir: boolean) {
+  const label = isDir ? `目录 "${path}" 及其所有内容` : `文件 "${path}"`;
+  if (!confirm(`确定删除 ${label}？此操作不可恢复。`)) return;
+  try {
+    await invoke("nginx_html_delete", { path });
+    if (path === nginxEditingFile.value) closeNginxEditor();
+    await loadNginxFiles(nginxFilesDir.value || undefined);
+  } catch (e: any) {
+    error.value = String(e);
+  }
+}
 const redisDatabase = ref(0);
 const redisPattern = ref("*");
 const redisCursor = ref("0");
@@ -379,12 +481,20 @@ const selectedPostgresVersionInfo = computed(
     ) ?? null,
 );
 
+const selectedNginxVersionInfo = computed(
+  () =>
+    nginxVersions.value.find(
+      (release) => release.version === nginxVersionTarget.value,
+    ) ?? null,
+);
+
 const serviceControlBusy = computed(
   () =>
     pendingAction.value !== null ||
     redisVersionChanging.value ||
     mysqlVersionChanging.value ||
-    postgresVersionChanging.value,
+    postgresVersionChanging.value ||
+    nginxVersionChanging.value,
 );
 const latestInstallLog = computed(
   () => installTask.value?.logs.at(-1) ?? null,
@@ -749,6 +859,7 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
     return [
       ["overview", "概览"],
       ["site", "站点"],
+      ["files", "文件管理"],
       ["connect", "连接"],
       ["backup", "备份恢复"],
       ["config", "配置文件"],
@@ -795,7 +906,11 @@ const iconLetter: Record<ServiceKind, string> = {
 };
 
 function openExternal(url: string) {
-  window.open(url, "_blank");
+  invoke("open_url", { url }).catch(() => {});
+}
+
+function openPath(path: string) {
+  invoke("open_path", { path }).catch(() => {});
 }
 
 const governanceProfile = computed(() =>
@@ -3911,8 +4026,11 @@ onUnmounted(() => {
             </div>
             <div class="ns-site-card">
               <strong>静态站点目录</strong>
-              <code>{{ selectedService.dataPath }}/html</code>
+              <code>{{ selectedService.instanceDir }}/html</code>
               <span>index.html 为默认首页</span>
+              <button type="button" class="ns-outline-btn" @click="openPath(selectedService.dataPath + '/html')">
+                在 Finder 中打开
+              </button>
             </div>
             <div class="ns-site-card">
               <strong>Access Log</strong>
@@ -3928,6 +4046,79 @@ onUnmounted(() => {
           <p class="ns-site-note">
             修改端口和反向代理请在「配置文件」标签页编辑 nginx.conf，保存后使用 nginx -t 自动校验。
           </p>
+        </section>
+
+        <section
+          v-else-if="activeTab === 'files' && selectedKind === 'nginx'"
+          class="nginx-files-panel"
+        >
+          <div class="nf-head">
+            <div>
+              <p>FILES</p>
+              <h2>文件管理</h2>
+            </div>
+            <button type="button" @click="loadNginxFiles(nginxFilesDir || undefined)" :disabled="nginxFilesLoading">刷新</button>
+          </div>
+          <div class="nf-toolbar">
+            <input v-model="nginxNewFileName" type="text" placeholder="新文件名，例如 style.css" spellcheck="false" @keydown.enter.prevent="createNginxFile" />
+            <button type="button" class="primary" @click="createNginxFile" :disabled="!nginxNewFileName.trim()">新建</button>
+            <button type="button" class="ns-outline-btn" @click="openPath((selectedService?.dataPath ?? '') + '/html')">在 Finder 打开</button>
+          </div>
+          <div v-if="nginxFilesLoading" class="panel-state">加载中…</div>
+          <div v-else-if="nginxFiles.length === 0" class="panel-state">
+            <span class="empty-symbol">📁</span>
+            <strong>暂无文件</strong>
+            <small>在 Finder 中打开目录添加文件，或点击"新建"创建</small>
+          </div>
+          <div v-else class="nf-table">
+            <div class="nf-row nf-row-head">
+              <span>名称</span>
+              <span>大小</span>
+              <span>操作</span>
+            </div>
+            <button
+              v-if="nginxFilesDir"
+              type="button"
+              class="nf-row nf-folder-row"
+              @click="loadNginxFiles(nginxFilesDir.split('/').slice(0, -1).join('/') || undefined)"
+            >📁 ..</button>
+            <template v-for="f in nginxFiles" :key="f.path">
+              <button
+                v-if="f.isDir"
+                type="button"
+                class="nf-row nf-folder-row"
+                @click="loadNginxFiles(f.path)"
+              >
+                <span>📁 {{ f.name }}</span>
+                <span>—</span>
+                <span></span>
+              </button>
+              <div v-else class="nf-row">
+                <span class="nf-name" :title="f.path">{{ f.name }}</span>
+                <span>{{ formatBytes(f.sizeBytes) }}</span>
+                <span class="nf-actions">
+                  <button type="button" class="clip-btn" @click="editNginxFile(f.path)">编辑</button>
+                  <button type="button" class="clip-btn remove" @click="deleteNginxFile(f.path, false)">删除</button>
+                </span>
+              </div>
+            </template>
+          </div>
+          <div v-if="nginxEditingFile" class="nf-editor">
+            <div class="nf-editor-head">
+              <strong>{{ nginxEditingFile }}</strong>
+              <div>
+                <button type="button" @click="saveNginxFile" :disabled="!nginxFileModified || nginxEditingSaving">
+                  {{ nginxEditingSaving ? "保存中…" : "保存" }}
+                </button>
+                <button type="button" @click="closeNginxEditor">关闭</button>
+              </div>
+            </div>
+            <textarea
+              v-model="nginxEditingContent"
+              class="nf-editor-textarea"
+              spellcheck="false"
+            ></textarea>
+          </div>
         </section>
 
         <section

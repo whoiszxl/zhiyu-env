@@ -38,6 +38,7 @@ import type {
   RedisVersionInfo,
   MysqlVersionInfo,
   PostgresVersionInfo,
+  NginxVersionInfo,
   RestoreResult,
   ServiceBackup,
   SqlResult,
@@ -198,6 +199,20 @@ export function selectPostgresVersion(
   operationId: string,
 ): Promise<ServiceInfo> {
   return invoke<ServiceInfo>("postgres_version_select", {
+    version,
+    operationId,
+  });
+}
+
+export function listNginxVersions(): Promise<NginxVersionInfo[]> {
+  return invoke<NginxVersionInfo[]>("nginx_versions");
+}
+
+export function selectNginxVersion(
+  version: string,
+  operationId: string,
+): Promise<ServiceInfo> {
+  return invoke<ServiceInfo>("nginx_version_select", {
     version,
     operationId,
   });

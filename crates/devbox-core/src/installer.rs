@@ -415,11 +415,49 @@ const RABBITMQ_OTP_URL: &str =
     "https://github.com/erlef/otp_builds/releases/download/OTP-27.3.4.6/otp-aarch64-apple-darwin.tar.gz";
 const RABBITMQ_OTP_SHA256: &str =
     "82b1aa23f4a40f391e6b42cb4e9607e1e360bc2fdcb88d032b040795bb6d349f";
+
+pub struct NginxRelease {
+    pub series: &'static str,
+    pub version: &'static str,
+    pub archive: &'static str,
+    pub source_url: &'static str,
+    pub sha256: &'static str,
+    pub support_label: &'static str,
+    pub legacy: bool,
+    pub recommended: bool,
+}
+
 pub const NGINX_SERIES: &str = "1.30";
 pub const NGINX_VERSION: &str = "1.30.4";
-const NGINX_ARCHIVE: &str = "nginx-1.30.4.tar.gz";
-const NGINX_URL: &str = "https://nginx.org/download/nginx-1.30.4.tar.gz";
-const NGINX_SHA256: &str = "4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b";
+
+pub const NGINX_RELEASES: &[NginxRelease] = &[
+    NginxRelease {
+        series: "1.28",
+        version: "1.28.3",
+        archive: "nginx-1.28.3.tar.gz",
+        source_url: "https://nginx.org/download/nginx-1.28.3.tar.gz",
+        sha256: "2c96a946bfb0882a21744ed429770a2123ae1828c7c48665092993ddee91a918",
+        support_label: "旧版 · 维护期至 2027-05",
+        legacy: true,
+        recommended: false,
+    },
+    NginxRelease {
+        series: NGINX_SERIES,
+        version: NGINX_VERSION,
+        archive: "nginx-1.30.4.tar.gz",
+        source_url: "https://nginx.org/download/nginx-1.30.4.tar.gz",
+        sha256: "4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b",
+        support_label: "最新稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub fn nginx_release(version_or_series: &str) -> Option<&'static NginxRelease> {
+    NGINX_RELEASES
+        .iter()
+        .find(|release| release.version == version_or_series || release.series == version_or_series)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
@@ -994,6 +1032,7 @@ pub struct RabbitmqInstaller {
 
 pub struct NginxInstaller {
     devbox_root: PathBuf,
+    release: &'static NginxRelease,
 }
 
 impl RabbitmqInstaller {
@@ -1104,14 +1143,29 @@ impl NginxInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: nginx_release(NGINX_VERSION).expect("default Nginx release is registered"),
         }
+    }
+
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = nginx_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported Nginx version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn release(&self) -> &'static NginxRelease {
+        self.release
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
         report_install_progress(
             3,
             "准备安装",
-            format!("准备编译安装 Nginx {}", NGINX_VERSION),
+            format!("准备编译安装 Nginx {}", self.release.version),
         );
         ensure_macos_arm64("Nginx")?;
         ensure_tools(&[
@@ -1127,8 +1181,8 @@ impl NginxInstaller {
             && installation_manifest_matches(
                 &installation_dir,
                 "nginx",
-                NGINX_VERSION,
-                NGINX_SHA256,
+                self.release.version,
+                self.release.sha256,
             )
         {
             report_install_progress(90, "已安装", "目标版本已经安装");
@@ -1147,12 +1201,17 @@ impl NginxInstaller {
                 .expect("Nginx installation has a parent"),
         )?;
 
-        let archive = downloads_dir.join(NGINX_ARCHIVE);
-        prepare_archive(&archive, NGINX_ARCHIVE, NGINX_URL, NGINX_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
 
         let work_dir = temp_root.join(format!(
             "nginx-{}-{}-{}",
-            NGINX_VERSION,
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
@@ -1171,7 +1230,7 @@ impl NginxInstaller {
     pub fn installation_dir(&self) -> PathBuf {
         self.devbox_root
             .join("installations/nginx")
-            .join(NGINX_SERIES)
+            .join(self.release.series)
     }
 
     pub fn is_installed(&self) -> bool {
@@ -1180,8 +1239,8 @@ impl NginxInstaller {
             && installation_manifest_matches(
                 &installation_dir,
                 "nginx",
-                NGINX_VERSION,
-                NGINX_SHA256,
+                self.release.version,
+                self.release.sha256,
             )
     }
 
@@ -1189,7 +1248,7 @@ impl NginxInstaller {
         Command::new(executable)
             .arg("-v")
             .output()
-            .map(|output| String::from_utf8_lossy(&output.stderr).contains(NGINX_VERSION))
+            .map(|output| String::from_utf8_lossy(&output.stderr).contains(self.release.version))
             .unwrap_or(false)
     }
 
@@ -1209,7 +1268,7 @@ impl NginxInstaller {
             "tar",
         )?;
 
-        let source_dir = work_dir.join(format!("nginx-{}", NGINX_VERSION));
+        let source_dir = work_dir.join(format!("nginx-{}", self.release.version));
 
         let stage = work_dir.join("installation");
         let bin_dir = stage.join("bin");
@@ -1256,17 +1315,17 @@ impl NginxInstaller {
         if !self.is_expected_version(&bin_dir.join("nginx")) {
             return Err(DevBoxError::CommandFailed {
                 command: "nginx -v".into(),
-                message: format!("编译后的程序版本不是 Nginx {}", NGINX_VERSION),
+                message: format!("编译后的程序版本不是 Nginx {}", self.release.version),
             });
         }
 
         write_manifest(
             &stage,
             "nginx",
-            NGINX_SERIES,
-            NGINX_VERSION,
-            NGINX_URL,
-            NGINX_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-source",
         )?;
         report_install_progress(90, "完成安装", "Nginx 程序已写入版本目录");

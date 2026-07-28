@@ -1,12 +1,13 @@
 use devbox_core::{
     installer::{
-        mysql_release, postgres_release, redis_release, MysqlRelease, PostgresRelease,
-        RedisRelease, CONSUL_SERIES, CONSUL_VERSION, ETCD_SERIES, ETCD_VERSION, KAFKA_SERIES,
-        KAFKA_VERSION, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION,
-        MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES,
-        MYSQL_VERSION, NATS_SERIES, NATS_VERSION, NGINX_SERIES, NGINX_VERSION, POSTGRES_RELEASES,
-        POSTGRES_VERSION, RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION,
-        RNACOS_SERIES, RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
+        mysql_release, nginx_release, postgres_release, redis_release, MysqlRelease, NginxRelease,
+        PostgresRelease, RedisRelease, CONSUL_SERIES, CONSUL_VERSION, ETCD_SERIES, ETCD_VERSION,
+        KAFKA_SERIES, KAFKA_VERSION, MAILPIT_SERIES, MAILPIT_VERSION, MEILISEARCH_SERIES,
+        MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION, MONGODB_SERIES, MONGODB_VERSION,
+        MYSQL_RELEASES, MYSQL_VERSION, NATS_SERIES, NATS_VERSION, NGINX_RELEASES, NGINX_SERIES,
+        NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_SERIES, RABBITMQ_VERSION,
+        REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES, RNACOS_VERSION, RUSTFS_SERIES,
+        RUSTFS_VERSION,
     },
     report_install_progress, with_install_context, ConfigManager, ConsulInstaller, ConsulService,
     EtcdInstaller, EtcdService, InstallCancellationToken, InstallReporter, KafkaInstaller,
@@ -411,6 +412,41 @@ fn postgres_service_config(root: &Path, release: &PostgresRelease) -> ServiceCon
     }
 }
 
+fn selected_nginx_release(root: &Path) -> &'static NginxRelease {
+    let metadata = root.join("instances/nginx/default/service.json");
+    ConfigManager
+        .load(metadata)
+        .ok()
+        .filter(|config| config.kind == ServiceKind::Nginx)
+        .and_then(|config| nginx_release(&config.version))
+        .unwrap_or_else(|| {
+            nginx_release(NGINX_VERSION).expect("default Nginx release is registered")
+        })
+}
+
+fn nginx_service_config(root: &Path, release: &NginxRelease) -> ServiceConfig {
+    let instance = root.join("instances/nginx/default");
+    ServiceConfig {
+        name: "Nginx".into(),
+        kind: ServiceKind::Nginx,
+        version: release.version.into(),
+        port: 8081,
+        executable: root
+            .join("installations/nginx")
+            .join(release.series)
+            .join("bin/nginx"),
+        arguments: vec![
+            "-p".into(),
+            instance.display().to_string(),
+            "-c".into(),
+            "conf/nginx.conf".into(),
+        ],
+        environment: BTreeMap::new(),
+        instance_dir: instance,
+        wait_for_port: true,
+    }
+}
+
 pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String> {
     let root = devbox_root()?;
     if kind == ServiceKind::Redis {
@@ -424,6 +460,9 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
             &root,
             selected_postgres_release(&root),
         ));
+    }
+    if kind == ServiceKind::Nginx {
+        return Ok(nginx_service_config(&root, selected_nginx_release(&root)));
     }
     let (name, version, port, executable, arguments) = match kind {
         ServiceKind::Redis => unreachable!(),
@@ -1298,6 +1337,71 @@ pub async fn postgres_version_select(
     .map_err(|error| format!("PostgreSQL 版本切换任务异常结束: {error}"))?
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NginxVersionInfo {
+    pub series: &'static str,
+    pub version: &'static str,
+    pub installed: bool,
+    pub selected: bool,
+    pub support_label: &'static str,
+    pub legacy: bool,
+    pub recommended: bool,
+}
+
+#[tauri::command]
+pub async fn nginx_versions() -> Result<Vec<NginxVersionInfo>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let root = devbox_root()?;
+        let selected = selected_nginx_release(&root);
+        NGINX_RELEASES
+            .iter()
+            .map(|release| {
+                let installer =
+                    NginxInstaller::for_version(&root, release.version).map_err(stringify_error)?;
+                Ok(NginxVersionInfo {
+                    series: release.series,
+                    version: release.version,
+                    installed: installer.is_installed(),
+                    selected: release.version == selected.version,
+                    support_label: release.support_label,
+                    legacy: release.legacy,
+                    recommended: release.recommended,
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| format!("Nginx 版本列表任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn nginx_version_select(
+    app: AppHandle,
+    version: String,
+    operation_id: String,
+) -> Result<ServiceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_install_task(app, operation_id, "nginx".into(), || {
+            ensure_install_compatible(ServiceKindInput::Nginx)?;
+            let root = devbox_root()?;
+            let release =
+                nginx_release(&version).ok_or_else(|| format!("不支持 Nginx 版本 {version}"))?;
+            let installer =
+                NginxInstaller::for_version(&root, release.version).map_err(stringify_error)?;
+            installer.install().map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 Nginx 实例配置");
+            let config = nginx_service_config(&root, release);
+            NginxService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            info(ServiceKindInput::Nginx)
+        })
+    })
+    .await
+    .map_err(|error| format!("Nginx 版本切换任务异常结束: {error}"))?
+}
+
 #[tauri::command]
 pub async fn service_start(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
     run_lifecycle_task(kind, LifecycleAction::Start).await
@@ -1346,6 +1450,7 @@ pub async fn service_stop_all() -> Result<Vec<ServiceInfo>, String> {
             ServiceKindInput::Consul,
             ServiceKindInput::Rnacos,
             ServiceKindInput::Rabbitmq,
+            ServiceKindInput::Nginx,
         ] {
             match with_service(kind, |service| service.status()) {
                 Ok(ServiceStatus::Running { .. }) => {
@@ -1395,6 +1500,133 @@ pub async fn environment_disk_usage() -> Result<u64, String> {
     tauri::async_runtime::spawn_blocking(|| devbox_root().and_then(|root| path_disk_size(&root)))
         .await
         .map_err(|error| format!("总磁盘统计任务异常结束: {error}"))?
+}
+
+fn nginx_html_dir() -> Result<PathBuf, String> {
+    let root = devbox_root()?;
+    Ok(root.join("instances/nginx/default/html"))
+}
+
+fn nginx_html_path(relative: &str) -> Result<PathBuf, String> {
+    if relative.is_empty() || relative.contains("..") || relative.starts_with('/') {
+        return Err("无效的文件路径".into());
+    }
+    let base = nginx_html_dir()?;
+    let resolved = base.join(relative);
+    let canonical = resolved
+        .canonicalize()
+        .map_err(|_| "路径不存在".to_string())?;
+    if !canonical.starts_with(&base.canonicalize().unwrap_or_else(|_| base.clone())) {
+        return Err("路径越界".into());
+    }
+    Ok(canonical)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NginxFileEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size_bytes: u64,
+}
+
+#[tauri::command]
+pub fn nginx_html_list(subdir: Option<String>) -> Result<Vec<NginxFileEntry>, String> {
+    let dir = if let Some(ref sub) = subdir {
+        nginx_html_path(sub)?
+    } else {
+        nginx_html_dir()?
+    };
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let meta = entry.metadata().map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = if let Some(ref sub) = subdir {
+            format!("{sub}/{name}")
+        } else {
+            name.clone()
+        };
+        entries.push(NginxFileEntry {
+            name,
+            path: rel,
+            is_dir: meta.is_dir(),
+            size_bytes: meta.len(),
+        });
+    }
+    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn nginx_html_read(path: String) -> Result<String, String> {
+    let resolved = nginx_html_path(&path)?;
+    let meta = resolved.metadata().map_err(|e| e.to_string())?;
+    if meta.is_dir() {
+        return Err("不能读取目录".into());
+    }
+    if meta.len() > 512 * 1024 {
+        return Err("文件超过 512 KiB，不适合在线编辑".into());
+    }
+    String::from_utf8(std::fs::read(&resolved).map_err(|e| e.to_string())?)
+        .map_err(|_| "文件不是有效的 UTF-8 文本".into())
+}
+
+#[tauri::command]
+pub fn nginx_html_write(path: String, content: String) -> Result<(), String> {
+    if content.len() > 512 * 1024 {
+        return Err("内容不能超过 512 KiB".into());
+    }
+    let base = nginx_html_dir()?;
+    if path.contains("..") || path.starts_with('/') {
+        return Err("无效的文件路径".into());
+    }
+    let resolved = base.join(&path);
+    if let Some(parent) = resolved.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp = resolved.with_extension("html.tmp");
+    std::fs::write(&tmp, content.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &resolved).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn nginx_html_delete(path: String) -> Result<(), String> {
+    let resolved = nginx_html_path(&path)?;
+    let meta = resolved.metadata().map_err(|e| e.to_string())?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(&resolved).map_err(|e| e.to_string())
+    } else {
+        std::fs::remove_file(&resolved).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("只允许打开 HTTP 或 HTTPS 链接".into());
+    }
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map_err(|error| format!("无法打开浏览器: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_path(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    let base = devbox_root()?;
+    let canonical = p.canonicalize().map_err(|_| "路径不存在".to_string())?;
+    if !canonical.starts_with(&base.canonicalize().unwrap_or_else(|_| base.clone())) {
+        return Err("不允许打开 devbox 之外的路径".into());
+    }
+    std::process::Command::new("open")
+        .arg(&canonical)
+        .spawn()
+        .map_err(|error| format!("无法打开: {error}"))?;
+    Ok(())
 }
 
 #[tauri::command]
