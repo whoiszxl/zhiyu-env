@@ -550,9 +550,16 @@ const selectedManagedVersionInfo = computed(
     ) ?? null,
 );
 const genericMultiVersionKinds: ServiceKind[] = [
+  "mongodb",
   "mailpit",
   "nats",
+  "meilisearch",
+  "minio",
+  "rustfs",
   "etcd",
+  "consul",
+  "rnacos",
+  "rabbitmq",
   "caddy",
 ];
 
@@ -4355,9 +4362,9 @@ onUnmounted(() => {
             <div class="redis-version-head">
               <div>
                 <p>VERSION MANAGER</p>
-                <h2>{{ selectedService.name }} 版本管理</h2>
+                <h2>{{ selectedService.name }} 运行版本</h2>
               </div>
-              <span>{{ selectedService.platformLabel }}</span>
+              <span>官方发布包 · 单个活动版本</span>
             </div>
 
             <div
@@ -4373,7 +4380,10 @@ onUnmounted(() => {
             <template
               v-else-if="genericMultiVersionKinds.includes(selectedKind)"
             >
-              <div class="redis-version-grid">
+              <div
+                class="redis-version-grid"
+                :class="{ 'two-columns': managedVersions.length === 2 }"
+              >
                 <button
                   v-for="release in managedVersions"
                   :key="release.version"
@@ -4405,16 +4415,9 @@ onUnmounted(() => {
                 </button>
               </div>
 
-              <div class="generic-version-explanation">
-                <span>版本切换说明</span>
-                <p>
-                  所有条目均已验证官方发布地址、文件结构和 SHA-256。切换前需要停止服务；配置和本地数据会保留。
-                </p>
-              </div>
-
               <footer class="redis-version-footer">
                 <p>
-                  多个程序版本独立存放，卸载版本不会删除配置、数据、日志和备份。
+                  各版本程序独立存放，配置和数据保持不变。跨大版本的数据格式可能不兼容，切换前建议先创建备份。
                 </p>
                 <div>
                   <button
@@ -4466,46 +4469,49 @@ onUnmounted(() => {
             </template>
 
             <template v-else>
-              <article
-                class="generic-version-card"
-                :class="{
-                  installed: selectedService.status !== 'not_installed',
-                }"
-              >
-                <span class="generic-version-icon">{{
-                  iconLetter[selectedService.kind]
-                }}</span>
-                <div>
-                  <span>当前验证版本</span>
-                  <strong>{{ selectedService.version }}</strong>
-                  <small>{{ selectedService.installSupportLabel }}</small>
-                </div>
-                <div class="generic-version-state">
-                  <em>{{
-                    selectedService.status === "not_installed"
-                      ? "未安装"
-                      : "已安装"
-                  }}</em>
-                  <strong>{{
-                    formatBytes(
-                      selectedDiskUsage?.installationBytes ?? 0,
-                    )
-                  }}</strong>
-                  <small>程序文件</small>
-                </div>
-              </article>
-
-              <div class="generic-version-explanation">
-                <span>为什么目前只有一个版本？</span>
-                <p>
-                  智屿只展示已经验证下载地址、文件结构和 SHA-256
-                  的版本，避免安装未经校验的程序。后续增加版本时会直接出现在这里。
-                </p>
+              <div class="redis-version-grid">
+                <button
+                  type="button"
+                  class="selected active"
+                  disabled
+                >
+                  <span class="redis-version-radio"></span>
+                  <span class="redis-version-copy">
+                    <strong>
+                      {{ selectedService.name }} {{ selectedService.version }}
+                    </strong>
+                    <small>v{{ selectedService.version }}</small>
+                  </span>
+                  <span class="redis-version-badges">
+                    <i>当前</i>
+                    <i
+                      v-if="selectedService.status !== 'not_installed'"
+                    >
+                      已安装
+                    </i>
+                  </span>
+                  <em>
+                    {{ selectedService.installSupportLabel }}
+                    <template
+                      v-if="
+                        (selectedDiskUsage?.installationBytes ?? 0) > 0
+                      "
+                    >
+                      ·
+                      {{
+                        formatBytes(
+                          selectedDiskUsage?.installationBytes ?? 0,
+                        )
+                      }}
+                    </template>
+                  </em>
+                </button>
               </div>
 
-              <footer class="generic-version-footer">
+              <footer class="redis-version-footer">
                 <p>
-                  卸载程序不会删除配置、数据、日志和备份；重新安装后可以继续使用原数据。
+                  当前仅有一个经过官方来源和 SHA-256
+                  验证的稳定版本；卸载程序不会删除配置、数据和日志。
                 </p>
                 <div>
                   <span v-if="selectedService.status === 'running'">
@@ -5055,7 +5061,10 @@ onUnmounted(() => {
             正在读取已验证版本…
           </div>
           <template v-else>
-            <div class="redis-version-grid">
+            <div
+              class="redis-version-grid"
+              :class="{ 'two-columns': nginxVersions.length === 2 }"
+            >
               <button
                 v-for="release in nginxVersions"
                 :key="release.version"

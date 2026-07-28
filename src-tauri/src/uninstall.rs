@@ -1,12 +1,18 @@
 use crate::commands::{self, ServiceInfo, ServiceKindInput};
 use devbox_core::{
     installer::{
-        caddy_release, etcd_release, mailpit_release, mysql_release, nats_release, nginx_release,
-        postgres_release, redis_release, CADDY_RELEASES, ETCD_RELEASES, MAILPIT_RELEASES,
-        MYSQL_RELEASES, NATS_RELEASES, NGINX_RELEASES, POSTGRES_RELEASES, REDIS_RELEASES,
+        caddy_release, consul_release, etcd_release, mailpit_release, meilisearch_release,
+        minio_release, mongodb_release, mysql_release, nats_release, nginx_release,
+        postgres_release, rabbitmq_release, redis_release, rnacos_release, rustfs_release,
+        VerifiedBinaryRelease, CADDY_RELEASES, CONSUL_RELEASES, ETCD_RELEASES, MAILPIT_RELEASES,
+        MEILISEARCH_RELEASES, MINIO_RELEASES, MONGODB_RELEASES, MYSQL_RELEASES, NATS_RELEASES,
+        NGINX_RELEASES, POSTGRES_RELEASES, RABBITMQ_RELEASES, REDIS_RELEASES, RNACOS_RELEASES,
+        RUSTFS_RELEASES,
     },
-    CaddyInstaller, EtcdInstaller, MailpitInstaller, MysqlInstaller, NatsInstaller, NginxInstaller,
-    PostgresInstaller, RedisInstaller, ServiceKind, ServiceStatus,
+    CaddyInstaller, ConsulInstaller, EtcdInstaller, MailpitInstaller, MeilisearchInstaller,
+    MinioInstaller, MongodbInstaller, MysqlInstaller, NatsInstaller, NginxInstaller,
+    PostgresInstaller, RabbitmqInstaller, RedisInstaller, RnacosInstaller, RustfsInstaller,
+    ServiceKind, ServiceStatus,
 };
 use serde::Serialize;
 use std::fs;
@@ -195,6 +201,76 @@ fn version_target(
                 release.version.to_string(),
             )
         }
+        ServiceKindInput::Mongodb => {
+            let release =
+                mongodb_release(version).ok_or_else(|| format!("不支持 MongoDB 版本 {version}"))?;
+            (
+                MongodbInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Meilisearch => {
+            let release = meilisearch_release(version)
+                .ok_or_else(|| format!("不支持 Meilisearch 版本 {version}"))?;
+            (
+                MeilisearchInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Minio => {
+            let release =
+                minio_release(version).ok_or_else(|| format!("不支持 MinIO 版本 {version}"))?;
+            (
+                MinioInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Rustfs => {
+            let release =
+                rustfs_release(version).ok_or_else(|| format!("不支持 RustFS 版本 {version}"))?;
+            (
+                RustfsInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Consul => {
+            let release =
+                consul_release(version).ok_or_else(|| format!("不支持 Consul 版本 {version}"))?;
+            (
+                ConsulInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Rnacos => {
+            let release =
+                rnacos_release(version).ok_or_else(|| format!("不支持 rnacos 版本 {version}"))?;
+            (
+                RnacosInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Rabbitmq => {
+            let release = rabbitmq_release(version)
+                .ok_or_else(|| format!("不支持 RabbitMQ 版本 {version}"))?;
+            (
+                RabbitmqInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
         _ => {
             let config = commands::service_config(kind.into())?;
             if config.version != version {
@@ -305,8 +381,61 @@ fn installed_fallback(
             })
             .max_by_key(|release| release.recommended)
             .map(|release| release.version.into()),
+        ServiceKindInput::Mongodb => {
+            verified_fallback(MONGODB_RELEASES, removed_version, |version| {
+                MongodbInstaller::for_version(root, version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+        }
+        ServiceKindInput::Meilisearch => {
+            verified_fallback(MEILISEARCH_RELEASES, removed_version, |version| {
+                MeilisearchInstaller::for_version(root, version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+        }
+        ServiceKindInput::Minio => verified_fallback(MINIO_RELEASES, removed_version, |version| {
+            MinioInstaller::for_version(root, version)
+                .is_ok_and(|installer| installer.is_installed())
+        }),
+        ServiceKindInput::Rustfs => {
+            verified_fallback(RUSTFS_RELEASES, removed_version, |version| {
+                RustfsInstaller::for_version(root, version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+        }
+        ServiceKindInput::Consul => {
+            verified_fallback(CONSUL_RELEASES, removed_version, |version| {
+                ConsulInstaller::for_version(root, version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+        }
+        ServiceKindInput::Rnacos => {
+            verified_fallback(RNACOS_RELEASES, removed_version, |version| {
+                RnacosInstaller::for_version(root, version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+        }
+        ServiceKindInput::Rabbitmq => {
+            verified_fallback(RABBITMQ_RELEASES, removed_version, |version| {
+                RabbitmqInstaller::for_version(root, version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+        }
         _ => None,
     }
+}
+
+fn verified_fallback(
+    releases: &'static [VerifiedBinaryRelease],
+    removed_version: &str,
+    installed: impl Fn(&str) -> bool,
+) -> Option<String> {
+    releases
+        .iter()
+        .filter(|release| release.version != removed_version)
+        .filter(|release| installed(release.version))
+        .max_by_key(|release| release.recommended)
+        .map(|release| release.version.into())
 }
 
 fn ensure_direct_child(base: &Path, target: &Path) -> Result<(), String> {

@@ -552,6 +552,190 @@ pub const CADDY_RELEASES: &[VerifiedBinaryRelease] = &[
     },
 ];
 
+pub const MONGODB_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "7.0",
+        version: "7.0.30",
+        archive: "mongodb-macos-arm64-7.0.30.tgz",
+        source_url: "https://fastdl.mongodb.org/osx/mongodb-macos-arm64-7.0.30.tgz",
+        sha256: "6c6c6fcfc38e025d48e99c6f5892a9e6aa8012ccb08ce247787936423d634dd1",
+        support_label: "长期维护分支",
+        legacy: true,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: MONGODB_SERIES,
+        version: MONGODB_VERSION,
+        archive: MONGODB_ARCHIVE,
+        source_url: MONGODB_URL,
+        sha256: MONGODB_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const MEILISEARCH_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "1.45",
+        version: "1.45.1",
+        archive: "meilisearch-macos-apple-silicon-1.45.1",
+        source_url:
+            "https://github.com/meilisearch/meilisearch/releases/download/v1.45.1/meilisearch-macos-apple-silicon",
+        sha256: "a5b311f90b84ea8df12854d28dd2c0704e5784df24130c90a62df2344cedbf4f",
+        support_label: "兼容稳定版",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: MEILISEARCH_SERIES,
+        version: MEILISEARCH_VERSION,
+        archive: MEILISEARCH_BINARY,
+        source_url: MEILISEARCH_URL,
+        sha256: MEILISEARCH_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const MINIO_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "2024",
+        version: "2024-12-18",
+        archive: "minio.RELEASE.2024-12-18T13-15-44Z",
+        source_url:
+            "https://dl.min.io/server/minio/release/darwin-arm64/archive/minio.RELEASE.2024-12-18T13-15-44Z",
+        sha256: "af079f5c4e2cb855f8dd0c86eea57d1412c81c458bd7fcb8421bec34a4143fef",
+        support_label: "2024 兼容版本",
+        legacy: true,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: MINIO_SERIES,
+        version: MINIO_VERSION,
+        archive: MINIO_BINARY,
+        source_url: MINIO_URL,
+        sha256: MINIO_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const RUSTFS_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "1.0-beta.1",
+        version: "1.0.0-beta.1",
+        archive: "rustfs-macos-aarch64-v1.0.0-beta.1.zip",
+        source_url:
+            "https://github.com/rustfs/rustfs/releases/download/1.0.0-beta.1/rustfs-macos-aarch64-v1.0.0-beta.1.zip",
+        sha256: "8d1c2f6340163f9876472d17328aa78527fbcc0c5c09b7b2860edfdfce5d40cf",
+        support_label: "早期测试版",
+        legacy: true,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: RUSTFS_SERIES,
+        version: RUSTFS_VERSION,
+        archive: RUSTFS_ARCHIVE,
+        source_url: RUSTFS_URL,
+        sha256: RUSTFS_SHA256,
+        support_label: "当前测试版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const CONSUL_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "1.21",
+        version: "1.21.5",
+        archive: "consul_1.21.5_darwin_arm64.zip",
+        source_url: "https://releases.hashicorp.com/consul/1.21.5/consul_1.21.5_darwin_arm64.zip",
+        sha256: "36e141a33a3b34628ff02ec256528109a54712e9dacff3a3bd11d7e7d17d05f2",
+        support_label: "兼容稳定版",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: CONSUL_SERIES,
+        version: CONSUL_VERSION,
+        archive: CONSUL_ARCHIVE,
+        source_url: CONSUL_URL,
+        sha256: CONSUL_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const RNACOS_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "0.8.4",
+        version: "0.8.4",
+        archive: "rnacos-aarch64-apple-darwin-v0.8.4.tar.gz",
+        source_url:
+            "https://github.com/nacos-group/r-nacos/releases/download/v0.8.4/rnacos-aarch64-apple-darwin-v0.8.4.tar.gz",
+        sha256: "5126b2a7968950130a2c1629858f92b1d758ddff4194440a998d4e53a90bc86c",
+        support_label: "兼容稳定版",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: RNACOS_SERIES,
+        version: RNACOS_VERSION,
+        archive: RNACOS_ARCHIVE,
+        source_url: RNACOS_URL,
+        sha256: RNACOS_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+pub const RABBITMQ_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "4.2",
+        version: "4.2.4",
+        archive: "rabbitmq-server-generic-unix-4.2.4.tar.xz",
+        source_url:
+            "https://github.com/rabbitmq/rabbitmq-server/releases/download/v4.2.4/rabbitmq-server-generic-unix-4.2.4.tar.xz",
+        sha256: "7cc2ce2dea3c35fc1cf9ad48bca4a534e394af9e6c77c71d94eeb07775ec7832",
+        support_label: "兼容稳定版",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: RABBITMQ_SERIES,
+        version: RABBITMQ_VERSION,
+        archive: RABBITMQ_ARCHIVE,
+        source_url: RABBITMQ_URL,
+        sha256: RABBITMQ_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
+macro_rules! verified_release_lookup {
+    ($name:ident, $catalog:ident) => {
+        pub fn $name(version_or_series: &str) -> Option<&'static VerifiedBinaryRelease> {
+            $catalog.iter().find(|release| {
+                release.version == version_or_series || release.series == version_or_series
+            })
+        }
+    };
+}
+
+verified_release_lookup!(mongodb_release, MONGODB_RELEASES);
+verified_release_lookup!(meilisearch_release, MEILISEARCH_RELEASES);
+verified_release_lookup!(minio_release, MINIO_RELEASES);
+verified_release_lookup!(rustfs_release, RUSTFS_RELEASES);
+verified_release_lookup!(consul_release, CONSUL_RELEASES);
+verified_release_lookup!(rnacos_release, RNACOS_RELEASES);
+verified_release_lookup!(rabbitmq_release, RABBITMQ_RELEASES);
+
 pub fn mailpit_release(version_or_series: &str) -> Option<&'static VerifiedBinaryRelease> {
     MAILPIT_RELEASES
         .iter()
@@ -1029,6 +1213,7 @@ impl MysqlInstaller {
 #[derive(Debug, Clone)]
 pub struct MongodbInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
@@ -1160,16 +1345,19 @@ pub struct KafkaInstaller {
 #[derive(Debug, Clone)]
 pub struct MeilisearchInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
 pub struct MinioInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
 pub struct RustfsInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
@@ -1181,16 +1369,19 @@ pub struct EtcdInstaller {
 #[derive(Debug, Clone)]
 pub struct ConsulInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
 pub struct RnacosInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 #[derive(Debug, Clone)]
 pub struct RabbitmqInstaller {
     devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
 }
 
 pub struct NginxInstaller {
@@ -1207,20 +1398,43 @@ impl RabbitmqInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: rabbitmq_release(RABBITMQ_VERSION)
+                .expect("default RabbitMQ release is registered"),
         }
+    }
+
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = rabbitmq_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported RabbitMQ version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
         report_install_progress(
             3,
             "准备安装",
-            format!("准备安装 RabbitMQ {RABBITMQ_VERSION} 与 Erlang/OTP {RABBITMQ_OTP_VERSION}"),
+            format!(
+                "准备安装 RabbitMQ {} 与 Erlang/OTP {RABBITMQ_OTP_VERSION}",
+                self.release.version
+            ),
         );
         ensure_macos_arm64("RabbitMQ")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("server/sbin/rabbitmq-server");
-        if executable.is_file() && installation_dir.join("otp/bin/erl").is_file() {
+        if executable.is_file()
+            && installation_dir.join("otp/bin/erl").is_file()
+            && installation_manifest_matches(
+                &installation_dir,
+                "rabbitmq",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
             report_install_progress(90, "已安装", "RabbitMQ 与内置 Erlang 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -1229,19 +1443,20 @@ impl RabbitmqInstaller {
 
         let downloads_dir = self.devbox_root.join("downloads");
         let work_dir = self.devbox_root.join("tmp").join(format!(
-            "rabbitmq-{RABBITMQ_VERSION}-{}-{}",
+            "rabbitmq-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
         let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
-        let rabbit_archive = downloads_dir.join(RABBITMQ_ARCHIVE);
+        let rabbit_archive = downloads_dir.join(self.release.archive);
         prepare_archive(
             &rabbit_archive,
-            RABBITMQ_ARCHIVE,
-            RABBITMQ_URL,
-            RABBITMQ_SHA256,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
         )?;
         let otp_archive = downloads_dir.join(RABBITMQ_OTP_ARCHIVE);
         prepare_archive(
@@ -1272,7 +1487,7 @@ impl RabbitmqInstaller {
                 .arg(&work_dir),
             "tar",
         )?;
-        let server_source = work_dir.join(format!("rabbitmq_server-{RABBITMQ_VERSION}"));
+        let server_source = work_dir.join(format!("rabbitmq_server-{}", self.release.version));
         fs::rename(server_source, stage.join("server"))?;
         if !stage.join("server/sbin/rabbitmq-server").is_file()
             || !stage.join("otp/bin/erl").is_file()
@@ -1286,10 +1501,10 @@ impl RabbitmqInstaller {
         write_manifest(
             &stage,
             "rabbitmq",
-            RABBITMQ_SERIES,
-            RABBITMQ_VERSION,
-            RABBITMQ_URL,
-            RABBITMQ_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary-with-erlef-otp",
         )?;
         replace_installation(&stage, &installation_dir)?;
@@ -1303,7 +1518,19 @@ impl RabbitmqInstaller {
     pub fn installation_dir(&self) -> PathBuf {
         self.devbox_root
             .join("installations/rabbitmq")
-            .join(RABBITMQ_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        installation.join("server/sbin/rabbitmq-server").is_file()
+            && installation.join("otp/bin/erl").is_file()
+            && installation_manifest_matches(
+                &installation,
+                "rabbitmq",
+                self.release.version,
+                self.release.sha256,
+            )
     }
 }
 
@@ -1621,16 +1848,38 @@ impl RnacosInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: rnacos_release(RNACOS_VERSION).expect("default rnacos release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = rnacos_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported rnacos version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 rnacos {RNACOS_VERSION}"));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 rnacos {}", self.release.version),
+        );
         ensure_macos_arm64("rnacos")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/rnacos");
-        if binary_contains(&executable, &["--version"], RNACOS_VERSION) {
+        if binary_contains(&executable, &["--version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "rnacos",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
             report_install_progress(90, "已安装", "rnacos 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -1639,15 +1888,21 @@ impl RnacosInstaller {
 
         let downloads_dir = self.devbox_root.join("downloads");
         let work_dir = self.devbox_root.join("tmp").join(format!(
-            "rnacos-{RNACOS_VERSION}-{}-{}",
+            "rnacos-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
         let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
-        let archive = downloads_dir.join(RNACOS_ARCHIVE);
-        prepare_archive(&archive, RNACOS_ARCHIVE, RNACOS_URL, RNACOS_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         run(
             Command::new("/usr/bin/tar")
                 .args(["-xzf"])
@@ -1667,7 +1922,11 @@ impl RnacosInstaller {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(bin_dir.join("rnacos"), fs::Permissions::from_mode(0o755))?;
         }
-        if !binary_contains(&bin_dir.join("rnacos"), &["--version"], RNACOS_VERSION) {
+        if !binary_contains(
+            &bin_dir.join("rnacos"),
+            &["--version"],
+            self.release.version,
+        ) {
             let _ = fs::remove_dir_all(&work_dir);
             return Err(DevBoxError::CommandFailed {
                 command: "rnacos --version".into(),
@@ -1677,10 +1936,10 @@ impl RnacosInstaller {
         write_manifest(
             &stage,
             "rnacos",
-            RNACOS_SERIES,
-            RNACOS_VERSION,
-            RNACOS_URL,
-            RNACOS_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         replace_installation(&stage, &installation_dir)?;
@@ -1694,7 +1953,21 @@ impl RnacosInstaller {
     pub fn installation_dir(&self) -> PathBuf {
         self.devbox_root
             .join("installations/rnacos")
-            .join(RNACOS_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        binary_contains(
+            &installation.join("bin/rnacos"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation,
+            "rnacos",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 }
 
@@ -1702,16 +1975,38 @@ impl ConsulInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: consul_release(CONSUL_VERSION).expect("default Consul release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = consul_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported Consul version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 Consul {CONSUL_VERSION}"));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 Consul {}", self.release.version),
+        );
         ensure_macos_arm64("Consul")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/unzip"])?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/consul");
-        if binary_contains(&executable, &["version"], CONSUL_VERSION) {
+        if binary_contains(&executable, &["version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "consul",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
             report_install_progress(90, "已安装", "Consul 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -1720,15 +2015,21 @@ impl ConsulInstaller {
 
         let downloads_dir = self.devbox_root.join("downloads");
         let work_dir = self.devbox_root.join("tmp").join(format!(
-            "consul-{CONSUL_VERSION}-{}-{}",
+            "consul-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
         let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
-        let archive = downloads_dir.join(CONSUL_ARCHIVE);
-        prepare_archive(&archive, CONSUL_ARCHIVE, CONSUL_URL, CONSUL_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         run(
             Command::new("/usr/bin/unzip")
                 .args(["-q", "-o"])
@@ -1748,7 +2049,7 @@ impl ConsulInstaller {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(bin_dir.join("consul"), fs::Permissions::from_mode(0o755))?;
         }
-        if !binary_contains(&bin_dir.join("consul"), &["version"], CONSUL_VERSION) {
+        if !binary_contains(&bin_dir.join("consul"), &["version"], self.release.version) {
             let _ = fs::remove_dir_all(&work_dir);
             return Err(DevBoxError::CommandFailed {
                 command: "consul version".into(),
@@ -1758,10 +2059,10 @@ impl ConsulInstaller {
         write_manifest(
             &stage,
             "consul",
-            CONSUL_SERIES,
-            CONSUL_VERSION,
-            CONSUL_URL,
-            CONSUL_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         replace_installation(&stage, &installation_dir)?;
@@ -1775,7 +2076,21 @@ impl ConsulInstaller {
     pub fn installation_dir(&self) -> PathBuf {
         self.devbox_root
             .join("installations/consul")
-            .join(CONSUL_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        binary_contains(
+            &installation.join("bin/consul"),
+            &["version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation,
+            "consul",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 }
 
@@ -1913,21 +2228,36 @@ impl RustfsInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: rustfs_release(RUSTFS_VERSION).expect("default RustFS release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = rustfs_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported RustFS version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 RustFS {RUSTFS_VERSION}"));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 RustFS {}", self.release.version),
+        );
         ensure_macos_arm64("RustFS")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/unzip"])?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/rustfs");
-        if binary_contains(&executable, &["--version"], RUSTFS_VERSION)
+        if binary_contains(&executable, &["--version"], self.release.version)
             && installation_manifest_matches(
                 &installation_dir,
                 "rustfs",
-                RUSTFS_VERSION,
-                RUSTFS_SHA256,
+                self.release.version,
+                self.release.sha256,
             )
         {
             report_install_progress(90, "已安装", "RustFS 已经安装");
@@ -1938,15 +2268,21 @@ impl RustfsInstaller {
 
         let downloads_dir = self.devbox_root.join("downloads");
         let work_dir = self.devbox_root.join("tmp").join(format!(
-            "rustfs-{RUSTFS_VERSION}-{}-{}",
+            "rustfs-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
         let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
-        let archive = downloads_dir.join(RUSTFS_ARCHIVE);
-        prepare_archive(&archive, RUSTFS_ARCHIVE, RUSTFS_URL, RUSTFS_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         run(
             Command::new("/usr/bin/unzip")
                 .arg("-q")
@@ -1966,7 +2302,11 @@ impl RustfsInstaller {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(bin_dir.join("rustfs"), fs::Permissions::from_mode(0o755))?;
         }
-        if !binary_contains(&bin_dir.join("rustfs"), &["--version"], RUSTFS_VERSION) {
+        if !binary_contains(
+            &bin_dir.join("rustfs"),
+            &["--version"],
+            self.release.version,
+        ) {
             let _ = fs::remove_dir_all(&work_dir);
             return Err(DevBoxError::CommandFailed {
                 command: "rustfs --version".into(),
@@ -1976,10 +2316,10 @@ impl RustfsInstaller {
         write_manifest(
             &stage,
             "rustfs",
-            RUSTFS_SERIES,
-            RUSTFS_VERSION,
-            RUSTFS_URL,
-            RUSTFS_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         replace_installation(&stage, &installation_dir)?;
@@ -1993,7 +2333,21 @@ impl RustfsInstaller {
     pub fn installation_dir(&self) -> PathBuf {
         self.devbox_root
             .join("installations/rustfs")
-            .join(RUSTFS_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        binary_contains(
+            &installation.join("bin/rustfs"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation,
+            "rustfs",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 }
 
@@ -2001,21 +2355,36 @@ impl MinioInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: minio_release(MINIO_VERSION).expect("default MinIO release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = minio_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported MinIO version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 MinIO {MINIO_VERSION}"));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 MinIO {}", self.release.version),
+        );
         ensure_macos_arm64("MinIO")?;
         ensure_tools(&["/usr/bin/curl"])?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/minio");
-        if binary_contains(&executable, &["--version"], "RELEASE.2025-09-07")
+        if binary_contains(&executable, &["--version"], self.release.version)
             && installation_manifest_matches(
                 &installation_dir,
                 "minio",
-                MINIO_VERSION,
-                MINIO_SHA256,
+                self.release.version,
+                self.release.sha256,
             )
         {
             report_install_progress(90, "已安装", "MinIO 已经安装");
@@ -2026,15 +2395,21 @@ impl MinioInstaller {
 
         let downloads_dir = self.devbox_root.join("downloads");
         let work_dir = self.devbox_root.join("tmp").join(format!(
-            "minio-{MINIO_VERSION}-{}-{}",
+            "minio-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
         let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
-        let download = downloads_dir.join(MINIO_BINARY);
-        prepare_archive(&download, MINIO_BINARY, MINIO_URL, MINIO_SHA256)?;
+        let download = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &download,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         let stage = work_dir.join("installation");
         let bin_dir = stage.join("bin");
         fs::create_dir_all(&bin_dir)?;
@@ -2045,7 +2420,7 @@ impl MinioInstaller {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(bin_dir.join("minio"), fs::Permissions::from_mode(0o755))?;
         }
-        if !binary_contains(&bin_dir.join("minio"), &["--version"], "RELEASE.2025-09-07") {
+        if !binary_contains(&bin_dir.join("minio"), &["--version"], self.release.version) {
             let _ = fs::remove_dir_all(&work_dir);
             return Err(DevBoxError::CommandFailed {
                 command: "minio --version".into(),
@@ -2055,10 +2430,10 @@ impl MinioInstaller {
         write_manifest(
             &stage,
             "minio",
-            MINIO_SERIES,
-            MINIO_VERSION,
-            MINIO_URL,
-            MINIO_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         replace_installation(&stage, &installation_dir)?;
@@ -2072,7 +2447,21 @@ impl MinioInstaller {
     pub fn installation_dir(&self) -> PathBuf {
         self.devbox_root
             .join("installations/minio")
-            .join(MINIO_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        binary_contains(
+            &installation.join("bin/minio"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation,
+            "minio",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 }
 
@@ -2080,21 +2469,42 @@ impl MeilisearchInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: meilisearch_release(MEILISEARCH_VERSION)
+                .expect("default Meilisearch release is registered"),
         }
+    }
+
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = meilisearch_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!(
+                "unsupported Meilisearch version: {version_or_series}"
+            ))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
     }
 
     pub fn install(&self) -> Result<InstallOutcome> {
         report_install_progress(
             3,
             "准备安装",
-            format!("准备安装 Meilisearch {MEILISEARCH_VERSION}"),
+            format!("准备安装 Meilisearch {}", self.release.version),
         );
         ensure_macos_arm64("Meilisearch")?;
         ensure_tools(&["/usr/bin/curl"])?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/meilisearch");
-        if binary_contains(&executable, &["--version"], MEILISEARCH_VERSION) {
+        if binary_contains(&executable, &["--version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "meilisearch",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
             report_install_progress(90, "已安装", "Meilisearch 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -2111,15 +2521,16 @@ impl MeilisearchInstaller {
                 .expect("Meilisearch installation has a parent"),
         )?;
 
-        let download = downloads_dir.join(MEILISEARCH_BINARY);
+        let download = downloads_dir.join(self.release.archive);
         prepare_archive(
             &download,
-            MEILISEARCH_BINARY,
-            MEILISEARCH_URL,
-            MEILISEARCH_SHA256,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
         )?;
         let work_dir = temp_root.join(format!(
-            "meilisearch-{MEILISEARCH_VERSION}-{}-{}",
+            "meilisearch-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
@@ -2141,21 +2552,24 @@ impl MeilisearchInstaller {
         if !binary_contains(
             &bin_dir.join("meilisearch"),
             &["--version"],
-            MEILISEARCH_VERSION,
+            self.release.version,
         ) {
             let _ = fs::remove_dir_all(&work_dir);
             return Err(DevBoxError::CommandFailed {
                 command: "meilisearch --version".into(),
-                message: format!("downloaded binary is not Meilisearch {MEILISEARCH_VERSION}"),
+                message: format!(
+                    "downloaded binary is not Meilisearch {}",
+                    self.release.version
+                ),
             });
         }
         write_manifest(
             &stage,
             "meilisearch",
-            MEILISEARCH_SERIES,
-            MEILISEARCH_VERSION,
-            MEILISEARCH_URL,
-            MEILISEARCH_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         replace_installation(&stage, &installation_dir)?;
@@ -2170,7 +2584,21 @@ impl MeilisearchInstaller {
         self.devbox_root
             .join("installations")
             .join("meilisearch")
-            .join(MEILISEARCH_SERIES)
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        binary_contains(
+            &installation.join("bin/meilisearch"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation,
+            "meilisearch",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 }
 
@@ -2601,22 +3029,38 @@ impl MongodbInstaller {
     pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
         Self {
             devbox_root: devbox_root.into(),
+            release: mongodb_release(MONGODB_VERSION)
+                .expect("default MongoDB release is registered"),
         }
     }
 
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = mongodb_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported MongoDB version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
     pub fn install(&self) -> Result<InstallOutcome> {
-        report_install_progress(3, "准备安装", format!("准备安装 MongoDB {MONGODB_VERSION}"));
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 MongoDB {}", self.release.version),
+        );
         ensure_macos_arm64("MongoDB")?;
         ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/mongod");
-        if binary_contains(&executable, &["--version"], MONGODB_VERSION)
+        if binary_contains(&executable, &["--version"], self.release.version)
             && installation_manifest_matches(
                 &installation_dir,
                 "mongodb",
-                MONGODB_VERSION,
-                MONGODB_SHA256,
+                self.release.version,
+                self.release.sha256,
             )
         {
             report_install_progress(90, "已安装", "MongoDB 已经安装");
@@ -2635,10 +3079,16 @@ impl MongodbInstaller {
                 .expect("MongoDB installation has a parent"),
         )?;
 
-        let archive = downloads_dir.join(MONGODB_ARCHIVE);
-        prepare_archive(&archive, MONGODB_ARCHIVE, MONGODB_URL, MONGODB_SHA256)?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
         let work_dir = temp_root.join(format!(
-            "mongodb-{MONGODB_VERSION}-{}-{}",
+            "mongodb-{}-{}-{}",
+            self.release.version,
             std::process::id(),
             unique_suffix()
         ));
@@ -2657,7 +3107,7 @@ impl MongodbInstaller {
         self.devbox_root
             .join("installations")
             .join("mongodb")
-            .join(MONGODB_SERIES)
+            .join(self.release.series)
     }
 
     fn extract_and_commit(
@@ -2684,7 +3134,8 @@ impl MongodbInstaller {
                         .file_name()
                         .and_then(|name| name.to_str())
                         .is_some_and(|name| {
-                            name.starts_with("mongodb-macos-") && name.ends_with(MONGODB_VERSION)
+                            name.starts_with("mongodb-macos-")
+                                && name.ends_with(self.release.version)
                         })
             })
             .ok_or_else(|| DevBoxError::CommandFailed {
@@ -2695,23 +3146,41 @@ impl MongodbInstaller {
         report_install_progress(75, "整理文件", "正在写入 MongoDB 版本目录");
         fs::rename(source, &stage)?;
 
-        if !binary_contains(&stage.join("bin/mongod"), &["--version"], MONGODB_VERSION) {
+        if !binary_contains(
+            &stage.join("bin/mongod"),
+            &["--version"],
+            self.release.version,
+        ) {
             return Err(DevBoxError::CommandFailed {
                 command: "mongod --version".into(),
-                message: format!("downloaded binary is not MongoDB {MONGODB_VERSION}"),
+                message: format!("downloaded binary is not MongoDB {}", self.release.version),
             });
         }
         write_manifest(
             &stage,
             "mongodb",
-            MONGODB_SERIES,
-            MONGODB_VERSION,
-            MONGODB_URL,
-            MONGODB_SHA256,
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
             "official-binary",
         )?;
         report_install_progress(90, "完成安装", "MongoDB 安装完成");
         replace_installation(&stage, installation_dir)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        binary_contains(
+            &installation.join("bin/mongod"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation,
+            "mongodb",
+            self.release.version,
+            self.release.sha256,
+        )
     }
 }
 
@@ -3852,6 +4321,13 @@ mod tests {
             NATS_RELEASES,
             ETCD_RELEASES,
             CADDY_RELEASES,
+            MONGODB_RELEASES,
+            MEILISEARCH_RELEASES,
+            MINIO_RELEASES,
+            RUSTFS_RELEASES,
+            CONSUL_RELEASES,
+            RNACOS_RELEASES,
+            RABBITMQ_RELEASES,
         ] {
             assert!(releases.len() >= 2);
             assert_eq!(
@@ -3863,7 +4339,7 @@ mod tests {
             );
             for (index, release) in releases.iter().enumerate() {
                 assert_eq!(release.sha256.len(), 64);
-                assert!(release.source_url.starts_with("https://github.com/"));
+                assert!(release.source_url.starts_with("https://"));
                 assert!(release.source_url.contains(release.version));
                 assert!(releases[..index]
                     .iter()
@@ -3874,6 +4350,13 @@ mod tests {
         assert!(nats_release("1.0").is_none());
         assert!(etcd_release("2.0").is_none());
         assert!(caddy_release("1.0").is_none());
+        assert!(mongodb_release("6.0").is_none());
+        assert!(meilisearch_release("1.0").is_none());
+        assert!(minio_release("2023").is_none());
+        assert!(rustfs_release("0.9").is_none());
+        assert!(consul_release("1.20").is_none());
+        assert!(rnacos_release("0.7").is_none());
+        assert!(rabbitmq_release("3.13").is_none());
     }
 
     #[test]
@@ -3908,5 +4391,33 @@ mod tests {
         assert!(CaddyInstaller::new(root)
             .installation_dir()
             .ends_with(format!("caddy/{CADDY_SERIES}")));
+        assert!(MongodbInstaller::for_version(root, "7.0")
+            .unwrap()
+            .installation_dir()
+            .ends_with("mongodb/7.0"));
+        assert!(MeilisearchInstaller::for_version(root, "1.45")
+            .unwrap()
+            .installation_dir()
+            .ends_with("meilisearch/1.45"));
+        assert!(MinioInstaller::for_version(root, "2024")
+            .unwrap()
+            .installation_dir()
+            .ends_with("minio/2024"));
+        assert!(RustfsInstaller::for_version(root, "1.0.0-beta.1")
+            .unwrap()
+            .installation_dir()
+            .ends_with("rustfs/1.0-beta.1"));
+        assert!(ConsulInstaller::for_version(root, "1.21")
+            .unwrap()
+            .installation_dir()
+            .ends_with("consul/1.21"));
+        assert!(RnacosInstaller::for_version(root, "0.8.4")
+            .unwrap()
+            .installation_dir()
+            .ends_with("rnacos/0.8.4"));
+        assert!(RabbitmqInstaller::for_version(root, "4.2")
+            .unwrap()
+            .installation_dir()
+            .ends_with("rabbitmq/4.2"));
     }
 }

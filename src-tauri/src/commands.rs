@@ -1,14 +1,16 @@
 use devbox_core::{
     installer::{
-        caddy_release, etcd_release, mailpit_release, mysql_release, nats_release, nginx_release,
-        postgres_release, redis_release, MysqlRelease, NginxRelease, PostgresRelease, RedisRelease,
-        VerifiedBinaryRelease, CADDY_RELEASES, CADDY_VERSION, CONSUL_SERIES, CONSUL_VERSION,
-        ETCD_RELEASES, ETCD_VERSION, KAFKA_SERIES, KAFKA_VERSION, MAILPIT_RELEASES,
-        MAILPIT_VERSION, MEILISEARCH_SERIES, MEILISEARCH_VERSION, MINIO_SERIES, MINIO_VERSION,
-        MONGODB_SERIES, MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_RELEASES,
-        NATS_VERSION, NGINX_RELEASES, NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION,
-        RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES,
-        RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
+        caddy_release, consul_release, etcd_release, mailpit_release, meilisearch_release,
+        minio_release, mongodb_release, mysql_release, nats_release, nginx_release,
+        postgres_release, rabbitmq_release, redis_release, rnacos_release, rustfs_release,
+        MysqlRelease, NginxRelease, PostgresRelease, RedisRelease, VerifiedBinaryRelease,
+        CADDY_RELEASES, CADDY_VERSION, CONSUL_RELEASES, CONSUL_VERSION, ETCD_RELEASES,
+        ETCD_VERSION, KAFKA_SERIES, KAFKA_VERSION, MAILPIT_RELEASES, MAILPIT_VERSION,
+        MEILISEARCH_RELEASES, MEILISEARCH_VERSION, MINIO_RELEASES, MINIO_VERSION, MONGODB_RELEASES,
+        MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_RELEASES, NATS_VERSION,
+        NGINX_RELEASES, NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_RELEASES,
+        RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_RELEASES,
+        RNACOS_VERSION, RUSTFS_RELEASES, RUSTFS_VERSION,
     },
     report_install_progress, with_install_context, CaddyInstaller, CaddyService, ConfigManager,
     ConsulInstaller, ConsulService, EtcdInstaller, EtcdService, InstallCancellationToken,
@@ -560,6 +562,146 @@ fn caddy_service_config(root: &Path, release: &VerifiedBinaryRelease) -> Service
     }
 }
 
+fn catalog_service_config(
+    root: &Path,
+    kind: ServiceKind,
+    release: &VerifiedBinaryRelease,
+) -> ServiceConfig {
+    let instance = root.join("instances").join(kind.as_str()).join("default");
+    let installation = root
+        .join("installations")
+        .join(kind.as_str())
+        .join(release.series);
+    let (name, port, executable, arguments) = match kind {
+        ServiceKind::Mongodb => (
+            "MongoDB",
+            27017,
+            installation.join("bin/mongod"),
+            vec![
+                "--config".into(),
+                instance.join("conf/mongod.conf").display().to_string(),
+            ],
+        ),
+        ServiceKind::Meilisearch => (
+            "Meilisearch",
+            7700,
+            installation.join("bin/meilisearch"),
+            vec![
+                "--config-file-path".into(),
+                instance.join("conf/meilisearch.toml").display().to_string(),
+            ],
+        ),
+        ServiceKind::Minio => (
+            "MinIO",
+            9000,
+            installation.join("bin/minio"),
+            vec![
+                "server".into(),
+                instance.join("data").display().to_string(),
+                "--address".into(),
+                "127.0.0.1:9000".into(),
+                "--console-address".into(),
+                "127.0.0.1:9001".into(),
+            ],
+        ),
+        ServiceKind::Rustfs => ("RustFS", 9002, installation.join("bin/rustfs"), Vec::new()),
+        ServiceKind::Consul => (
+            "Consul",
+            8500,
+            installation.join("bin/consul"),
+            vec![
+                "agent".into(),
+                "-config-file".into(),
+                instance.join("conf/consul.hcl").display().to_string(),
+            ],
+        ),
+        ServiceKind::Rnacos => (
+            "rnacos",
+            8848,
+            installation.join("bin/rnacos"),
+            vec![
+                "-e".into(),
+                instance.join("conf/rnacos.env").display().to_string(),
+            ],
+        ),
+        ServiceKind::Rabbitmq => (
+            "RabbitMQ",
+            5672,
+            installation.join("server/sbin/rabbitmq-server"),
+            Vec::new(),
+        ),
+        _ => unreachable!("service does not use the shared binary catalog"),
+    };
+    let environment = match kind {
+        ServiceKind::Minio => BTreeMap::from([
+            ("MINIO_ROOT_USER".into(), "zhiyuadmin".into()),
+            (
+                "MINIO_ROOT_PASSWORD".into(),
+                "zhiyu-local-minio-2026".into(),
+            ),
+            ("MINIO_BROWSER".into(), "on".into()),
+        ]),
+        ServiceKind::Rustfs => BTreeMap::from([
+            ("RUSTFS_ACCESS_KEY".into(), "zhiyuadmin".into()),
+            ("RUSTFS_SECRET_KEY".into(), "zhiyu-local-rustfs-2026".into()),
+            (
+                "RUSTFS_VOLUMES".into(),
+                instance.join("data").display().to_string(),
+            ),
+            ("RUSTFS_ADDRESS".into(), "127.0.0.1:9002".into()),
+            ("RUSTFS_CONSOLE_ENABLE".into(), "true".into()),
+            ("RUSTFS_CONSOLE_ADDRESS".into(), "127.0.0.1:7001".into()),
+        ]),
+        ServiceKind::Rabbitmq => BTreeMap::from([
+            (
+                "ERLANG_HOME".into(),
+                installation.join("otp").display().to_string(),
+            ),
+            (
+                "PATH".into(),
+                format!("{}:/usr/bin:/bin", installation.join("otp/bin").display()),
+            ),
+            (
+                "RABBITMQ_HOME".into(),
+                installation.join("server").display().to_string(),
+            ),
+            (
+                "RABBITMQ_CONFIG_FILE".into(),
+                instance.join("conf/rabbitmq").display().to_string(),
+            ),
+            (
+                "RABBITMQ_ENABLED_PLUGINS_FILE".into(),
+                instance.join("conf/enabled_plugins").display().to_string(),
+            ),
+            (
+                "RABBITMQ_MNESIA_BASE".into(),
+                instance.join("data").display().to_string(),
+            ),
+            (
+                "RABBITMQ_LOG_BASE".into(),
+                instance.join("logs").display().to_string(),
+            ),
+            (
+                "RABBITMQ_PID_FILE".into(),
+                instance.join("run/rabbitmq-node.pid").display().to_string(),
+            ),
+            ("RABBITMQ_NODENAME".into(), "rabbit@localhost".into()),
+        ]),
+        _ => BTreeMap::new(),
+    };
+    ServiceConfig {
+        name: name.into(),
+        kind,
+        version: release.version.into(),
+        port,
+        executable,
+        arguments,
+        environment,
+        instance_dir: instance,
+        wait_for_port: true,
+    }
+}
+
 pub(crate) fn activate_installed_version(
     kind: ServiceKindInput,
     version: &str,
@@ -598,6 +740,42 @@ pub(crate) fn activate_installed_version(
             &root,
             caddy_release(version).ok_or_else(|| format!("不支持 Caddy 版本 {version}"))?,
         ),
+        ServiceKindInput::Mongodb => catalog_service_config(
+            &root,
+            ServiceKind::Mongodb,
+            mongodb_release(version).ok_or_else(|| format!("不支持 MongoDB 版本 {version}"))?,
+        ),
+        ServiceKindInput::Meilisearch => catalog_service_config(
+            &root,
+            ServiceKind::Meilisearch,
+            meilisearch_release(version)
+                .ok_or_else(|| format!("不支持 Meilisearch 版本 {version}"))?,
+        ),
+        ServiceKindInput::Minio => catalog_service_config(
+            &root,
+            ServiceKind::Minio,
+            minio_release(version).ok_or_else(|| format!("不支持 MinIO 版本 {version}"))?,
+        ),
+        ServiceKindInput::Rustfs => catalog_service_config(
+            &root,
+            ServiceKind::Rustfs,
+            rustfs_release(version).ok_or_else(|| format!("不支持 RustFS 版本 {version}"))?,
+        ),
+        ServiceKindInput::Consul => catalog_service_config(
+            &root,
+            ServiceKind::Consul,
+            consul_release(version).ok_or_else(|| format!("不支持 Consul 版本 {version}"))?,
+        ),
+        ServiceKindInput::Rnacos => catalog_service_config(
+            &root,
+            ServiceKind::Rnacos,
+            rnacos_release(version).ok_or_else(|| format!("不支持 rnacos 版本 {version}"))?,
+        ),
+        ServiceKindInput::Rabbitmq => catalog_service_config(
+            &root,
+            ServiceKind::Rabbitmq,
+            rabbitmq_release(version).ok_or_else(|| format!("不支持 RabbitMQ 版本 {version}"))?,
+        ),
         _ => return Err("当前服务不支持版本切换".into()),
     };
     ConfigManager.save(&config).map_err(stringify_error)
@@ -621,8 +799,7 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
         return Ok(nginx_service_config(&root, selected_nginx_release(&root)));
     }
     if kind == ServiceKind::Mailpit {
-        let release =
-            selected_verified_release(&root, kind, mailpit_release, MAILPIT_VERSION);
+        let release = selected_verified_release(&root, kind, mailpit_release, MAILPIT_VERSION);
         return Ok(mailpit_service_config(&root, release));
     }
     if kind == ServiceKind::Nats {
@@ -637,26 +814,43 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
         let release = selected_verified_release(&root, kind, caddy_release, CADDY_VERSION);
         return Ok(caddy_service_config(&root, release));
     }
+    let catalog: Option<(
+        fn(&str) -> Option<&'static VerifiedBinaryRelease>,
+        &'static str,
+    )> = match kind {
+        ServiceKind::Mongodb => Some((
+            mongodb_release as fn(&str) -> Option<&'static VerifiedBinaryRelease>,
+            MONGODB_VERSION,
+        )),
+        ServiceKind::Meilisearch => Some((meilisearch_release, MEILISEARCH_VERSION)),
+        ServiceKind::Minio => Some((minio_release, MINIO_VERSION)),
+        ServiceKind::Rustfs => Some((rustfs_release, RUSTFS_VERSION)),
+        ServiceKind::Consul => Some((consul_release, CONSUL_VERSION)),
+        ServiceKind::Rnacos => Some((rnacos_release, RNACOS_VERSION)),
+        ServiceKind::Rabbitmq => Some((rabbitmq_release, RABBITMQ_VERSION)),
+        _ => None,
+    };
+    if let Some((resolve, default_version)) = catalog {
+        let release = selected_verified_release(&root, kind, resolve, default_version);
+        return Ok(catalog_service_config(&root, kind, release));
+    }
     let (name, version, port, executable, arguments) = match kind {
         ServiceKind::Redis => unreachable!(),
         ServiceKind::Mysql => unreachable!(),
         ServiceKind::Postgres => unreachable!(),
         ServiceKind::Nginx => unreachable!(),
-        ServiceKind::Caddy | ServiceKind::Mailpit | ServiceKind::Nats | ServiceKind::Etcd => {
+        ServiceKind::Caddy
+        | ServiceKind::Mailpit
+        | ServiceKind::Nats
+        | ServiceKind::Etcd
+        | ServiceKind::Mongodb
+        | ServiceKind::Meilisearch
+        | ServiceKind::Minio
+        | ServiceKind::Rustfs
+        | ServiceKind::Consul
+        | ServiceKind::Rnacos
+        | ServiceKind::Rabbitmq => {
             unreachable!()
-        }
-        ServiceKind::Mongodb => {
-            let instance = root.join("instances/mongodb/default");
-            (
-                "MongoDB",
-                MONGODB_VERSION,
-                27017,
-                root.join(format!("installations/mongodb/{MONGODB_SERIES}/bin/mongod")),
-                vec![
-                    "--config".into(),
-                    instance.join("conf/mongod.conf").display().to_string(),
-                ],
-            )
         }
         ServiceKind::Kafka => {
             let instance = root.join("instances/kafka/default");
@@ -678,81 +872,6 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
                 ],
             )
         }
-        ServiceKind::Meilisearch => {
-            let instance = root.join("instances/meilisearch/default");
-            (
-                "Meilisearch",
-                MEILISEARCH_VERSION,
-                7700,
-                root.join(format!(
-                    "installations/meilisearch/{MEILISEARCH_SERIES}/bin/meilisearch"
-                )),
-                vec![
-                    "--config-file-path".into(),
-                    instance.join("conf/meilisearch.toml").display().to_string(),
-                ],
-            )
-        }
-        ServiceKind::Minio => {
-            let instance = root.join("instances/minio/default");
-            (
-                "MinIO",
-                MINIO_VERSION,
-                9000,
-                root.join(format!("installations/minio/{MINIO_SERIES}/bin/minio")),
-                vec![
-                    "server".into(),
-                    instance.join("data").display().to_string(),
-                    "--address".into(),
-                    "127.0.0.1:9000".into(),
-                    "--console-address".into(),
-                    "127.0.0.1:9001".into(),
-                ],
-            )
-        }
-        ServiceKind::Rustfs => (
-            "RustFS",
-            RUSTFS_VERSION,
-            9002,
-            root.join(format!("installations/rustfs/{RUSTFS_SERIES}/bin/rustfs")),
-            Vec::new(),
-        ),
-        ServiceKind::Consul => {
-            let instance = root.join("instances/consul/default");
-            (
-                "Consul",
-                CONSUL_VERSION,
-                8500,
-                root.join(format!("installations/consul/{CONSUL_SERIES}/bin/consul")),
-                vec![
-                    "agent".into(),
-                    "-config-file".into(),
-                    instance.join("conf/consul.hcl").display().to_string(),
-                ],
-            )
-        }
-        ServiceKind::Rnacos => {
-            let instance = root.join("instances/rnacos/default");
-            (
-                "rnacos",
-                RNACOS_VERSION,
-                8848,
-                root.join(format!("installations/rnacos/{RNACOS_SERIES}/bin/rnacos")),
-                vec![
-                    "-e".into(),
-                    instance.join("conf/rnacos.env").display().to_string(),
-                ],
-            )
-        }
-        ServiceKind::Rabbitmq => (
-            "RabbitMQ",
-            RABBITMQ_VERSION,
-            5672,
-            root.join(format!(
-                "installations/rabbitmq/{RABBITMQ_SERIES}/server/sbin/rabbitmq-server"
-            )),
-            Vec::new(),
-        ),
     };
 
     let instance_dir = root.join("instances").join(kind.as_str()).join("default");
@@ -1181,11 +1300,17 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             service_info(kind)
         }
         ServiceKindInput::Mongodb => {
-            MongodbInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Mongodb)?;
+            MongodbInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 MongoDB 实例配置");
-            run_action(kind, |service| service.install())
+            MongodbService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Mailpit => {
             let root = devbox_root()?;
@@ -1221,25 +1346,43 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             run_action(kind, |service| service.install())
         }
         ServiceKindInput::Meilisearch => {
-            MeilisearchInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Meilisearch)?;
+            MeilisearchInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Meilisearch 实例配置");
-            run_action(kind, |service| service.install())
+            MeilisearchService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Minio => {
-            MinioInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Minio)?;
+            MinioInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 MinIO 实例配置");
-            run_action(kind, |service| service.install())
+            MinioService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Rustfs => {
-            RustfsInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Rustfs)?;
+            RustfsInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 RustFS 实例配置");
-            run_action(kind, |service| service.install())
+            RustfsService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Etcd => {
             let root = devbox_root()?;
@@ -1255,25 +1398,43 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
             service_info(kind)
         }
         ServiceKindInput::Consul => {
-            ConsulInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Consul)?;
+            ConsulInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Consul 实例配置");
-            run_action(kind, |service| service.install())
+            ConsulService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Rnacos => {
-            RnacosInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Rnacos)?;
+            RnacosInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 rnacos 实例配置");
-            run_action(kind, |service| service.install())
+            RnacosService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Rabbitmq => {
-            RabbitmqInstaller::new(devbox_root()?)
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Rabbitmq)?;
+            RabbitmqInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
                 .install()
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 RabbitMQ 实例配置");
-            run_action(kind, |service| service.install())
+            RabbitmqService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
         }
         ServiceKindInput::Nginx => {
             let root = devbox_root()?;
@@ -1615,6 +1776,13 @@ fn verified_releases(kind: ServiceKindInput) -> Result<&'static [VerifiedBinaryR
         ServiceKindInput::Nats => Ok(NATS_RELEASES),
         ServiceKindInput::Etcd => Ok(ETCD_RELEASES),
         ServiceKindInput::Caddy => Ok(CADDY_RELEASES),
+        ServiceKindInput::Mongodb => Ok(MONGODB_RELEASES),
+        ServiceKindInput::Meilisearch => Ok(MEILISEARCH_RELEASES),
+        ServiceKindInput::Minio => Ok(MINIO_RELEASES),
+        ServiceKindInput::Rustfs => Ok(RUSTFS_RELEASES),
+        ServiceKindInput::Consul => Ok(CONSUL_RELEASES),
+        ServiceKindInput::Rnacos => Ok(RNACOS_RELEASES),
+        ServiceKindInput::Rabbitmq => Ok(RABBITMQ_RELEASES),
         _ => Err("当前服务暂未接入通用多版本管理".into()),
     }
 }
@@ -1625,6 +1793,13 @@ fn verified_service_name(kind: ServiceKindInput) -> &'static str {
         ServiceKindInput::Nats => "NATS",
         ServiceKindInput::Etcd => "etcd",
         ServiceKindInput::Caddy => "Caddy",
+        ServiceKindInput::Mongodb => "MongoDB",
+        ServiceKindInput::Meilisearch => "Meilisearch",
+        ServiceKindInput::Minio => "MinIO",
+        ServiceKindInput::Rustfs => "RustFS",
+        ServiceKindInput::Consul => "Consul",
+        ServiceKindInput::Rnacos => "rnacos",
+        ServiceKindInput::Rabbitmq => "RabbitMQ",
         _ => "服务",
     }
 }
@@ -1645,6 +1820,13 @@ fn verified_installer_state(
         ServiceKindInput::Nats => state!(NatsInstaller),
         ServiceKindInput::Etcd => state!(EtcdInstaller),
         ServiceKindInput::Caddy => state!(CaddyInstaller),
+        ServiceKindInput::Mongodb => state!(MongodbInstaller),
+        ServiceKindInput::Meilisearch => state!(MeilisearchInstaller),
+        ServiceKindInput::Minio => state!(MinioInstaller),
+        ServiceKindInput::Rustfs => state!(RustfsInstaller),
+        ServiceKindInput::Consul => state!(ConsulInstaller),
+        ServiceKindInput::Rnacos => state!(RnacosInstaller),
+        ServiceKindInput::Rabbitmq => state!(RabbitmqInstaller),
         _ => return Err("当前服务暂未接入通用多版本管理".into()),
     })
 }
@@ -1721,6 +1903,73 @@ fn install_verified_version(
                 .install()
                 .map_err(stringify_error)?;
             CaddyService::new(caddy_service_config(root, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Mongodb => {
+            MongodbInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            MongodbService::new(catalog_service_config(root, ServiceKind::Mongodb, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Meilisearch => {
+            MeilisearchInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            MeilisearchService::new(catalog_service_config(
+                root,
+                ServiceKind::Meilisearch,
+                release,
+            ))
+            .and_then(|service| service.install())
+            .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Minio => {
+            MinioInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            MinioService::new(catalog_service_config(root, ServiceKind::Minio, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Rustfs => {
+            RustfsInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            RustfsService::new(catalog_service_config(root, ServiceKind::Rustfs, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Consul => {
+            ConsulInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            ConsulService::new(catalog_service_config(root, ServiceKind::Consul, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Rnacos => {
+            RnacosInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            RnacosService::new(catalog_service_config(root, ServiceKind::Rnacos, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Rabbitmq => {
+            RabbitmqInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            RabbitmqService::new(catalog_service_config(root, ServiceKind::Rabbitmq, release))
                 .and_then(|service| service.install())
                 .map_err(stringify_error)?;
         }
