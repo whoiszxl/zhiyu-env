@@ -8,25 +8,37 @@ use devbox_core::{
         RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_SERIES,
         RNACOS_VERSION, RUSTFS_SERIES, RUSTFS_VERSION,
     },
-    report_install_progress, with_install_reporter, ConfigManager, ConsulInstaller, ConsulService,
-    EtcdInstaller, EtcdService, InstallReporter, KafkaInstaller, KafkaService, MailpitInstaller,
-    MailpitService, MeilisearchInstaller, MeilisearchService, MinioInstaller, MinioService,
-    MongodbInstaller, MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService,
-    PostgresInstaller, PostgresService, RabbitmqInstaller, RabbitmqService, RedisInstaller,
-    RedisService, RnacosInstaller, RnacosService, RustfsInstaller, RustfsService, ServiceConfig,
-    ServiceKind, ServiceManager, ServiceStatus,
+    report_install_progress, with_install_context, ConfigManager, ConsulInstaller, ConsulService,
+    EtcdInstaller, EtcdService, InstallCancellationToken, InstallReporter, KafkaInstaller,
+    KafkaService, MailpitInstaller, MailpitService, MeilisearchInstaller, MeilisearchService,
+    MinioInstaller, MinioService, MongodbInstaller, MongodbService, MysqlInstaller, MysqlService,
+    NatsInstaller, NatsService, PostgresInstaller, PostgresService, RabbitmqInstaller,
+    RabbitmqService, RedisInstaller, RedisService, RnacosInstaller, RnacosService, RustfsInstaller,
+    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 pub(crate) const INSTALL_PROGRESS_EVENT: &str = "install-progress";
+#[derive(Clone)]
+struct ActiveInstallTask {
+    kind: String,
+    cancellation: InstallCancellationToken,
+}
+
+static INSTALL_TASKS: OnceLock<Mutex<HashMap<String, ActiveInstallTask>>> = OnceLock::new();
+
+fn install_tasks() -> &'static Mutex<HashMap<String, ActiveInstallTask>> {
+    INSTALL_TASKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +63,26 @@ pub(crate) fn run_install_task<T>(
 ) -> Result<T, String> {
     if operation_id.is_empty() || operation_id.len() > 100 {
         return Err("无效的安装任务标识".into());
+    }
+    let cancellation = InstallCancellationToken::default();
+    {
+        let mut tasks = install_tasks()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if tasks.values().any(|task| task.kind == kind) {
+            return Err(format!("{kind} 正在安装，请等待当前任务结束"));
+        }
+        match tasks.entry(operation_id.clone()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(ActiveInstallTask {
+                    kind: kind.clone(),
+                    cancellation: cancellation.clone(),
+                });
+            }
+            std::collections::hash_map::Entry::Occupied(_) => {
+                return Err("安装任务标识正在使用".into());
+            }
+        }
     }
 
     emit_install_event(
@@ -82,7 +114,11 @@ pub(crate) fn run_install_task<T>(
         );
     });
 
-    let result = with_install_reporter(reporter, operation);
+    let result = with_install_context(reporter, cancellation.clone(), operation);
+    install_tasks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&operation_id);
     match &result {
         Ok(_) => emit_install_event(
             &app,
@@ -95,19 +131,42 @@ pub(crate) fn run_install_task<T>(
                 status: "completed",
             },
         ),
-        Err(error) => emit_install_event(
-            &app,
-            InstallProgressEvent {
-                operation_id,
-                kind,
-                percent: None,
-                stage: "安装失败".into(),
-                message: error.clone(),
-                status: "failed",
-            },
-        ),
+        Err(error) => {
+            let cancelled = cancellation.is_cancelled();
+            emit_install_event(
+                &app,
+                InstallProgressEvent {
+                    operation_id,
+                    kind,
+                    percent: None,
+                    stage: if cancelled {
+                        "安装已取消".into()
+                    } else {
+                        "安装失败".into()
+                    },
+                    message: if cancelled {
+                        "安装任务已停止，可再次安装并从下载断点继续".into()
+                    } else {
+                        error.clone()
+                    },
+                    status: if cancelled { "cancelled" } else { "failed" },
+                },
+            )
+        }
     }
     result
+}
+
+#[tauri::command]
+pub fn service_install_cancel(operation_id: String) -> Result<(), String> {
+    let tasks = install_tasks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let task = tasks
+        .get(&operation_id)
+        .ok_or_else(|| "安装任务已经结束或不存在".to_string())?;
+    task.cancellation.cancel();
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
@@ -159,6 +218,9 @@ pub struct ServiceInfo {
     pub(crate) port: u16,
     pub(crate) status: &'static str,
     pub(crate) pid: Option<u32>,
+    install_supported: bool,
+    install_support_label: String,
+    platform_label: String,
     instance_dir: PathBuf,
     config_path: PathBuf,
     data_path: PathBuf,
@@ -739,6 +801,7 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "RabbitMQ",
     };
+    let (install_supported, install_support_label) = install_compatibility(kind);
     Ok(ServiceInfo {
         kind: kind.into(),
         name,
@@ -746,6 +809,9 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         port: config.port,
         status,
         pid,
+        install_supported,
+        install_support_label,
+        platform_label: platform_label(),
         instance_dir: config.instance_dir.clone(),
         config_path: native_config_path(&config),
         data_path: match kind {
@@ -763,6 +829,49 @@ fn info(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
         log_path: primary_log_path(&config),
         executable_path: config.executable,
     })
+}
+
+fn platform_label() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        value => value,
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" if std::env::consts::OS == "macos" => "Apple Silicon",
+        "aarch64" => "ARM64",
+        "x86_64" if std::env::consts::OS == "macos" => "Intel",
+        "x86_64" => "x64",
+        value => value,
+    };
+    format!("{os} · {arch}")
+}
+
+fn install_compatibility(kind: ServiceKindInput) -> (bool, String) {
+    let platform = platform_label();
+    let supported = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        true
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        matches!(kind, ServiceKindInput::Redis | ServiceKindInput::Postgres)
+    } else {
+        false
+    };
+    let label = if supported {
+        format!("支持当前平台：{platform}")
+    } else {
+        format!("当前版本暂不支持在 {platform} 自动安装")
+    };
+    (supported, label)
+}
+
+fn ensure_install_compatible(kind: ServiceKindInput) -> Result<(), String> {
+    let (supported, label) = install_compatibility(kind);
+    if supported {
+        Ok(())
+    } else {
+        Err(label)
+    }
 }
 
 fn run_action(
@@ -824,6 +933,7 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
 }
 
 fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
+    ensure_install_compatible(kind)?;
     match kind {
         ServiceKindInput::Redis => {
             let root = devbox_root()?;
@@ -998,6 +1108,7 @@ pub async fn redis_version_select(
 ) -> Result<ServiceInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
         run_install_task(app, operation_id, "redis".into(), || {
+            ensure_install_compatible(ServiceKindInput::Redis)?;
             let root = devbox_root()?;
             let release =
                 redis_release(&version).ok_or_else(|| format!("不支持 Redis 版本 {version}"))?;
@@ -1060,6 +1171,7 @@ pub async fn mysql_version_select(
 ) -> Result<ServiceInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
         run_install_task(app, operation_id, "mysql".into(), || {
+            ensure_install_compatible(ServiceKindInput::Mysql)?;
             let root = devbox_root()?;
             let release =
                 mysql_release(&version).ok_or_else(|| format!("不支持 MySQL 版本 {version}"))?;
@@ -1124,6 +1236,7 @@ pub async fn postgres_version_select(
 ) -> Result<ServiceInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
         run_install_task(app, operation_id, "postgres".into(), || {
+            ensure_install_compatible(ServiceKindInput::Postgres)?;
             let root = devbox_root()?;
             let release = postgres_release(&version)
                 .ok_or_else(|| format!("不支持 PostgreSQL 版本 {version}"))?;
@@ -1611,9 +1724,9 @@ fn tail_file(path: &PathBuf, max_bytes: u64) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        mailpit_value_allowed, mysql_service_config, path_disk_size, postgres_service_config,
-        redis_service_config, selected_mysql_release, selected_postgres_release,
-        selected_redis_release, sum_process_metrics,
+        install_compatibility, mailpit_value_allowed, mysql_service_config, path_disk_size,
+        platform_label, postgres_service_config, redis_service_config, selected_mysql_release,
+        selected_postgres_release, selected_redis_release, sum_process_metrics, ServiceKindInput,
     };
     use devbox_core::{ConfigManager, ServiceConfig};
     use std::fs;
@@ -1660,6 +1773,17 @@ mod tests {
             (3 * 1024 * 1024, 3.75)
         );
         assert_eq!(sum_process_metrics(""), (0, 0.0));
+    }
+
+    #[test]
+    fn installer_reports_the_current_platform_and_support_state() {
+        let platform = platform_label();
+        assert!(!platform.is_empty());
+        let (supported, label) = install_compatibility(ServiceKindInput::Redis);
+        assert!(label.contains(&platform));
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            assert!(supported);
+        }
     }
 
     #[test]

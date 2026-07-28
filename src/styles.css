@@ -412,6 +412,14 @@ button {
   font-size: 10px;
 }
 
+.detail-identity .platform-unsupported {
+  display: block;
+  max-width: 430px;
+  margin-top: 5px;
+  color: #a45a43;
+  font-size: 9px;
+}
+
 .status-dot.busy {
   border: 1px solid #b6b8ae;
   border-top-color: #dd5633;
@@ -3804,6 +3812,11 @@ button:disabled {
   box-shadow: 0 0 0 3px rgba(201, 79, 58, 0.14);
 }
 
+.install-progress-panel.cancelled .install-progress-state {
+  background: #85877f;
+  box-shadow: 0 0 0 3px rgba(133, 135, 127, 0.14);
+}
+
 .install-progress-summary strong {
   font-size: 10px;
   white-space: nowrap;
@@ -3855,6 +3868,10 @@ button:disabled {
 
 .install-progress-panel.failed .install-progress-track span {
   background: #c94f3a;
+}
+
+.install-progress-panel.cancelled .install-progress-track span {
+  background: #85877f;
 }
 
 .install-log-preview,
@@ -3927,6 +3944,28 @@ button:disabled {
   background: transparent;
   color: #96988f;
   font-size: 15px;
+}
+
+.install-progress-cancel {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid #d5b8ad;
+  border-radius: 6px;
+  background: #fffaf7;
+  color: #a44e39;
+  font-size: 8px;
+}
+
+.install-progress-cancel:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.install-progress-panel.running .install-progress-summary {
+  padding-right: 88px;
 }
 
 @keyframes install-pulse {

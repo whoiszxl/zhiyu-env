@@ -29,6 +29,9 @@ pub enum DevBoxError {
     #[error("download integrity check failed: expected {expected}, got {actual}")]
     IntegrityMismatch { expected: String, actual: String },
 
+    #[error("安装已取消")]
+    InstallCancelled,
+
     #[error("external command failed: {command}: {message}")]
     CommandFailed { command: String, message: String },
 

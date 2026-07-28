@@ -29,6 +29,9 @@ export interface ServiceInfo {
   port: number;
   status: ServiceState;
   pid: number | null;
+  installSupported: boolean;
+  installSupportLabel: string;
+  platformLabel: string;
   instanceDir: string;
   configPath: string;
   dataPath: string;

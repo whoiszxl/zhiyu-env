@@ -279,10 +279,7 @@ fn request_target(
 }
 
 fn object_key(config: &S3Config, endpoint: &reqwest::Url, key: &str) -> String {
-    let path_style = config.path_style
-        && !endpoint
-            .host_str()
-            .is_some_and(requires_virtual_host);
+    let path_style = config.path_style && !endpoint.host_str().is_some_and(requires_virtual_host);
     if path_style {
         format!("{}/{}", config.bucket, key)
     } else {
@@ -570,9 +567,7 @@ pub async fn s3_list_objects(
         if let Some(token) = continuation_token.filter(|token| !token.is_empty()) {
             query.push(("continuation-token".into(), token));
         }
-        let key = if config.path_style
-            && !endpoint.host_str().is_some_and(requires_virtual_host)
-        {
+        let key = if config.path_style && !endpoint.host_str().is_some_and(requires_virtual_host) {
             config.bucket.clone()
         } else {
             String::new()
@@ -623,7 +618,8 @@ pub async fn s3_put_object(config: S3Config, key: String, data: String) -> Resul
 #[tauri::command]
 pub async fn s3_put_file(config: S3Config, key: String, path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let metadata = fs::metadata(&path).map_err(|error| format!("读取待上传文件失败: {error}"))?;
+        let metadata =
+            fs::metadata(&path).map_err(|error| format!("读取待上传文件失败: {error}"))?;
         if !metadata.is_file() {
             return Err("选择的路径不是文件".to_string());
         }
@@ -633,14 +629,7 @@ pub async fn s3_put_file(config: S3Config, key: String, path: String) -> Result<
         let data = fs::read(&path).map_err(|error| format!("读取待上传文件失败: {error}"))?;
         let endpoint = validate_config(&config)?;
         let key = object_key(&config, &endpoint, &key);
-        s3_request(
-            &config,
-            "PUT",
-            &key,
-            &[],
-            Some(&data),
-            ERROR_RESPONSE_LIMIT,
-        )?;
+        s3_request(&config, "PUT", &key, &[], Some(&data), ERROR_RESPONSE_LIMIT)?;
         Ok(())
     })
     .await

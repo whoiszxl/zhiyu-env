@@ -62,6 +62,10 @@ export function runServiceAction(
   });
 }
 
+export function cancelInstall(operationId: string): Promise<void> {
+  return invoke<void>("service_install_cancel", { operationId });
+}
+
 export function getServiceMetrics(
   kind: ServiceKind,
 ): Promise<ServiceMetrics> {

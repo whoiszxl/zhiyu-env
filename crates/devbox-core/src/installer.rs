@@ -6,9 +6,13 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Condvar, Mutex,
+};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallUpdate {
@@ -47,17 +51,59 @@ impl InstallReporter {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct InstallCancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl InstallCancellationToken {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
+
 thread_local! {
     static ACTIVE_INSTALL_REPORTER: RefCell<Option<InstallReporter>> = const { RefCell::new(None) };
+    static ACTIVE_INSTALL_CANCELLATION: RefCell<Option<InstallCancellationToken>> = const { RefCell::new(None) };
 }
 
 pub fn with_install_reporter<T>(reporter: InstallReporter, operation: impl FnOnce() -> T) -> T {
+    with_install_context(reporter, InstallCancellationToken::default(), operation)
+}
+
+pub fn with_install_context<T>(
+    reporter: InstallReporter,
+    cancellation: InstallCancellationToken,
+    operation: impl FnOnce() -> T,
+) -> T {
     ACTIVE_INSTALL_REPORTER.with(|active| {
         let previous = active.replace(Some(reporter));
-        let result = operation();
-        active.replace(previous);
-        result
+        ACTIVE_INSTALL_CANCELLATION.with(|active_cancellation| {
+            let previous_cancellation = active_cancellation.replace(Some(cancellation));
+            let result = operation();
+            active_cancellation.replace(previous_cancellation);
+            active.replace(previous);
+            result
+        })
     })
+}
+
+fn check_install_cancelled() -> Result<()> {
+    let cancelled = ACTIVE_INSTALL_CANCELLATION.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .is_some_and(InstallCancellationToken::is_cancelled)
+    });
+    if cancelled {
+        Err(DevBoxError::InstallCancelled)
+    } else {
+        Ok(())
+    }
 }
 
 pub fn report_install_progress(percent: u8, stage: &str, message: impl Into<String>) {
@@ -410,11 +456,19 @@ impl RedisInstaller {
             "准备安装",
             format!("准备安装 Redis {}", self.release.version),
         );
+        ensure_macos("Redis")?;
         self.ensure_build_tools()?;
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/redis-server");
-        if self.is_expected_version(&executable) {
+        if self.is_expected_version(&executable)
+            && installation_manifest_matches(
+                &installation_dir,
+                "redis",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
             report_install_progress(90, "已安装", "目标版本已经安装，无需重复构建");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -446,6 +500,7 @@ impl RedisInstaller {
             unique_suffix()
         ));
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
 
         let result = self.build_and_commit(&archive, &work_dir, &installation_dir);
         let _ = fs::remove_dir_all(&work_dir);
@@ -464,7 +519,14 @@ impl RedisInstaller {
     }
 
     pub fn is_installed(&self) -> bool {
-        self.is_expected_version(&self.installation_dir().join("bin/redis-server"))
+        let installation_dir = self.installation_dir();
+        self.is_expected_version(&installation_dir.join("bin/redis-server"))
+            && installation_manifest_matches(
+                &installation_dir,
+                "redis",
+                self.release.version,
+                self.release.sha256,
+            )
     }
 
     fn ensure_build_tools(&self) -> Result<()> {
@@ -624,7 +686,14 @@ impl MysqlInstaller {
         ensure_macos_arm64("MySQL")?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/mysqld");
-        if binary_contains(&executable, &["--version"], self.release.version) {
+        if binary_contains(&executable, &["--version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "mysql",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
             report_install_progress(90, "已安装", "目标版本已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -655,6 +724,7 @@ impl MysqlInstaller {
             unique_suffix()
         ));
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
         let _ = fs::remove_dir_all(&work_dir);
         result?;
@@ -689,10 +759,16 @@ impl MysqlInstaller {
     }
 
     pub fn is_installed(&self) -> bool {
+        let installation_dir = self.installation_dir();
         binary_contains(
-            &self.installation_dir().join("bin/mysqld"),
+            &installation_dir.join("bin/mysqld"),
             &["--version"],
             self.release.version,
+        ) && installation_manifest_matches(
+            &installation_dir,
+            "mysql",
+            self.release.version,
+            self.release.sha256,
         )
     }
 
@@ -801,6 +877,7 @@ impl DuckdbInstaller {
             unique_suffix()
         ));
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
         let _ = fs::remove_dir_all(&work_dir);
         result?;
@@ -942,6 +1019,7 @@ impl RabbitmqInstaller {
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let rabbit_archive = downloads_dir.join(RABBITMQ_ARCHIVE);
         prepare_archive(
             &rabbit_archive,
@@ -1041,6 +1119,7 @@ impl RnacosInstaller {
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let archive = downloads_dir.join(RNACOS_ARCHIVE);
         prepare_archive(&archive, RNACOS_ARCHIVE, RNACOS_URL, RNACOS_SHA256)?;
         run(
@@ -1121,6 +1200,7 @@ impl ConsulInstaller {
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let archive = downloads_dir.join(CONSUL_ARCHIVE);
         prepare_archive(&archive, CONSUL_ARCHIVE, CONSUL_URL, CONSUL_SHA256)?;
         run(
@@ -1201,6 +1281,7 @@ impl EtcdInstaller {
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let archive = downloads_dir.join(ETCD_ARCHIVE);
         prepare_archive(&archive, ETCD_ARCHIVE, ETCD_URL, ETCD_SHA256)?;
         run(
@@ -1269,7 +1350,14 @@ impl RustfsInstaller {
         ensure_tools(&["/usr/bin/curl", "/usr/bin/unzip"])?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/rustfs");
-        if binary_contains(&executable, &["--version"], RUSTFS_VERSION) {
+        if binary_contains(&executable, &["--version"], RUSTFS_VERSION)
+            && installation_manifest_matches(
+                &installation_dir,
+                "rustfs",
+                RUSTFS_VERSION,
+                RUSTFS_SHA256,
+            )
+        {
             report_install_progress(90, "已安装", "RustFS 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -1284,6 +1372,7 @@ impl RustfsInstaller {
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let archive = downloads_dir.join(RUSTFS_ARCHIVE);
         prepare_archive(&archive, RUSTFS_ARCHIVE, RUSTFS_URL, RUSTFS_SHA256)?;
         run(
@@ -1349,7 +1438,14 @@ impl MinioInstaller {
         ensure_tools(&["/usr/bin/curl"])?;
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/minio");
-        if binary_contains(&executable, &["--version"], "RELEASE.2025-09-07") {
+        if binary_contains(&executable, &["--version"], "RELEASE.2025-09-07")
+            && installation_manifest_matches(
+                &installation_dir,
+                "minio",
+                MINIO_VERSION,
+                MINIO_SHA256,
+            )
+        {
             report_install_progress(90, "已安装", "MinIO 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -1364,6 +1460,7 @@ impl MinioInstaller {
         ));
         fs::create_dir_all(&downloads_dir)?;
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let download = downloads_dir.join(MINIO_BINARY);
         prepare_archive(&download, MINIO_BINARY, MINIO_URL, MINIO_SHA256)?;
         let stage = work_dir.join("installation");
@@ -1519,7 +1616,9 @@ impl NatsInstaller {
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/nats-server");
-        if binary_contains(&executable, &["--version"], NATS_VERSION) {
+        if binary_contains(&executable, &["--version"], NATS_VERSION)
+            && installation_manifest_matches(&installation_dir, "nats", NATS_VERSION, NATS_SHA256)
+        {
             report_install_progress(90, "已安装", "NATS 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -1544,6 +1643,7 @@ impl NatsInstaller {
             unique_suffix()
         ));
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
         let _ = fs::remove_dir_all(&work_dir);
         result?;
@@ -1657,6 +1757,7 @@ impl KafkaInstaller {
             unique_suffix()
         ));
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
         let _ = fs::remove_dir_all(&work_dir);
         result?;
@@ -1767,6 +1868,7 @@ impl MailpitInstaller {
             unique_suffix()
         ));
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
         let _ = fs::remove_dir_all(&work_dir);
         result?;
@@ -1839,7 +1941,14 @@ impl MongodbInstaller {
 
         let installation_dir = self.installation_dir();
         let executable = installation_dir.join("bin/mongod");
-        if binary_contains(&executable, &["--version"], MONGODB_VERSION) {
+        if binary_contains(&executable, &["--version"], MONGODB_VERSION)
+            && installation_manifest_matches(
+                &installation_dir,
+                "mongodb",
+                MONGODB_VERSION,
+                MONGODB_SHA256,
+            )
+        {
             report_install_progress(90, "已安装", "MongoDB 已经安装");
             return Ok(InstallOutcome::AlreadyInstalled {
                 path: installation_dir,
@@ -1864,6 +1973,7 @@ impl MongodbInstaller {
             unique_suffix()
         ));
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
         let _ = fs::remove_dir_all(&work_dir);
         result?;
@@ -1972,7 +2082,7 @@ impl PostgresInstaller {
             "准备安装",
             format!("准备安装 PostgreSQL {}", self.release.version),
         );
-        ensure_macos_arm64("PostgreSQL")?;
+        ensure_macos("PostgreSQL")?;
         ensure_tools(&[
             "/usr/bin/curl",
             "/usr/bin/tar",
@@ -1987,6 +2097,12 @@ impl PostgresInstaller {
                 &installation_dir.join("bin/initdb"),
                 &["--version"],
                 self.release.version,
+            )
+            && installation_manifest_matches(
+                &installation_dir,
+                "postgres",
+                self.release.version,
+                self.release.sha256,
             )
         {
             report_install_progress(90, "已安装", "目标版本已经安装，无需重复编译");
@@ -2019,6 +2135,7 @@ impl PostgresInstaller {
             unique_suffix()
         ));
         fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
         let result = self.build_and_commit(&archive, &work_dir, &installation_dir);
         let _ = fs::remove_dir_all(&work_dir);
         result?;
@@ -2066,6 +2183,11 @@ impl PostgresInstaller {
             &installation_dir.join("bin/initdb"),
             &["--version"],
             self.release.version,
+        ) && installation_manifest_matches(
+            &installation_dir,
+            "postgres",
+            self.release.version,
+            self.release.sha256,
         )
     }
 
@@ -2167,8 +2289,10 @@ fn prepare_archive(
     source_url: &str,
     expected_sha256: &str,
 ) -> Result<()> {
+    check_install_cancelled()?;
     report_install_progress(8, "检查缓存", format!("检查安装包缓存：{archive_name}"));
     if archive.is_file() {
+        check_install_cancelled()?;
         if sha256(archive)? == expected_sha256 {
             report_install_progress(35, "使用缓存", format!("安装包校验通过：{archive_name}"));
             return Ok(());
@@ -2190,11 +2314,12 @@ fn prepare_archive(
         configured_mirror.as_deref(),
         settings.public_github_mirror && std::env::var_os("ZHIYU_DISABLE_PUBLIC_MIRROR").is_none(),
     );
-    let _download_permit = DownloadPermit::acquire(settings.download_concurrency);
+    let _download_permit = DownloadPermit::acquire(settings.download_concurrency)?;
     let mut failures = Vec::new();
 
     for (index, candidate) in candidates.iter().enumerate() {
-        let _ = fs::remove_file(&partial);
+        check_install_cancelled()?;
+        let resuming = partial.is_file();
         report_install_progress(
             12,
             "下载安装包",
@@ -2206,23 +2331,18 @@ fn prepare_archive(
                 candidate.url
             ),
         );
-        let mut command = Command::new("/usr/bin/curl");
-        command
-            .args(["--fail", "--location", "--silent", "--show-error"])
-            .arg("--connect-timeout")
-            .arg(settings.download_timeout_seconds.min(15).to_string())
-            .arg("--max-time")
-            .arg(settings.download_timeout_seconds.to_string())
-            .args(["--retry", "1"])
-            .arg("--output")
-            .arg(&partial);
-        if !candidate.official {
-            command.args(["--speed-time", "15", "--speed-limit", "16384"]);
+        if resuming {
+            report_install_log(
+                "断点续传",
+                format!("检测到未完成下载，将从已有文件继续：{archive_name}"),
+            );
         }
-        let output = command.arg(&candidate.url).output()?;
-        if !output.status.success() {
-            let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            failures.push(format!("{}: {}", candidate.label, message));
+        if let Err(error) = download_candidate(&partial, candidate, &settings, resuming) {
+            if matches!(error, DevBoxError::InstallCancelled) {
+                report_install_log("安装取消", "下载已停止，未完成文件将用于下次断点续传");
+                return Err(error);
+            }
+            failures.push(format!("{}: {}", candidate.label, error));
             report_install_log(
                 "切换下载源",
                 format!("{}不可用，自动尝试下一个下载源", candidate.label),
@@ -2230,10 +2350,12 @@ fn prepare_archive(
             continue;
         }
 
+        check_install_cancelled()?;
         report_install_progress(30, "校验安装包", "下载完成，正在计算 SHA-256");
         let actual = sha256(&partial)?;
         if actual != expected_sha256 {
             failures.push(format!("{}: SHA-256 校验不一致", candidate.label));
+            let _ = fs::remove_file(&partial);
             report_install_log(
                 "切换下载源",
                 format!("{}返回的文件校验失败，已丢弃并切换", candidate.label),
@@ -2248,11 +2370,59 @@ fn prepare_archive(
         );
         return Ok(());
     }
-    let _ = fs::remove_file(&partial);
     Err(DevBoxError::CommandFailed {
         command: "curl".into(),
         message: format!("所有下载源均失败：{}", failures.join("；")),
     })
+}
+
+fn download_candidate(
+    partial: &Path,
+    candidate: &DownloadCandidate,
+    settings: &InstallerDownloadSettings,
+    resume: bool,
+) -> Result<()> {
+    let mut command = download_command(partial, candidate, settings, resume);
+    match run(&mut command, "curl") {
+        Ok(()) => Ok(()),
+        Err(DevBoxError::InstallCancelled) => Err(DevBoxError::InstallCancelled),
+        Err(_error) if resume => {
+            report_install_log(
+                "断点续传",
+                format!("{}不支持当前断点，正在从头重新下载", candidate.label),
+            );
+            fs::remove_file(partial)?;
+            run(
+                &mut download_command(partial, candidate, settings, false),
+                "curl",
+            )
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn download_command(
+    partial: &Path,
+    candidate: &DownloadCandidate,
+    settings: &InstallerDownloadSettings,
+    resume: bool,
+) -> Command {
+    let mut command = Command::new("/usr/bin/curl");
+    command
+        .args(["--fail", "--location", "--silent", "--show-error"])
+        .arg("--connect-timeout")
+        .arg(settings.download_timeout_seconds.min(15).to_string())
+        .arg("--max-time")
+        .arg(settings.download_timeout_seconds.to_string())
+        .args(["--retry", "1"]);
+    if resume {
+        command.args(["--continue-at", "-"]);
+    }
+    if !candidate.official {
+        command.args(["--speed-time", "15", "--speed-limit", "16384"]);
+    }
+    command.arg("--output").arg(partial).arg(&candidate.url);
+    command
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2310,16 +2480,18 @@ static ACTIVE_DOWNLOADS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new(
 struct DownloadPermit;
 
 impl DownloadPermit {
-    fn acquire(limit: usize) -> Self {
+    fn acquire(limit: usize) -> Result<Self> {
         let (lock, ready) = &ACTIVE_DOWNLOADS;
         let mut active = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         while *active >= limit {
-            active = ready
-                .wait(active)
+            check_install_cancelled()?;
+            let (next, _) = ready
+                .wait_timeout(active, Duration::from_millis(100))
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            active = next;
         }
         *active += 1;
-        Self
+        Ok(Self)
     }
 }
 
@@ -2385,14 +2557,55 @@ fn write_manifest(
     Ok(())
 }
 
+fn installation_manifest_matches(
+    installation_dir: &Path,
+    service: &str,
+    version: &str,
+    source_sha256: &str,
+) -> bool {
+    let value: serde_json::Value = match fs::read(installation_dir.join("manifest.json"))
+        .ok()
+        .and_then(|contents| serde_json::from_slice(&contents).ok())
+    {
+        Some(value) => value,
+        None => return false,
+    };
+    value.get("service").and_then(|value| value.as_str()) == Some(service)
+        && value.get("version").and_then(|value| value.as_str()) == Some(version)
+        && value.get("source_sha256").and_then(|value| value.as_str()) == Some(source_sha256)
+}
+
 fn replace_installation(stage: &Path, installation_dir: &Path) -> Result<()> {
+    check_install_cancelled()?;
     if let Some(parent) = installation_dir.parent() {
         fs::create_dir_all(parent)?;
     }
+    let backup = installation_dir.with_file_name(format!(
+        ".{}-previous-{}-{}",
+        installation_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("installation"),
+        std::process::id(),
+        unique_suffix()
+    ));
     if installation_dir.exists() {
-        fs::remove_dir_all(installation_dir)?;
+        fs::rename(installation_dir, &backup)?;
     }
-    fs::rename(stage, installation_dir)?;
+    if let Err(error) = fs::rename(stage, installation_dir) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, installation_dir);
+        }
+        return Err(error.into());
+    }
+    if backup.exists() {
+        if let Err(error) = fs::remove_dir_all(&backup) {
+            report_install_log(
+                "清理旧版本",
+                format!("新版本已安装，但旧目录清理失败：{error}"),
+            );
+        }
+    }
     Ok(())
 }
 
@@ -2430,11 +2643,22 @@ fn ensure_macos_arm64(service: &str) -> Result<()> {
     }
 }
 
+fn ensure_macos(service: &str) -> Result<()> {
+    if cfg!(target_os = "macos") {
+        Ok(())
+    } else {
+        Err(DevBoxError::UnsupportedPlatform(format!(
+            "{service} automatic installation currently supports macOS"
+        )))
+    }
+}
+
 fn sha256(path: &Path) -> Result<String> {
     let mut reader = BufReader::new(File::open(path)?);
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
+        check_install_cancelled()?;
         let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
@@ -2445,20 +2669,60 @@ fn sha256(path: &Path) -> Result<String> {
 }
 
 fn run(command: &mut Command, name: &str) -> Result<()> {
+    check_install_cancelled()?;
     report_install_log("执行命令", format!("开始执行：{name}"));
-    let output = command.output()?;
-    if output.status.success() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stdout = child.stdout.take().map(|mut output| {
+        thread::spawn(move || {
+            let mut contents = Vec::new();
+            let _ = output.read_to_end(&mut contents);
+            contents
+        })
+    });
+    let stderr = child.stderr.take().map(|mut output| {
+        thread::spawn(move || {
+            let mut contents = Vec::new();
+            let _ = output.read_to_end(&mut contents);
+            contents
+        })
+    });
+
+    let status = loop {
+        if check_install_cancelled().is_err() {
+            terminate_install_process(&mut child);
+            let _ = child.wait();
+            join_output(stdout);
+            join_output(stderr);
+            report_install_log("安装取消", format!("已终止命令：{name}"));
+            return Err(DevBoxError::InstallCancelled);
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+    let stdout = join_output(stdout);
+    let stderr = join_output(stderr);
+    if status.success() {
         report_install_log("执行命令", format!("执行完成：{name}"));
         return Ok(());
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&stdout).trim().to_string();
     let message = match (stdout.is_empty(), stderr.is_empty()) {
         (false, false) => format!("{stdout}\n{stderr}"),
         (false, true) => stdout,
         (true, false) => stderr,
-        (true, true) => format!("process exited with {}", output.status),
+        (true, true) => format!("process exited with {status}"),
     };
     let message = tail_chars(&message, 32 * 1024);
     report_install_log("命令失败", format!("{name}：{message}"));
@@ -2466,6 +2730,43 @@ fn run(command: &mut Command, name: &str) -> Result<()> {
         command: name.into(),
         message,
     })
+}
+
+#[cfg(unix)]
+fn terminate_install_process(child: &mut std::process::Child) {
+    let process_group = -(child.id() as i32);
+    unsafe {
+        libc::kill(process_group, libc::SIGTERM);
+    }
+    thread::sleep(Duration::from_millis(100));
+    unsafe {
+        libc::kill(process_group, libc::SIGKILL);
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_install_process(child: &mut std::process::Child) {
+    let _ = child.kill();
+}
+
+fn join_output(handle: Option<thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    handle
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default()
+}
+
+struct WorkDirCleanup(PathBuf);
+
+impl WorkDirCleanup {
+    fn new(path: &Path) -> Self {
+        Self(path.to_path_buf())
+    }
+}
+
+impl Drop for WorkDirCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 fn tail_chars(value: &str, max_chars: usize) -> String {
@@ -2491,6 +2792,7 @@ fn unique_suffix() -> u128 {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     #[test]
@@ -2603,6 +2905,121 @@ mod tests {
     }
 
     #[test]
+    fn valid_archive_cache_is_reused_without_downloading() {
+        let temp = TempDir::new().unwrap();
+        let downloads = temp.path().join("downloads");
+        fs::create_dir_all(&downloads).unwrap();
+        let archive = downloads.join("example.tar.gz");
+        fs::write(&archive, b"abc").unwrap();
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&updates);
+
+        let result = with_install_reporter(
+            InstallReporter::new(move |update| captured.lock().unwrap().push(update)),
+            || {
+                prepare_archive(
+                    &archive,
+                    "example.tar.gz",
+                    "https://invalid.example/example.tar.gz",
+                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                )
+            },
+        );
+
+        assert!(result.is_ok());
+        assert!(updates
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|update| update.stage == "使用缓存"));
+    }
+
+    #[test]
+    fn resumed_download_uses_curl_continue_at() {
+        let candidate = DownloadCandidate {
+            label: "测试源".into(),
+            url: "https://example.com/archive.tar.gz".into(),
+            official: true,
+        };
+        let settings = InstallerDownloadSettings::default();
+        let command = download_command(
+            Path::new("/tmp/archive.tar.gz.partial"),
+            &candidate,
+            &settings,
+            true,
+        );
+        let arguments = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(arguments
+            .windows(2)
+            .any(|pair| pair == ["--continue-at", "-"]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_interrupts_a_running_command() {
+        let token = InstallCancellationToken::default();
+        let cancellation = token.clone();
+        let canceller = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            cancellation.cancel();
+        });
+        let started = Instant::now();
+
+        let result = with_install_context(InstallReporter::default(), token, || {
+            run(Command::new("/bin/sleep").arg("10"), "sleep")
+        });
+        canceller.join().unwrap();
+
+        assert!(matches!(result, Err(DevBoxError::InstallCancelled)));
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn cancellation_never_replaces_an_existing_installation() {
+        let temp = TempDir::new().unwrap();
+        let installation = temp.path().join("installations/service/1.0");
+        let stage = temp.path().join("tmp/installation");
+        fs::create_dir_all(&installation).unwrap();
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(installation.join("marker"), b"stable").unwrap();
+        fs::write(stage.join("marker"), b"new").unwrap();
+        let token = InstallCancellationToken::default();
+        token.cancel();
+
+        let result = with_install_context(InstallReporter::default(), token, || {
+            replace_installation(&stage, &installation)
+        });
+
+        assert!(matches!(result, Err(DevBoxError::InstallCancelled)));
+        assert_eq!(fs::read(installation.join("marker")).unwrap(), b"stable");
+        assert_eq!(fs::read(stage.join("marker")).unwrap(), b"new");
+
+        let retry = with_install_context(
+            InstallReporter::default(),
+            InstallCancellationToken::default(),
+            || replace_installation(&stage, &installation),
+        );
+        assert!(retry.is_ok());
+        assert_eq!(fs::read(installation.join("marker")).unwrap(), b"new");
+    }
+
+    #[test]
+    fn work_directory_is_removed_when_an_install_step_returns_early() {
+        let temp = TempDir::new().unwrap();
+        let work_dir = temp.path().join("tmp/service-work");
+        fs::create_dir_all(&work_dir).unwrap();
+        {
+            let _cleanup = WorkDirCleanup::new(&work_dir);
+            fs::write(work_dir.join("partial-output"), b"incomplete").unwrap();
+        }
+        assert!(!work_dir.exists());
+    }
+
+    #[test]
     fn replacing_an_installation_creates_the_service_parent_directory() {
         let temp = TempDir::new().unwrap();
         let stage = temp.path().join("tmp/installation");
@@ -2620,6 +3037,42 @@ mod tests {
             b"binary"
         );
         assert!(!stage.exists());
+    }
+
+    #[test]
+    fn installation_manifest_must_match_service_version_and_checksum() {
+        let temp = TempDir::new().unwrap();
+        let installation = temp.path().join("installation");
+        fs::create_dir_all(&installation).unwrap();
+        write_manifest(
+            &installation,
+            "redis",
+            "7.2",
+            "7.2.15",
+            "https://example.com/redis.tar.gz",
+            "abc123",
+            "official-source",
+        )
+        .unwrap();
+
+        assert!(installation_manifest_matches(
+            &installation,
+            "redis",
+            "7.2.15",
+            "abc123"
+        ));
+        assert!(!installation_manifest_matches(
+            &installation,
+            "redis",
+            "7.2.14",
+            "abc123"
+        ));
+        assert!(!installation_manifest_matches(
+            &installation,
+            "redis",
+            "7.2.15",
+            "different"
+        ));
     }
 
     #[test]

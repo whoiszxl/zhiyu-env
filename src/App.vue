@@ -12,6 +12,7 @@ import {
   checkAppUpdate,
   cleanAllInstallCache,
   cleanServiceCache,
+  cancelInstall,
   addMeilisearchDocuments,
   createServiceBackup,
   executeSql,
@@ -166,7 +167,7 @@ type MongoConsoleEntry = {
   elapsedMs: number;
   error: string;
 };
-type InstallTaskStatus = "running" | "completed" | "failed";
+type InstallTaskStatus = "running" | "completed" | "failed" | "cancelled";
 type InstallProgressPayload = {
   operationId: string;
   kind: string;
@@ -333,6 +334,7 @@ const notice = ref("");
 const error = ref("");
 const installTask = ref<InstallTask | null>(null);
 const installLogExpanded = ref(true);
+const installCancelling = ref(false);
 let serviceTimer: number | undefined;
 let metricTimer: number | undefined;
 let diskTimer: number | undefined;
@@ -532,7 +534,12 @@ function startInstallTask(kind: string, title: string) {
 
 function recordInstallFailure(operationId: string, cause: unknown) {
   const task = installTask.value;
-  if (!task || task.operationId !== operationId || task.status === "failed") {
+  if (
+    !task ||
+    task.operationId !== operationId ||
+    task.status === "failed" ||
+    task.status === "cancelled"
+  ) {
     return;
   }
   const message = String(cause);
@@ -543,6 +550,20 @@ function recordInstallFailure(operationId: string, cause: unknown) {
     stage: "安装失败",
     message,
   });
+}
+
+async function cancelCurrentInstall() {
+  const task = installTask.value;
+  if (!task || task.status !== "running" || installCancelling.value) return;
+  installCancelling.value = true;
+  task.stage = "正在取消";
+  try {
+    await cancelInstall(task.operationId);
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    installCancelling.value = false;
+  }
 }
 
 function recordInstallSuccess(operationId: string) {
@@ -2596,7 +2617,7 @@ onUnmounted(() => {
         <span class="core-dot"></span>
         <div>
           <strong>智屿 Core</strong>
-          <small>运行正常 · ARM64</small>
+          <small>运行正常 · {{ selectedService?.platformLabel ?? "检测中" }}</small>
         </div>
       </div>
     </aside>
@@ -2622,7 +2643,9 @@ onUnmounted(() => {
                 ? "完成"
                 : installTask.status === "failed"
                   ? "失败"
-                  : `${installTask.percent}%`
+                  : installTask.status === "cancelled"
+                    ? "已取消"
+                    : `${installTask.percent}%`
             }}
           </span>
           <span class="install-progress-toggle">
@@ -2650,6 +2673,15 @@ onUnmounted(() => {
             </p>
           </template>
         </div>
+        <button
+          v-if="installTask.status === 'running'"
+          type="button"
+          class="install-progress-cancel"
+          :disabled="installCancelling"
+          @click="cancelCurrentInstall"
+        >
+          {{ installCancelling ? "取消中…" : "取消安装" }}
+        </button>
         <button
           v-if="installTask.status !== 'running'"
           type="button"
@@ -3131,6 +3163,15 @@ onUnmounted(() => {
                   · PID {{ selectedService.pid }}
                 </template>
               </p>
+              <small
+                v-if="
+                  selectedService.status === 'not_installed' &&
+                  !selectedService.installSupported
+                "
+                class="platform-unsupported"
+              >
+                {{ selectedService.installSupportLabel }}
+              </small>
             </div>
           </div>
 
@@ -3139,7 +3180,10 @@ onUnmounted(() => {
               v-if="selectedService.status === 'not_installed'"
               class="primary"
               type="button"
-              :disabled="serviceControlBusy"
+              :disabled="
+                serviceControlBusy || !selectedService.installSupported
+              "
+              :title="selectedService.installSupportLabel"
               @click="execute('install')"
             >
               <template v-if="pendingAction === 'install'">
@@ -3244,7 +3288,12 @@ onUnmounted(() => {
                     推荐
                   </i>
                 </span>
-                <em>{{ release.supportLabel }}</em>
+                <em>
+                  {{ release.supportLabel }}
+                  <template v-if="!selectedService.installSupported">
+                    · 当前平台不支持
+                  </template>
+                </em>
               </button>
             </div>
 
@@ -3268,6 +3317,7 @@ onUnmounted(() => {
                     !selectedRedisVersionInfo ||
                     selectedRedisVersionInfo.selected ||
                     selectedService.status === 'running' ||
+                    !selectedService.installSupported ||
                     serviceControlBusy
                   "
                   @click="changeRedisVersion"
@@ -3332,7 +3382,12 @@ onUnmounted(() => {
                     推荐
                   </i>
                 </span>
-                <em>{{ release.supportLabel }}</em>
+                <em>
+                  {{ release.supportLabel }}
+                  <template v-if="!selectedService.installSupported">
+                    · 当前平台不支持
+                  </template>
+                </em>
               </button>
             </div>
 
@@ -3356,6 +3411,7 @@ onUnmounted(() => {
                     !selectedMysqlVersionInfo ||
                     selectedMysqlVersionInfo.selected ||
                     selectedService.status === 'running' ||
+                    !selectedService.installSupported ||
                     serviceControlBusy
                   "
                   @click="changeMysqlVersion"
@@ -3422,7 +3478,12 @@ onUnmounted(() => {
                     推荐
                   </i>
                 </span>
-                <em>{{ release.supportLabel }}</em>
+                <em>
+                  {{ release.supportLabel }}
+                  <template v-if="!selectedService.installSupported">
+                    · 当前平台不支持
+                  </template>
+                </em>
               </button>
             </div>
 
@@ -3446,6 +3507,7 @@ onUnmounted(() => {
                     !selectedPostgresVersionInfo ||
                     selectedPostgresVersionInfo.selected ||
                     selectedService.status === 'running' ||
+                    !selectedService.installSupported ||
                     serviceControlBusy
                   "
                   @click="changePostgresVersion"
