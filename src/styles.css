@@ -277,6 +277,20 @@ button {
   font-family: "SFMono-Regular", Consolas, monospace;
 }
 
+.nav-icon.mockapi,
+.service-logo.mockapi {
+  background: #4f7668;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-weight: 700;
+}
+
+.nav-icon.http,
+.service-logo.http {
+  background: #496a8d;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-weight: 700;
+}
+
 .nav-icon.duckdb,
 .service-logo.duckdb {
   background: #f2c94c;

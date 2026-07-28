@@ -5,6 +5,8 @@ import PortTool from "../components/tools/PortTool.vue";
 import SqliteTool from "../components/tools/SqliteTool.vue";
 import ClipboardTool from "../components/tools/ClipboardTool.vue";
 import S3BrowserTool from "../components/tools/S3BrowserTool.vue";
+import MockApiTool from "../components/tools/MockApiTool.vue";
+import HttpRequestTool from "../components/tools/HttpRequestTool.vue";
 import type { ToolDefinition, ToolId } from "./types";
 
 /**
@@ -18,6 +20,20 @@ export const TOOLS: ToolDefinition[] = [
     navHint: "TCP LISTEN",
     icon: "↔",
     component: PortTool,
+  },
+  {
+    id: "mockapi",
+    navLabel: "本地 Mock API",
+    navHint: "LOCAL HTTP SERVER",
+    icon: "M",
+    component: MockApiTool,
+  },
+  {
+    id: "http",
+    navLabel: "HTTP 请求调试器",
+    navHint: "REST CLIENT",
+    icon: "H",
+    component: HttpRequestTool,
   },
   {
     id: "dataformat",

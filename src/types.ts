@@ -619,3 +619,62 @@ export interface S3ObjectContent {
 export interface S3PresignedUrl {
   url: string;
 }
+
+// ── 本地 Mock API ─────────────────────────────────────────
+
+export interface MockRoute {
+  id: string;
+  method: string;
+  path: string;
+  statusCode: number;
+  contentType: string;
+  responseBody: string;
+  delayMs: number;
+  enabled: boolean;
+}
+
+export interface MockRequestLog {
+  id: number;
+  timestampMillis: number;
+  method: string;
+  path: string;
+  statusCode: number;
+  matchedRouteId: string | null;
+  bodyPreview: string;
+}
+
+export interface MockApiState {
+  running: boolean;
+  port: number;
+  baseUrl: string;
+  routes: MockRoute[];
+  recentRequests: MockRequestLog[];
+}
+
+// ── HTTP 请求调试器 ───────────────────────────────────────
+
+export interface HttpHeader {
+  name: string;
+  value: string;
+}
+
+export interface HttpRequestInput {
+  method: string;
+  url: string;
+  headers: HttpHeader[];
+  body: string;
+  timeoutSeconds: number;
+  followRedirects: boolean;
+}
+
+export interface HttpResponseOutput {
+  statusCode: number;
+  statusText: string;
+  headers: HttpHeader[];
+  body: string;
+  contentType: string;
+  elapsedMs: number;
+  sizeBytes: number;
+  truncated: boolean;
+  effectiveUrl: string;
+}

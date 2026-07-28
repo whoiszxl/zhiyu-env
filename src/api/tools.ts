@@ -19,6 +19,10 @@ import type {
   SqliteTable,
   TokenStatus,
   TransformResult,
+  MockApiState,
+  MockRoute,
+  HttpRequestInput,
+  HttpResponseOutput,
 } from "../types";
 
 export function transformDataFormat(
@@ -160,4 +164,34 @@ export function s3PresignedUrl(
   expires?: number,
 ): Promise<S3PresignedUrl> {
   return invoke<S3PresignedUrl>("s3_presigned_url", { config, key, expires });
+}
+
+// ── 本地 Mock API ─────────────────────────────────────────
+
+export function mockApiState(): Promise<MockApiState> {
+  return invoke<MockApiState>("mock_api_state");
+}
+
+export function mockApiSaveRoutes(routes: MockRoute[]): Promise<MockApiState> {
+  return invoke<MockApiState>("mock_api_save_routes", { routes });
+}
+
+export function mockApiStart(port: number, routes: MockRoute[]): Promise<MockApiState> {
+  return invoke<MockApiState>("mock_api_start", { port, routes });
+}
+
+export function mockApiStop(): Promise<MockApiState> {
+  return invoke<MockApiState>("mock_api_stop");
+}
+
+export function mockApiClearRequests(): Promise<MockApiState> {
+  return invoke<MockApiState>("mock_api_clear_requests");
+}
+
+// ── HTTP 请求调试器 ───────────────────────────────────────
+
+export function executeHttpRequest(
+  request: HttpRequestInput,
+): Promise<HttpResponseOutput> {
+  return invoke<HttpResponseOutput>("http_request_execute", { request });
 }

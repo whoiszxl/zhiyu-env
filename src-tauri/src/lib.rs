@@ -3,9 +3,11 @@ mod commands;
 mod database_tools;
 mod diagnostics;
 mod duckdb_tools;
+mod http_tools;
 mod kafka_tools;
 mod mailpit_tools;
 mod meilisearch_tools;
+mod mock_tools;
 mod mongodb_tools;
 mod nats_tools;
 mod port_tools;
@@ -181,6 +183,12 @@ pub fn run() {
             s3_tools::s3_presigned_url,
             s3_tools::s3_config_get,
             s3_tools::s3_config_save,
+            mock_tools::mock_api_state,
+            mock_tools::mock_api_save_routes,
+            mock_tools::mock_api_start,
+            mock_tools::mock_api_stop,
+            mock_tools::mock_api_clear_requests,
+            http_tools::http_request_execute,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");
