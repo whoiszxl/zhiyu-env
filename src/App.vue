@@ -10,7 +10,7 @@ import SshTool from "./components/tools/SshTool.vue";
 import { findTool, TOOLS } from "./tools/registry";
 import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
 import { formatBytes } from "./utils/format";
-import { setThemeMode } from "./theme";
+import { setColorTheme, setThemeMode } from "./theme";
 import { applyUiScale } from "./display";
 import {
   checkAppUpdate,
@@ -83,8 +83,10 @@ import {
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
   AppSettings,
+  BackgroundPattern,
   BackgroundPosition,
   BackgroundStyle,
+  ColorTheme,
   ThemeMode,
   UiScale,
   DatabaseInfo,
@@ -258,6 +260,8 @@ const diagnosticsRepairing = ref(false);
 const diagnosticReport = ref<DiagnosticReport | null>(null);
 const appSettings = ref<AppSettings>({
   themeMode: "system",
+  colorTheme: "classic",
+  backgroundPattern: "auto",
   uiScale: 100,
   backgroundImagePath: "",
   backgroundStyle: "off",
@@ -281,6 +285,84 @@ const uiScaleOptions: Array<{ value: UiScale; label: string }> = [
   { value: 100, label: "标准" },
   { value: 110, label: "大" },
   { value: 120, label: "特大" },
+];
+const colorThemeOptions: Array<{
+  value: ColorTheme;
+  label: string;
+  description: string;
+  colors: [string, string, string, string, string];
+}> = [
+  {
+    value: "classic",
+    label: "智屿经典",
+    description: "品牌墨绿与暖橙",
+    colors: ["#20231e", "#292c25", "#edf0e8", "#dd5633", "#6eae7d"],
+  },
+  {
+    value: "ocean",
+    label: "深海终端",
+    description: "冷静、专注、高对比",
+    colors: ["#0d1b2a", "#1b263b", "#e0e1dd", "#5fa8d3", "#778da9"],
+  },
+  {
+    value: "forest",
+    label: "松林",
+    description: "自然、柔和、耐久看",
+    colors: ["#1f2925", "#2f3e46", "#edf3ef", "#84a98c", "#52796f"],
+  },
+  {
+    value: "sand",
+    label: "暖沙",
+    description: "明亮、温和、低刺激",
+    colors: ["#f5ebe0", "#fff9f3", "#302a26", "#a56a43", "#d6ccc2"],
+  },
+  {
+    value: "twilight",
+    label: "暮光",
+    description: "低饱和紫灰氛围",
+    colors: ["#22223b", "#303149", "#f2e9e4", "#b59bac", "#4a4e69"],
+  },
+  {
+    value: "aurora",
+    label: "极光青",
+    description: "深蓝与清透薄荷",
+    colors: ["#0b132b", "#1c2541", "#3a506b", "#5bc0be", "#6fffe9"],
+  },
+  {
+    value: "graphite",
+    label: "石墨红",
+    description: "冷灰与克制红色",
+    colors: ["#2b2d42", "#8d99ae", "#edf2f4", "#ef233c", "#d90429"],
+  },
+  {
+    value: "coral",
+    label: "薄荷珊瑚",
+    description: "柔和青绿与暖珊瑚",
+    colors: ["#006d77", "#83c5be", "#edf6f9", "#ffddd2", "#e29578"],
+  },
+  {
+    value: "sunset",
+    label: "落日琥珀",
+    description: "海军蓝与金橙",
+    colors: ["#003049", "#d62828", "#f77f00", "#fcbf49", "#eae2b7"],
+  },
+  {
+    value: "neon",
+    label: "霓虹波普",
+    description: "高能撞色与深色底",
+    colors: ["#ffbe0b", "#fb5607", "#ff006e", "#8338ec", "#3a86ff"],
+  },
+];
+const backgroundPatternOptions: Array<{
+  value: BackgroundPattern;
+  label: string;
+  description: string;
+}> = [
+  { value: "auto", label: "跟随主题", description: "自动匹配当前配色" },
+  { value: "none", label: "无纹理", description: "纯净、简洁" },
+  { value: "grid", label: "方格", description: "开发者网格" },
+  { value: "dots", label: "点阵", description: "轻盈、现代" },
+  { value: "diagonal", label: "斜线", description: "细腻、利落" },
 ];
 const backgroundStyleOptions: Array<{
   value: Exclude<BackgroundStyle, "off">;
@@ -309,6 +391,26 @@ const hasCustomBackground = computed(
     Boolean(visualSettings.value.backgroundImagePath) &&
     visualSettings.value.backgroundStyle !== "off",
 );
+const resolvedBackgroundPattern = computed<
+  Exclude<BackgroundPattern, "auto">
+>(() => {
+  const pattern = visualSettings.value.backgroundPattern;
+  if (pattern !== "auto") return pattern;
+  if (hasCustomBackground.value) return "none";
+  const defaults: Record<ColorTheme, Exclude<BackgroundPattern, "auto">> = {
+    classic: "grid",
+    ocean: "grid",
+    forest: "dots",
+    sand: "none",
+    twilight: "dots",
+    aurora: "dots",
+    graphite: "grid",
+    coral: "dots",
+    sunset: "diagonal",
+    neon: "grid",
+  };
+  return defaults[visualSettings.value.colorTheme];
+});
 const backgroundImageUrl = computed(() =>
   visualSettings.value.backgroundImagePath
     ? convertFileSrc(visualSettings.value.backgroundImagePath)
@@ -331,7 +433,12 @@ const updateStatus = ref<UpdateStatus | null>(null);
 const onboardingOpen = ref(false);
 const onboardingStep = ref(0);
 
-function applyAppTheme(mode: ThemeMode, persist = true) {
+function applyAppTheme(
+  mode: ThemeMode,
+  palette: ColorTheme,
+  persist = true,
+) {
+  setColorTheme(palette, persist);
   setThemeMode(mode, persist);
   void getCurrentWindow()
     .setTheme(mode === "system" ? null : mode)
@@ -1379,7 +1486,10 @@ async function loadAppSettings() {
   try {
     appSettings.value = await getAppSettings();
     settingsDraft.value = { ...appSettings.value };
-    applyAppTheme(appSettings.value.themeMode);
+    applyAppTheme(
+      appSettings.value.themeMode,
+      appSettings.value.colorTheme,
+    );
     applyUiScale(appSettings.value.uiScale);
   } catch (cause) {
     error.value = String(cause);
@@ -1388,7 +1498,18 @@ async function loadAppSettings() {
 
 function previewTheme(mode: ThemeMode) {
   settingsDraft.value.themeMode = mode;
-  applyAppTheme(mode);
+  applyAppTheme(mode, settingsDraft.value.colorTheme);
+  void saveSettings();
+}
+
+function previewColorTheme(theme: ColorTheme) {
+  settingsDraft.value.colorTheme = theme;
+  applyAppTheme(settingsDraft.value.themeMode, theme);
+  void saveSettings();
+}
+
+function previewBackgroundPattern(pattern: BackgroundPattern) {
+  settingsDraft.value.backgroundPattern = pattern;
   void saveSettings();
 }
 
@@ -1533,8 +1654,11 @@ async function saveSettings() {
 
       const saved = await saveAppSettings(snapshot);
       appSettings.value = saved;
-      if (saved.themeMode === settingsDraft.value.themeMode) {
-        applyAppTheme(saved.themeMode);
+      if (
+        saved.themeMode === settingsDraft.value.themeMode &&
+        saved.colorTheme === settingsDraft.value.colorTheme
+      ) {
+        applyAppTheme(saved.themeMode, saved.colorTheme);
       }
       if (saved.uiScale === settingsDraft.value.uiScale) {
         applyUiScale(saved.uiScale);
@@ -1553,7 +1677,10 @@ async function saveSettings() {
   } catch (cause) {
     error.value = String(cause);
     settingsDraft.value = { ...appSettings.value };
-    applyAppTheme(appSettings.value.themeMode);
+    applyAppTheme(
+      appSettings.value.themeMode,
+      appSettings.value.colorTheme,
+    );
     applyUiScale(appSettings.value.uiScale);
   } finally {
     settingsSaving.value = false;
@@ -3283,6 +3410,7 @@ onUnmounted(() => {
     class="app-layout"
     :class="[
       `background-${visualSettings.backgroundStyle}`,
+      `pattern-${resolvedBackgroundPattern}`,
       { 'has-custom-background': hasCustomBackground },
     ]"
     :style="backgroundShellStyle"
@@ -3547,6 +3675,75 @@ onUnmounted(() => {
                 <strong>深色</strong>
                 <small>降低夜间视觉亮度</small>
               </button>
+            </div>
+            <div class="color-theme-setting">
+              <div class="color-theme-heading">
+                <strong>配色主题</strong>
+                <small>改变界面氛围，不影响浅色与深色模式</small>
+              </div>
+              <div
+                class="color-theme-options"
+                role="radiogroup"
+                aria-label="配色主题"
+              >
+                <button
+                  v-for="option in colorThemeOptions"
+                  :key="option.value"
+                  type="button"
+                  :class="{
+                    selected: settingsDraft.colorTheme === option.value,
+                  }"
+                  role="radio"
+                  :aria-checked="settingsDraft.colorTheme === option.value"
+                  @click="previewColorTheme(option.value)"
+                >
+                  <span class="color-theme-swatches" aria-hidden="true">
+                    <i
+                      v-for="color in option.colors"
+                      :key="color"
+                      :style="{ backgroundColor: color }"
+                    ></i>
+                  </span>
+                  <strong>{{ option.label }}</strong>
+                  <small>{{ option.description }}</small>
+                  <em>✓</em>
+                </button>
+              </div>
+            </div>
+            <div class="background-pattern-setting">
+              <div class="color-theme-heading">
+                <strong>背景纹理</strong>
+                <small>装饰主内容区；使用背景图片时“跟随主题”会自动关闭纹理</small>
+              </div>
+              <div
+                class="background-pattern-options"
+                role="radiogroup"
+                aria-label="背景纹理"
+              >
+                <button
+                  v-for="option in backgroundPatternOptions"
+                  :key="option.value"
+                  type="button"
+                  :class="{
+                    selected:
+                      settingsDraft.backgroundPattern === option.value,
+                  }"
+                  role="radio"
+                  :aria-checked="
+                    settingsDraft.backgroundPattern === option.value
+                  "
+                  @click="previewBackgroundPattern(option.value)"
+                >
+                  <span
+                    class="background-pattern-preview"
+                    :class="`pattern-preview-${option.value}`"
+                    aria-hidden="true"
+                  ></span>
+                  <strong>{{ option.label }}</strong>
+                  <small>{{ option.description }}</small>
+                  <em>✓</em>
+                </button>
+              </div>
             </div>
             <div class="ui-scale-setting">
               <div>

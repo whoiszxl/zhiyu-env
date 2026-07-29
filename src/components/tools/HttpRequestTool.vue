@@ -372,7 +372,7 @@ function formatBytes(value: number) {
   padding: 13px 14px;
   resize: vertical;
   border-color: #3d4139;
-  background: #20231d;
+  background: var(--terminal-bg);
   color: #e9ede5;
   font: 10px/1.65 "SFMono-Regular", Consolas, monospace;
 }
@@ -461,7 +461,7 @@ function formatBytes(value: number) {
   margin: 0;
   overflow: auto;
   padding: 16px 18px;
-  background: #20231d;
+  background: var(--terminal-bg);
   color: #e9ede5;
   font: 10px/1.65 "SFMono-Regular", Consolas, monospace;
   white-space: pre-wrap;

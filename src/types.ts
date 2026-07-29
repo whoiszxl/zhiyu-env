@@ -97,12 +97,26 @@ export interface DiagnosticRepairResult {
 }
 
 export type ThemeMode = "system" | "light" | "dark";
+export type ColorTheme =
+  | "classic"
+  | "ocean"
+  | "forest"
+  | "sand"
+  | "twilight"
+  | "aurora"
+  | "graphite"
+  | "coral"
+  | "sunset"
+  | "neon";
+export type BackgroundPattern = "auto" | "none" | "grid" | "dots" | "diagonal";
 export type UiScale = 90 | 100 | 110 | 120;
 export type BackgroundStyle = "off" | "original" | "frosted" | "blur" | "mist";
 export type BackgroundPosition = "center" | "top" | "bottom";
 
 export interface AppSettings {
   themeMode: ThemeMode;
+  colorTheme: ColorTheme;
+  backgroundPattern: BackgroundPattern;
   uiScale: UiScale;
   backgroundImagePath: string;
   backgroundStyle: BackgroundStyle;

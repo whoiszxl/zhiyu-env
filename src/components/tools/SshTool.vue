@@ -86,6 +86,7 @@ let terminal: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let terminalUnlisten: UnlistenFn | null = null;
 let terminalResizeObserver: ResizeObserver | null = null;
+let terminalThemeObserver: MutationObserver | null = null;
 let profileListTimer: number | null = null;
 let idleDisconnectTimer: number | null = null;
 
@@ -398,6 +399,41 @@ function decodeTerminalData(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+function terminalThemeValue(name: string, fallback: string) {
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
+    fallback
+  );
+}
+
+function currentTerminalTheme() {
+  const background = terminalThemeValue("--terminal-bg", "#171b17");
+  return {
+    background,
+    foreground: terminalThemeValue("--terminal-fg", "#dce3da"),
+    cursor: terminalThemeValue("--terminal-cursor", "#79bd8b"),
+    cursorAccent: background,
+    selectionBackground: terminalThemeValue(
+      "--terminal-selection",
+      "#45644d",
+    ),
+    black: background,
+    brightBlack: terminalThemeValue("--terminal-muted", "#697168"),
+    green: terminalThemeValue("--color-success", "#79bd8b"),
+    brightGreen: terminalThemeValue("--color-success-text", "#9bd5a8"),
+    red: terminalThemeValue("--color-danger", "#d66b55"),
+    brightRed: terminalThemeValue("--color-danger-text", "#eb8874"),
+    yellow: terminalThemeValue("--color-warning", "#d5aa60"),
+    brightYellow: terminalThemeValue("--color-warning-text", "#e8c37f"),
+    blue: terminalThemeValue("--color-accent", "#78a9d2"),
+    brightBlue: terminalThemeValue("--terminal-cursor", "#96c2e5"),
+  };
+}
+
+function applyTerminalTheme() {
+  if (terminal) terminal.options.theme = currentTerminalTheme();
+}
+
 async function initializeTerminal() {
   if (!terminalElement.value || terminal) return;
   terminal = new Terminal({
@@ -410,23 +446,7 @@ async function initializeTerminal() {
     lineHeight: 1.35,
     scrollback: 3000,
     allowTransparency: false,
-    theme: {
-      background: "#171b17",
-      foreground: "#dce3da",
-      cursor: "#79bd8b",
-      cursorAccent: "#171b17",
-      selectionBackground: "#45644d",
-      black: "#171b17",
-      brightBlack: "#697168",
-      green: "#79bd8b",
-      brightGreen: "#9bd5a8",
-      red: "#d66b55",
-      brightRed: "#eb8874",
-      yellow: "#d5aa60",
-      brightYellow: "#e8c37f",
-      blue: "#78a9d2",
-      brightBlue: "#96c2e5",
-    },
+    theme: currentTerminalTheme(),
   });
   fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
@@ -454,6 +474,11 @@ async function initializeTerminal() {
     window.requestAnimationFrame(() => fitAddon?.fit());
   });
   terminalResizeObserver.observe(terminalElement.value);
+  terminalThemeObserver = new MutationObserver(applyTerminalTheme);
+  terminalThemeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme", "data-palette"],
+  });
   terminalUnlisten = await listen<SshTerminalEvent>(
     "ssh-terminal-event",
     ({ payload }) => {
@@ -547,6 +572,7 @@ onBeforeUnmount(() => {
     void disconnectSshTerminal(sessionId);
   }
   terminalResizeObserver?.disconnect();
+  terminalThemeObserver?.disconnect();
   terminalUnlisten?.();
   terminal?.dispose();
   clearIdleDisconnectTimer();
@@ -1661,7 +1687,7 @@ onBeforeUnmount(() => {
   height: clamp(320px, calc(100vh - 390px), 610px);
   min-height: 320px;
   padding: 10px 8px 8px 12px;
-  background: #171b17;
+  background: var(--terminal-bg);
 }
 
 .ssh-terminal-host :deep(.xterm) {
@@ -1669,7 +1695,7 @@ onBeforeUnmount(() => {
 }
 
 .ssh-terminal-host :deep(.xterm-viewport) {
-  scrollbar-color: #4c554b #171b17;
+  scrollbar-color: var(--color-border-strong) var(--terminal-bg);
   scrollbar-width: thin;
 }
 
@@ -1681,8 +1707,8 @@ onBeforeUnmount(() => {
   gap: 14px;
   padding: 6px 12px;
   border-top: 1px solid #30362f;
-  background: #171b17;
-  color: #7e887d;
+  background: var(--terminal-bg);
+  color: var(--terminal-muted);
   font-size: 7px;
 }
 

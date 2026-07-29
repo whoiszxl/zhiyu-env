@@ -567,7 +567,7 @@ onUnmounted(() => {
   padding: 13px 14px;
   resize: vertical;
   border-color: #3d4139;
-  background: #20231d;
+  background: var(--terminal-bg);
   color: #e9ede5;
   font: 10px/1.65 "SFMono-Regular", Consolas, monospace;
 }

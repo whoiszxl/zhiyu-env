@@ -10,6 +10,8 @@ use tauri_plugin_autostart::ManagerExt;
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub theme_mode: String,
+    pub color_theme: String,
+    pub background_pattern: String,
     pub ui_scale: u8,
     pub background_image_path: String,
     pub background_style: String,
@@ -32,6 +34,8 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme_mode: "system".into(),
+            color_theme: "classic".into(),
+            background_pattern: "auto".into(),
             ui_scale: 100,
             background_image_path: String::new(),
             background_style: "off".into(),
@@ -127,6 +131,13 @@ fn settings_path() -> Option<PathBuf> {
 
 fn validate(settings: &mut AppSettings) -> Result<(), String> {
     validate_theme_mode(&settings.theme_mode)?;
+    validate_color_theme(&settings.color_theme)?;
+    if !matches!(
+        settings.background_pattern.as_str(),
+        "auto" | "none" | "grid" | "dots" | "diagonal"
+    ) {
+        return Err("背景纹理不受支持".into());
+    }
     if !matches!(settings.ui_scale, 90 | 100 | 110 | 120) {
         return Err("界面字号只支持 90%、100%、110% 或 120%".into());
     }
@@ -173,6 +184,26 @@ fn validate_theme_mode(theme_mode: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("主题模式只支持 system、light 或 dark".into())
+    }
+}
+
+fn validate_color_theme(color_theme: &str) -> Result<(), String> {
+    if matches!(
+        color_theme,
+        "classic"
+            | "ocean"
+            | "forest"
+            | "sand"
+            | "twilight"
+            | "aurora"
+            | "graphite"
+            | "coral"
+            | "sunset"
+            | "neon"
+    ) {
+        Ok(())
+    } else {
+        Err("配色主题不受支持".into())
     }
 }
 
@@ -476,6 +507,17 @@ mod tests {
     }
 
     #[test]
+    fn valid_color_themes_are_accepted() {
+        for theme in [
+            "classic", "ocean", "forest", "sand", "twilight", "aurora", "graphite", "coral",
+            "sunset", "neon",
+        ] {
+            assert!(validate_color_theme(theme).is_ok());
+        }
+        assert!(validate_color_theme("rainbow").is_err());
+    }
+
+    #[test]
     fn settings_without_theme_keep_system_default() {
         let settings: AppSettings = serde_json::from_str(
             r#"{
@@ -485,6 +527,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.theme_mode, "system");
+        assert_eq!(settings.color_theme, "classic");
+        assert_eq!(settings.background_pattern, "auto");
         assert_eq!(settings.ui_scale, 100);
         assert_eq!(settings.background_style, "off");
         assert_eq!(settings.background_position, "center");
@@ -511,6 +555,12 @@ mod tests {
 
     #[test]
     fn invalid_background_preferences_are_rejected() {
+        let mut settings = AppSettings {
+            background_pattern: "noise".into(),
+            ..AppSettings::default()
+        };
+        assert!(validate(&mut settings).is_err());
+
         let mut settings = AppSettings {
             background_style: "neon".into(),
             ..AppSettings::default()
