@@ -26,7 +26,12 @@ function isColorTheme(value: string | null): value is ColorTheme {
     value === "graphite" ||
     value === "coral" ||
     value === "sunset" ||
-    value === "neon"
+    value === "neon" ||
+    value === "nord" ||
+    value === "sakura" ||
+    value === "coffee" ||
+    value === "solarized" ||
+    value === "lavender"
   );
 }
 

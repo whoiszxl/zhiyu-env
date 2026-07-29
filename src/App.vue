@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { computed, onMounted, onUnmounted, provide, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import ServiceDocs from "./components/ServiceDocs.vue";
 import ServiceConnectPanel from "./components/ServiceConnectPanel.vue";
 import SshTool from "./components/tools/SshTool.vue";
@@ -12,6 +13,7 @@ import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
 import { formatBytes } from "./utils/format";
 import { setColorTheme, setThemeMode } from "./theme";
 import { applyUiScale } from "./display";
+import { setAppLocale } from "./i18n";
 import {
   checkAppUpdate,
   cleanAllInstallCache,
@@ -83,6 +85,7 @@ import {
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
   AppSettings,
+  AppLocale,
   BackgroundPattern,
   BackgroundPosition,
   BackgroundStyle,
@@ -131,6 +134,8 @@ import type {
   UpdateStatus,
   VersionUninstallResult,
 } from "./types";
+
+const { t, locale: resolvedLocale } = useI18n();
 
 type DetailTab =
   | "overview"
@@ -236,15 +241,32 @@ const dashboardActive = ref(true);
 const settingsActive = ref(false);
 type SettingsTab = "appearance" | "sidebar" | "application" | "storage";
 const activeSettingsTab = ref<SettingsTab>("appearance");
-const settingsTabs: Array<{
-  id: SettingsTab;
-  label: string;
-  hint: string;
+const settingsTabs: SettingsTab[] = [
+  "appearance",
+  "sidebar",
+  "application",
+  "storage",
+];
+const localeOptions: Array<{
+  value: AppLocale;
+  labelKey: string;
+  hintKey: string;
 }> = [
-  { id: "appearance", label: "外观", hint: "主题与背景" },
-  { id: "sidebar", label: "侧栏", hint: "显示与排序" },
-  { id: "application", label: "应用", hint: "行为与更新" },
-  { id: "storage", label: "下载与存储", hint: "镜像与保留" },
+  {
+    value: "system",
+    labelKey: "languageSystem",
+    hintKey: "languageSystemHint",
+  },
+  {
+    value: "zh-CN",
+    labelKey: "languageChinese",
+    hintKey: "languageChineseHint",
+  },
+  {
+    value: "en-US",
+    labelKey: "languageEnglish",
+    hintKey: "languageEnglishHint",
+  },
 ];
 const activeToolDefinition = computed(() => findTool(activeTool.value));
 const activeTab = ref<DetailTab>("overview");
@@ -271,6 +293,7 @@ const diagnosticsRunning = ref(false);
 const diagnosticsRepairing = ref(false);
 const diagnosticReport = ref<DiagnosticReport | null>(null);
 const appSettings = ref<AppSettings>({
+  locale: "zh-CN",
   themeMode: "system",
   colorTheme: "classic",
   backgroundPattern: "auto",
@@ -368,6 +391,36 @@ const colorThemeOptions: Array<{
     description: "高能撞色与深色底",
     colors: ["#ffbe0b", "#fb5607", "#ff006e", "#8338ec", "#3a86ff"],
   },
+  {
+    value: "nord",
+    label: "北境冰川",
+    description: "克制蓝灰与冰川青",
+    colors: ["#2e3440", "#3b4252", "#d8dee9", "#88c0d0", "#a3be8c"],
+  },
+  {
+    value: "sakura",
+    label: "樱雾",
+    description: "柔和梅紫与樱花粉",
+    colors: ["#6d597a", "#b56576", "#e56b6f", "#eaac8b", "#fff0f3"],
+  },
+  {
+    value: "coffee",
+    label: "深焙咖啡",
+    description: "温暖棕褐与奶油色",
+    colors: ["#2b2118", "#5e4632", "#a98467", "#dbc1ac", "#f3e9dc"],
+  },
+  {
+    value: "solarized",
+    label: "日光终端",
+    description: "经典低对比开发配色",
+    colors: ["#002b36", "#073642", "#839496", "#2aa198", "#b58900"],
+  },
+  {
+    value: "lavender",
+    label: "薰衣草",
+    description: "清透紫蓝与柔雾白",
+    colors: ["#352f44", "#5c5470", "#b9b4c7", "#faf0e6", "#a594f9"],
+  },
 ];
 const backgroundPatternOptions: Array<{
   value: BackgroundPattern;
@@ -379,6 +432,11 @@ const backgroundPatternOptions: Array<{
   { value: "grid", label: "方格", description: "开发者网格" },
   { value: "dots", label: "点阵", description: "轻盈、现代" },
   { value: "diagonal", label: "斜线", description: "细腻、利落" },
+  { value: "crosshatch", label: "交叉线", description: "细密工程草图" },
+  { value: "circuit", label: "电路", description: "节点与线路" },
+  { value: "rings", label: "涟漪", description: "柔和同心圆" },
+  { value: "paper", label: "横线纸", description: "轻量书写节奏" },
+  { value: "checker", label: "棋盘", description: "低对比方块" },
 ];
 const backgroundStyleOptions: Array<{
   value: Exclude<BackgroundStyle, "off">;
@@ -484,6 +542,11 @@ const resolvedBackgroundPattern = computed<
     coral: "dots",
     sunset: "diagonal",
     neon: "grid",
+    nord: "circuit",
+    sakura: "rings",
+    coffee: "paper",
+    solarized: "crosshatch",
+    lavender: "checker",
   };
   return defaults[visualSettings.value.colorTheme];
 });
@@ -936,7 +999,7 @@ function recordActivity(
 }
 
 function formatActivityTime(value: number) {
-  return new Date(value).toLocaleString("zh-CN", {
+  return new Date(value).toLocaleString(resolvedLocale.value, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -979,7 +1042,7 @@ function recordInstallFailure(operationId: string, cause: unknown) {
   task.status = "failed";
   task.stage = "安装失败";
   task.logs.push({
-    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+    time: new Date().toLocaleTimeString(resolvedLocale.value, { hour12: false }),
     stage: "安装失败",
     message,
   });
@@ -1012,7 +1075,7 @@ function recordInstallSuccess(operationId: string) {
   task.percent = 100;
   task.stage = "安装完成";
   task.logs.push({
-    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+    time: new Date().toLocaleTimeString(resolvedLocale.value, { hour12: false }),
     stage: "安装完成",
     message: "安装、配置和初始化均已完成",
   });
@@ -1034,7 +1097,7 @@ function handleInstallProgress(payload: InstallProgressPayload) {
   task.stage = payload.stage;
   task.status = payload.status;
   task.logs.push({
-    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+    time: new Date().toLocaleTimeString(resolvedLocale.value, { hour12: false }),
     stage: payload.stage,
     message: payload.message,
   });
@@ -1224,13 +1287,13 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
   ];
 });
 
-const statusLabel: Record<ServiceState, string> = {
-  not_installed: "未安装",
-  stopped: "已停止",
-  running: "运行中",
-  stale_pid: "状态异常",
-  crashed: "意外退出",
-};
+const statusLabel = computed<Record<ServiceState, string>>(() => ({
+  not_installed: t("status.notInstalled"),
+  stopped: t("status.stopped"),
+  running: t("status.running"),
+  stale_pid: t("status.stalePid"),
+  crashed: t("status.crashed"),
+}));
 
 const iconLetter: Record<ServiceKind, string> = {
   redis: "R",
@@ -1328,12 +1391,12 @@ const objectStoreProfile = computed(() =>
       },
 );
 
-const actionLabel: Record<ServiceAction, string> = {
-  install: "安装中",
-  start: "启动中",
-  stop: "停止中",
-  restart: "重启中",
-};
+const actionLabel = computed<Record<ServiceAction, string>>(() => ({
+  install: t("common.installing"),
+  start: t("common.starting"),
+  stop: t("common.stopping"),
+  restart: t("common.restarting"),
+}));
 
 async function refreshServices(silent = false) {
   if (!silent) loading.value = true;
@@ -1573,6 +1636,7 @@ async function loadAppSettings() {
   try {
     appSettings.value = await getAppSettings();
     settingsDraft.value = { ...appSettings.value };
+    await setAppLocale(appSettings.value.locale);
     applyAppTheme(
       appSettings.value.themeMode,
       appSettings.value.colorTheme,
@@ -1581,6 +1645,12 @@ async function loadAppSettings() {
   } catch (cause) {
     error.value = String(cause);
   }
+}
+
+async function selectLocale(locale: AppLocale) {
+  settingsDraft.value.locale = locale;
+  await setAppLocale(locale);
+  await saveSettings();
 }
 
 function previewTheme(mode: ThemeMode) {
@@ -1886,6 +1956,7 @@ async function saveSettings() {
       appSettings.value.colorTheme,
     );
     applyUiScale(appSettings.value.uiScale);
+    await setAppLocale(appSettings.value.locale);
   } finally {
     settingsSaving.value = false;
   }
@@ -2007,12 +2078,15 @@ async function clearInstallCache() {
   if (!service || cacheCleaning.value) return;
   const cacheBytes = selectedDiskUsage.value?.cacheBytes ?? 0;
   if (cacheBytes === 0) {
-    notice.value = `${service.name} 没有可清理的安装缓存`;
+    notice.value = t("serviceOverview.noCache", { service: service.name });
     return;
   }
   if (
     !window.confirm(
-      `将清理 ${service.name} 的下载包和安装临时文件，预计释放 ${formatBytes(cacheBytes)}。已安装程序和数据不会被删除，确定继续吗？`,
+      t("serviceOverview.cleanConfirm", {
+        service: service.name,
+        size: formatBytes(cacheBytes),
+      }),
     )
   ) {
     return;
@@ -2021,7 +2095,10 @@ async function clearInstallCache() {
   try {
     const result = await cleanServiceCache(service.kind);
     await refreshDiskUsage(service.kind);
-    notice.value = `已清理 ${result.removedItems} 个缓存项，释放 ${formatBytes(result.freedBytes)}`;
+    notice.value = t("serviceOverview.cleaned", {
+      count: result.removedItems,
+      size: formatBytes(result.freedBytes),
+    });
     error.value = "";
   } catch (cause) {
     error.value = String(cause);
@@ -2048,14 +2125,16 @@ async function createBackup() {
   const service = selectedService.value;
   if (!service || backupCreating.value) return;
   if (service.status === "running") {
-    error.value = `请先停止 ${service.name}，再创建一致的数据备份`;
+    error.value = t("backup.stopBeforeCreate", { service: service.name });
     return;
   }
   backupCreating.value = true;
   try {
     const backup = await createServiceBackup(service.kind);
     await Promise.all([loadBackups(), refreshDiskUsage(service.kind)]);
-    notice.value = `备份创建成功：${formatBytes(backup.sizeBytes)}`;
+    notice.value = t("backup.created", {
+      size: formatBytes(backup.sizeBytes),
+    });
     error.value = "";
   } catch (cause) {
     error.value = String(cause);
@@ -2068,12 +2147,15 @@ async function restoreBackup(backup: ServiceBackup) {
   const service = selectedService.value;
   if (!service || restoringBackupId.value) return;
   if (service.status === "running") {
-    error.value = `请先停止 ${service.name}，再恢复数据`;
+    error.value = t("backup.stopBeforeRestore", { service: service.name });
     return;
   }
   if (
     !window.confirm(
-      `确定将 ${service.name} 恢复到 ${formatBackupDate(backup.createdAtMillis)} 的状态吗？当前 data 和 conf 会先自动备份，然后再替换。`,
+      t("backup.restoreConfirm", {
+        service: service.name,
+        time: formatBackupDate(backup.createdAtMillis),
+      }),
     )
   ) {
     return;
@@ -2082,7 +2164,7 @@ async function restoreBackup(backup: ServiceBackup) {
   try {
     const result = await restoreServiceBackup(service.kind, backup.id);
     await Promise.all([loadBackups(), refreshDiskUsage(service.kind)]);
-    notice.value = `恢复成功；恢复前状态已保存为 ${result.safetyBackup.id}`;
+    notice.value = t("backup.restored", { id: result.safetyBackup.id });
     error.value = "";
   } catch (cause) {
     error.value = String(cause);
@@ -2179,12 +2261,12 @@ async function changeRedisVersion() {
     return;
   }
   if (service.status === "running") {
-    error.value = "请先停止 Redis，再切换运行版本";
+    error.value = t("versions.stopSwitch", { service: "Redis" });
     return;
   }
   if (
     !window.confirm(
-      `确定切换到 Redis ${target.version} 吗？各版本使用独立数据目录；切回原版本时会恢复该版本的数据。切换前仍建议创建备份。`,
+      t("versions.redisConfirm", { version: target.version }),
     )
   ) {
     return;
@@ -2211,17 +2293,17 @@ async function changeRedisVersion() {
     ]);
     redisOverview.value = null;
     notice.value = wasInstalled
-      ? `已切换到 Redis ${target.version}`
-      : `Redis ${target.version} 安装并切换成功`;
+      ? t("versions.switched", { service: "Redis", version: target.version })
+      : t("versions.installedSwitched", { service: "Redis", version: target.version });
     recordActivity(
       updated,
-      wasInstalled ? "切换版本" : "安装版本",
+      wasInstalled ? t("versions.activitySwitch") : t("versions.activityInstall"),
       true,
       notice.value,
     );
   } catch (cause) {
     recordInstallFailure(operationId, cause);
-    recordActivity(service, "切换版本", false, String(cause));
+    recordActivity(service, t("versions.activitySwitch"), false, String(cause));
     error.value = String(cause);
   } finally {
     redisVersionChanging.value = false;
@@ -2257,12 +2339,12 @@ async function changeMysqlVersion() {
     return;
   }
   if (service.status === "running") {
-    error.value = "请先停止 MySQL，再切换运行版本";
+    error.value = t("versions.stopSwitch", { service: "MySQL" });
     return;
   }
   if (
     !window.confirm(
-      `确定切换到 MySQL ${target.version} 吗？每个版本使用独立数据目录，不会自动升级或降级原版本数据。切换前仍建议创建备份。`,
+      t("versions.databaseConfirm", { service: "MySQL", version: target.version }),
     )
   ) {
     return;
@@ -2293,17 +2375,17 @@ async function changeMysqlVersion() {
     tables.value = [];
     selectedTable.value = null;
     notice.value = wasInstalled
-      ? `已切换到 MySQL ${target.version}`
-      : `MySQL ${target.version} 安装并切换成功`;
+      ? t("versions.switched", { service: "MySQL", version: target.version })
+      : t("versions.installedSwitched", { service: "MySQL", version: target.version });
     recordActivity(
       updated,
-      wasInstalled ? "切换版本" : "安装版本",
+      wasInstalled ? t("versions.activitySwitch") : t("versions.activityInstall"),
       true,
       notice.value,
     );
   } catch (cause) {
     recordInstallFailure(operationId, cause);
-    recordActivity(service, "切换版本", false, String(cause));
+    recordActivity(service, t("versions.activitySwitch"), false, String(cause));
     error.value = String(cause);
   } finally {
     mysqlVersionChanging.value = false;
@@ -2339,12 +2421,12 @@ async function changePostgresVersion() {
     return;
   }
   if (service.status === "running") {
-    error.value = "请先停止 PostgreSQL，再切换运行版本";
+    error.value = t("versions.stopSwitch", { service: "PostgreSQL" });
     return;
   }
   if (
     !window.confirm(
-      `确定切换到 PostgreSQL ${target.version} 吗？每个主版本使用独立数据目录，不会自动升级或降级原版本数据。切换前仍建议创建备份。`,
+      t("versions.databaseConfirm", { service: "PostgreSQL", version: target.version }),
     )
   ) {
     return;
@@ -2378,17 +2460,17 @@ async function changePostgresVersion() {
     tables.value = [];
     selectedTable.value = null;
     notice.value = wasInstalled
-      ? `已切换到 PostgreSQL ${target.version}`
-      : `PostgreSQL ${target.version} 编译安装并切换成功`;
+      ? t("versions.switched", { service: "PostgreSQL", version: target.version })
+      : t("versions.compiledSwitched", { service: "PostgreSQL", version: target.version });
     recordActivity(
       updated,
-      wasInstalled ? "切换版本" : "安装版本",
+      wasInstalled ? t("versions.activitySwitch") : t("versions.activityInstall"),
       true,
       notice.value,
     );
   } catch (cause) {
     recordInstallFailure(operationId, cause);
-    recordActivity(service, "切换版本", false, String(cause));
+    recordActivity(service, t("versions.activitySwitch"), false, String(cause));
     error.value = String(cause);
   } finally {
     postgresVersionChanging.value = false;
@@ -2421,7 +2503,7 @@ function requestVersionUninstall(
     return;
   }
   if (release.selected && service.status === "running") {
-    error.value = `请先停止 ${serviceName}，再卸载当前版本`;
+    error.value = t("versions.stopUninstall", { service: serviceName });
     return;
   }
   const fallback =
@@ -2508,17 +2590,25 @@ async function confirmVersionUninstall() {
       refreshEnvironmentDiskUsage(),
     ]);
     notice.value = result.fallbackVersion
-      ? `已卸载 ${target.serviceName} ${result.version}，并切换到 ${result.fallbackVersion}；数据已保留`
-      : `已卸载 ${target.serviceName} ${result.version}，释放 ${formatBytes(result.freedBytes)}；数据已保留`;
+      ? t("versions.uninstallFallback", {
+          service: target.serviceName,
+          version: result.version,
+          fallback: result.fallbackVersion,
+        })
+      : t("versions.uninstalled", {
+          service: target.serviceName,
+          version: result.version,
+          size: formatBytes(result.freedBytes),
+        });
     recordActivity(
       result.service,
-      "卸载版本",
+      t("versions.activityUninstall"),
       true,
       notice.value,
     );
   } catch (cause) {
     error.value = String(cause);
-    recordActivity(service, "卸载版本", false, error.value);
+    recordActivity(service, t("versions.activityUninstall"), false, error.value);
   } finally {
     versionUninstalling.value = false;
   }
@@ -2552,7 +2642,7 @@ async function changeNginxVersion() {
     return;
   }
   if (service.status === "running") {
-    error.value = "请先停止 Nginx，再切换运行版本";
+    error.value = t("versions.stopSwitch", { service: "Nginx" });
     return;
   }
   nginxVersionChanging.value = true;
@@ -2573,18 +2663,18 @@ async function changeNginxVersion() {
       refreshEnvironmentDiskUsage(),
     ]);
     notice.value = wasInstalled
-      ? `已切换到 Nginx ${target.version}`
-      : `Nginx ${target.version} 编译安装并切换成功`;
+      ? t("versions.switched", { service: "Nginx", version: target.version })
+      : t("versions.compiledSwitched", { service: "Nginx", version: target.version });
     recordActivity(
       updated,
-      wasInstalled ? "切换版本" : "安装版本",
+      wasInstalled ? t("versions.activitySwitch") : t("versions.activityInstall"),
       true,
       notice.value,
     );
   } catch (cause) {
     recordInstallFailure(operationId, cause);
     error.value = String(cause);
-    recordActivity(service, "切换版本", false, error.value);
+    recordActivity(service, t("versions.activitySwitch"), false, error.value);
   } finally {
     nginxVersionChanging.value = false;
   }
@@ -2625,7 +2715,7 @@ async function changeManagedVersion() {
     return;
   }
   if (service.status === "running") {
-    error.value = `请先停止 ${service.name}，再切换运行版本`;
+    error.value = t("versions.stopSwitch", { service: service.name });
     return;
   }
   managedVersionChanging.value = true;
@@ -2653,18 +2743,18 @@ async function changeManagedVersion() {
       refreshEnvironmentDiskUsage(),
     ]);
     notice.value = wasInstalled
-      ? `已切换到 ${service.name} ${target.version}`
-      : `${service.name} ${target.version} 安装并切换成功`;
+      ? t("versions.switched", { service: service.name, version: target.version })
+      : t("versions.installedSwitched", { service: service.name, version: target.version });
     recordActivity(
       updated,
-      wasInstalled ? "切换版本" : "安装版本",
+      wasInstalled ? t("versions.activitySwitch") : t("versions.activityInstall"),
       true,
       notice.value,
     );
   } catch (cause) {
     recordInstallFailure(operationId, cause);
     error.value = String(cause);
-    recordActivity(service, "切换版本", false, error.value);
+    recordActivity(service, t("versions.activitySwitch"), false, error.value);
   } finally {
     managedVersionChanging.value = false;
   }
@@ -3140,7 +3230,7 @@ async function runConsoleCommand(confirmed = false) {
     const message = String(cause);
     if (
       message.includes("CONFIRM_REQUIRED:") &&
-      window.confirm("该命令会清空 Redis 数据，确定继续吗？")
+      window.confirm(t("console.redisConfirm"))
     ) {
       consoleRunning.value = false;
       await runConsoleCommand(true);
@@ -3275,7 +3365,7 @@ async function runMongoCommand(confirmed = false) {
     const message = String(cause);
     if (
       message.includes("需要确认后执行") &&
-      window.confirm("该 MongoDB 命令可能删除数据，确定继续吗？")
+      window.confirm(t("console.mongoConfirm"))
     ) {
       mongoCommandRunning.value = false;
       await runMongoCommand(true);
@@ -3399,7 +3489,7 @@ async function runSqlCommand(confirmed = false) {
     const message = String(cause);
     if (
       message.includes("CONFIRM_REQUIRED:") &&
-      window.confirm("该 SQL 会删除数据库对象或数据，确定继续吗？")
+      window.confirm(t("console.sqlConfirm"))
     ) {
       sqlRunning.value = false;
       await runSqlCommand(true);
@@ -3480,11 +3570,51 @@ async function loadLogs() {
 function formatMailDate(value: string) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString(resolvedLocale.value);
 }
 
 function formatBackupDate(value: number) {
-  return new Date(value).toLocaleString("zh-CN");
+  return new Date(value).toLocaleString(resolvedLocale.value);
+}
+
+function localizedSupportLabel(label: string) {
+  if (resolvedLocale.value !== "en-US") return label;
+  if (label === "旧版 · 已停止维护") return t("versions.support.legacy");
+  if (label === "创新版本 · 无长期支持") return t("versions.support.innovation");
+  if (label === "历史稳定版") return t("versions.support.historical");
+  if (label === "当前稳定版") return t("versions.support.current");
+  if (label === "兼容稳定版") return t("versions.support.compatible");
+  if (label === "最新稳定版") return t("versions.support.latest");
+  const legacyMaintenance = label.match(/^旧版 · 维护期至 (.+)$/);
+  if (legacyMaintenance) {
+    return t("versions.support.legacyUntil", { date: legacyMaintenance[1] });
+  }
+  const maintenance = label.match(/^维护期至 (.+)$/);
+  if (maintenance) {
+    return t("versions.support.maintenanceUntil", { date: maintenance[1] });
+  }
+  return label;
+}
+
+function localizedInstallSupportLabel(label: string) {
+  if (resolvedLocale.value !== "en-US") return label;
+  const supported = label.match(/^支持当前平台：(.+)$/);
+  if (supported) {
+    return t("versions.platformSupported", { platform: supported[1] });
+  }
+  const unsupported = label.match(/^当前版本暂不支持在 (.+) 自动安装$/);
+  return unsupported
+    ? t("versions.platformUnsupported", { platform: unsupported[1] })
+    : label;
+}
+
+function localizedSqlSummary(summary: string) {
+  if (resolvedLocale.value !== "en-US") return summary;
+  if (summary === "执行完成") return t("console.completed");
+  const rows = summary.match(/^返回 (\d+) 行$/);
+  return rows ? t("console.returnedRows", { count: rows[1] }) : summary;
 }
 
 function chartPoints(values: number[], width = 560, height = 112) {
@@ -3612,6 +3742,7 @@ onUnmounted(() => {
 
 <template>
   <div
+    v-tool-i18n
     class="app-layout"
     :class="[
       `background-${visualSettings.backgroundStyle}`,
@@ -3626,25 +3757,25 @@ onUnmounted(() => {
       <div class="brand">
         <div class="brand-mark"><span></span><span></span><span></span></div>
         <div class="brand-copy">
-          <strong>智屿</strong>
-          <small>轻量本地开发环境</small>
+          <strong>{{ t("brand.name") }}</strong>
+          <small>{{ t("brand.tagline") }}</small>
           <div class="brand-resource-row">
             <span
-              :title="`智屿桌面应用与当前 ${environmentMetrics.runningServiceCount} 个运行服务的常驻内存总和`"
+              :title="t('brand.memoryDetail', { count: environmentMetrics.runningServiceCount })"
             >
-              内存 {{ formatBytes(environmentMetrics.memoryBytes) }}
+              {{ t("brand.memory") }} {{ formatBytes(environmentMetrics.memoryBytes) }}
             </span>
             <span
-              :title="`智屿在 ${appSettings.installRoot || '~/.devbox'} 中保存的程序、数据、日志、备份与缓存总和`"
+              :title="t('brand.diskDetail', { root: appSettings.installRoot || '~/.devbox' })"
             >
-              磁盘 {{ formatBytes(environmentDiskBytes) }}
+              {{ t("brand.disk") }} {{ formatBytes(environmentDiskBytes) }}
             </span>
           </div>
         </div>
       </div>
 
       <nav class="service-nav">
-        <p class="nav-label">OVERVIEW</p>
+        <p class="nav-label">{{ t("nav.overview").toUpperCase() }}</p>
         <button
           type="button"
           class="service-nav-item dashboard-nav-item"
@@ -3653,12 +3784,12 @@ onUnmounted(() => {
         >
           <span class="nav-icon dashboard">⌂</span>
           <span class="nav-copy">
-            <strong>全局概览</strong>
-            <small>资源 · 状态 · 端口</small>
+            <strong>{{ t("nav.dashboardTitle") }}</strong>
+            <small>{{ t("nav.dashboardHint") }}</small>
           </span>
         </button>
 
-        <p class="nav-label">SERVICES</p>
+        <p class="nav-label">{{ t("nav.services").toUpperCase() }}</p>
         <button
           v-for="service in sidebarServices"
           :key="service.kind"
@@ -3690,7 +3821,7 @@ onUnmounted(() => {
           <i class="nav-state" :class="service.status"></i>
         </button>
 
-        <p class="nav-label tool-label">TOOLS</p>
+        <p class="nav-label tool-label">{{ t("nav.tools").toUpperCase() }}</p>
         <button
           v-for="tool in sidebarTools"
           :key="tool.id"
@@ -3706,8 +3837,8 @@ onUnmounted(() => {
         >
           <span class="nav-icon" :class="tool.id">{{ tool.icon }}</span>
           <span class="nav-copy">
-            <strong>{{ tool.navLabel }}</strong>
-            <small>{{ tool.navHint }}</small>
+            <strong>{{ t(`tools.${tool.id}.label`) }}</strong>
+            <small>{{ t(`tools.${tool.id}.hint`) }}</small>
           </span>
         </button>
 
@@ -3715,7 +3846,7 @@ onUnmounted(() => {
           <span>＋</span> 扩展更多服务
         </button>
 
-        <p class="nav-label tool-label">SYSTEM</p>
+        <p class="nav-label tool-label">{{ t("nav.system").toUpperCase() }}</p>
         <button
           type="button"
           class="service-nav-item"
@@ -3724,8 +3855,8 @@ onUnmounted(() => {
         >
           <span class="nav-icon settings">⚙</span>
           <span class="nav-copy">
-            <strong>设置中心</strong>
-            <small>启动 · 下载 · 存储</small>
+            <strong>{{ t("settings.title") }}</strong>
+            <small>{{ t("nav.settingsHint") }}</small>
           </span>
         </button>
       </nav>
@@ -3733,8 +3864,8 @@ onUnmounted(() => {
       <div class="sidebar-footer">
         <span class="core-dot"></span>
         <div>
-          <strong>智屿 Core</strong>
-          <small>运行正常 · {{ selectedService?.platformLabel ?? "检测中" }}</small>
+          <strong>{{ t("brand.core") }}</strong>
+          <small>{{ t("brand.coreStatus") }}<template v-if="selectedService?.platformLabel"> · {{ selectedService.platformLabel }}</template></small>
         </div>
       </div>
     </aside>
@@ -3813,36 +3944,37 @@ onUnmounted(() => {
       <div
         v-if="sshToolMounted"
         v-show="activeTool === 'ssh' && !loading"
+        v-tool-i18n
         class="persistent-tool-host"
       >
         <SshTool :visible="activeTool === 'ssh' && !loading" />
       </div>
 
-      <div v-if="loading" class="page-loading">正在读取服务状态…</div>
+      <div v-if="loading" class="page-loading">{{ t("common.loading") }}…</div>
 
       <section v-else-if="settingsActive" class="settings-page">
         <header class="settings-header">
           <div>
             <span class="dashboard-eyebrow">PREFERENCES</span>
-            <h1>设置中心</h1>
-            <p>统一管理启动行为、下载安装、存储和维护策略</p>
+            <h1>{{ t("settings.title") }}</h1>
+            <p>{{ t("settings.subtitle") }}</p>
           </div>
         </header>
 
-        <nav class="settings-tabs" role="tablist" aria-label="设置分类">
+        <nav class="settings-tabs" role="tablist" :aria-label="t('settings.title')">
           <button
             v-for="tab in settingsTabs"
-            :id="`settings-tab-${tab.id}`"
-            :key="tab.id"
+            :id="`settings-tab-${tab}`"
+            :key="tab"
             type="button"
             role="tab"
-            :class="{ active: activeSettingsTab === tab.id }"
-            :aria-selected="activeSettingsTab === tab.id"
-            :aria-controls="`settings-panel-${tab.id}`"
-            @click="activeSettingsTab = tab.id"
+            :class="{ active: activeSettingsTab === tab }"
+            :aria-selected="activeSettingsTab === tab"
+            :aria-controls="`settings-panel-${tab}`"
+            @click="activeSettingsTab = tab"
           >
-            <strong>{{ tab.label }}</strong>
-            <small>{{ tab.hint }}</small>
+            <strong>{{ t(`settings.tabs.${tab}.label`) }}</strong>
+            <small>{{ t(`settings.tabs.${tab}.hint`) }}</small>
           </button>
         </nav>
 
@@ -3865,11 +3997,33 @@ onUnmounted(() => {
           >
             <div class="settings-section-title">
               <div>
-                <h2>外观</h2>
-                <p>选择智屿的界面显示方式</p>
+                <h2>{{ t("settings.appearance.title") }}</h2>
+                <p>{{ t("settings.appearance.subtitle") }}</p>
               </div>
             </div>
-            <div class="theme-options" role="radiogroup" aria-label="主题模式">
+            <div class="language-setting">
+              <div class="color-theme-heading">
+                <strong>{{ t("settings.appearance.languageTitle") }}</strong>
+                <small>{{ t("settings.appearance.languageHint") }}</small>
+              </div>
+              <div class="language-options" role="radiogroup" :aria-label="t('settings.appearance.languageTitle')">
+                <button
+                  v-for="option in localeOptions"
+                  :key="option.value"
+                  type="button"
+                  :class="{ selected: settingsDraft.locale === option.value }"
+                  role="radio"
+                  :aria-checked="settingsDraft.locale === option.value"
+                  @click="selectLocale(option.value)"
+                >
+                  <span>{{ option.value === "system" ? "◐" : option.value === "zh-CN" ? "中" : "EN" }}</span>
+                  <strong>{{ t(`settings.appearance.${option.labelKey}`) }}</strong>
+                  <small>{{ t(`settings.appearance.${option.hintKey}`) }}</small>
+                  <em>✓</em>
+                </button>
+              </div>
+            </div>
+            <div class="theme-options" role="radiogroup" :aria-label="t('settings.appearance.themeTitle')">
               <button
                 type="button"
                 :class="{ selected: settingsDraft.themeMode === 'system' }"
@@ -3878,8 +4032,8 @@ onUnmounted(() => {
                 @click="previewTheme('system')"
               >
                 <span class="theme-preview system"><i></i><i></i></span>
-                <strong>跟随系统</strong>
-                <small>自动匹配 macOS 或 Windows</small>
+                <strong>{{ t("settings.appearance.themeSystem") }}</strong>
+                <small>{{ t("settings.appearance.themeSystemHint") }}</small>
               </button>
               <button
                 type="button"
@@ -3889,8 +4043,8 @@ onUnmounted(() => {
                 @click="previewTheme('light')"
               >
                 <span class="theme-preview light"><i></i></span>
-                <strong>浅色</strong>
-                <small>适合明亮环境</small>
+                <strong>{{ t("settings.appearance.themeLight") }}</strong>
+                <small>{{ t("settings.appearance.themeLightHint") }}</small>
               </button>
               <button
                 type="button"
@@ -3900,14 +4054,14 @@ onUnmounted(() => {
                 @click="previewTheme('dark')"
               >
                 <span class="theme-preview dark"><i></i></span>
-                <strong>深色</strong>
-                <small>降低夜间视觉亮度</small>
+                <strong>{{ t("settings.appearance.themeDark") }}</strong>
+                <small>{{ t("settings.appearance.themeDarkHint") }}</small>
               </button>
             </div>
             <div class="color-theme-setting">
               <div class="color-theme-heading">
-                <strong>配色主题</strong>
-                <small>改变界面氛围，不影响浅色与深色模式</small>
+                <strong>{{ t("settings.appearance.colorTitle") }}</strong>
+                <small>{{ t("settings.appearance.colorHint") }}</small>
               </div>
               <div
                 class="color-theme-options"
@@ -3932,16 +4086,16 @@ onUnmounted(() => {
                       :style="{ backgroundColor: color }"
                     ></i>
                   </span>
-                  <strong>{{ option.label }}</strong>
-                  <small>{{ option.description }}</small>
+                  <strong>{{ t(`settings.appearance.colors.${option.value}.label`) }}</strong>
+                  <small>{{ t(`settings.appearance.colors.${option.value}.description`) }}</small>
                   <em>✓</em>
                 </button>
               </div>
             </div>
             <div class="background-pattern-setting">
               <div class="color-theme-heading">
-                <strong>背景纹理</strong>
-                <small>装饰主内容区；使用背景图片时“跟随主题”会自动关闭纹理</small>
+                <strong>{{ t("settings.appearance.patternTitle") }}</strong>
+                <small>{{ t("settings.appearance.patternHint") }}</small>
               </div>
               <div
                 class="background-pattern-options"
@@ -3967,16 +4121,16 @@ onUnmounted(() => {
                     :class="`pattern-preview-${option.value}`"
                     aria-hidden="true"
                   ></span>
-                  <strong>{{ option.label }}</strong>
-                  <small>{{ option.description }}</small>
+                  <strong>{{ t(`settings.appearance.patterns.${option.value}.label`) }}</strong>
+                  <small>{{ t(`settings.appearance.patterns.${option.value}.description`) }}</small>
                   <em>✓</em>
                 </button>
               </div>
             </div>
             <div class="ui-scale-setting">
               <div>
-                <strong>界面字号</strong>
-                <small>同步调整文字和控件，修改后立即生效</small>
+                <strong>{{ t("settings.appearance.scaleTitle") }}</strong>
+                <small>{{ t("settings.appearance.scaleHint") }}</small>
               </div>
               <div
                 class="ui-scale-options"
@@ -3999,7 +4153,7 @@ onUnmounted(() => {
                   >
                     字
                   </span>
-                  <strong>{{ option.label }}</strong>
+                  <strong>{{ t(`settings.appearance.sizes.${option.value}`) }}</strong>
                   <small>{{ option.value }}%</small>
                 </button>
               </div>
@@ -4007,8 +4161,8 @@ onUnmounted(() => {
             <div class="background-setting">
               <div class="background-setting-head">
                 <div>
-                  <strong>应用背景</strong>
-                  <small>图片只保存在本机，不会上传或写入项目目录</small>
+                  <strong>{{ t("settings.appearance.backgroundTitle") }}</strong>
+                  <small>{{ t("settings.appearance.backgroundHint") }}</small>
                 </div>
                 <div class="background-actions">
                   <button
@@ -4017,7 +4171,7 @@ onUnmounted(() => {
                     class="background-remove"
                     @click="clearAppBackground"
                   >
-                    移除
+                    {{ t("common.remove") }}
                   </button>
                   <button
                     type="button"
@@ -4028,8 +4182,8 @@ onUnmounted(() => {
                     <span v-if="backgroundImporting" class="spinner"></span>
                     {{
                       settingsDraft.backgroundImagePath
-                        ? "更换图片"
-                        : "选择图片"
+                        ? t("settings.appearance.replaceImage")
+                        : t("settings.appearance.chooseImage")
                     }}
                   </button>
                 </div>
@@ -4050,8 +4204,8 @@ onUnmounted(() => {
               >
                 <div v-if="!settingsDraft.backgroundImagePath" class="background-empty">
                   <span>▧</span>
-                  <strong>选择一张喜欢的图片</strong>
-                  <small>支持 PNG、JPEG、WebP，最大 15 MiB</small>
+                  <strong>{{ t("settings.appearance.emptyImage") }}</strong>
+                  <small>{{ t("settings.appearance.imageSupport") }}</small>
                 </div>
                 <template v-else>
                   <div class="background-preview-veil"></div>
@@ -4075,8 +4229,8 @@ onUnmounted(() => {
                   @click="selectBackgroundStyle(option.value)"
                 >
                   <span :class="`style-swatch ${option.value}`"></span>
-                  <strong>{{ option.label }}</strong>
-                  <small>{{ option.description }}</small>
+                  <strong>{{ t(`settings.appearance.backgroundStyles.${option.value}.label`) }}</strong>
+                  <small>{{ t(`settings.appearance.backgroundStyles.${option.value}.description`) }}</small>
                 </button>
               </div>
 
@@ -4085,7 +4239,7 @@ onUnmounted(() => {
                 class="background-fine-tuning"
               >
                 <div class="background-position-control">
-                  <span>图片位置</span>
+                  <span>{{ t("settings.appearance.imagePosition") }}</span>
                   <div role="radiogroup" aria-label="背景图片位置">
                     <button
                       v-for="option in backgroundPositionOptions"
@@ -4097,13 +4251,13 @@ onUnmounted(() => {
                       }"
                       @click="selectBackgroundPosition(option.value)"
                     >
-                      {{ option.label }}
+                      {{ t(`settings.appearance.positions.${option.value}`) }}
                     </button>
                   </div>
                 </div>
                 <label class="background-overlay-control">
                   <span>
-                    <strong>内容遮罩</strong>
+                    <strong>{{ t("settings.appearance.contentOverlay") }}</strong>
                     <small>{{ settingsDraft.backgroundOverlay }}%</small>
                   </span>
                   <input
@@ -4128,8 +4282,8 @@ onUnmounted(() => {
                 >
                   {{
                     settingsDraft.backgroundStyle === "off"
-                      ? "显示背景"
-                      : "暂时关闭背景"
+                      ? t("settings.appearance.showBackground")
+                      : t("settings.appearance.disableBackground")
                   }}
                 </button>
               </div>
@@ -4145,22 +4299,22 @@ onUnmounted(() => {
           >
             <div class="settings-section-title">
               <div>
-                <h2>侧栏管理</h2>
-                <p>选择显示内容，拖动把常用服务和工具排到前面</p>
+                <h2>{{ t("settings.sidebar.title") }}</h2>
+                <p>{{ t("settings.sidebar.subtitle") }}</p>
               </div>
             </div>
             <div class="sidebar-manager-grid">
               <div class="sidebar-manager">
                 <div class="sidebar-manager-head">
                   <div>
-                    <strong>服务</strong>
+                    <strong>{{ t("common.services") }}</strong>
                     <small>SERVICES</small>
                   </div>
                   <span>
                     {{
                       services.length -
                       settingsDraft.hiddenServices.length
-                    }}/{{ services.length }} 显示
+                    }}/{{ services.length }} {{ t("common.show") }}
                   </span>
                 </div>
                 <div class="sidebar-manager-list">
@@ -4184,7 +4338,7 @@ onUnmounted(() => {
                   >
                     <span
                       class="sidebar-drag-handle"
-                      title="拖动排序"
+                      :title="t('settings.sidebar.drag')"
                       @pointerdown="
                         beginSidebarPointerDrag(
                           $event,
@@ -4213,8 +4367,8 @@ onUnmounted(() => {
                       class="sidebar-visibility-switch"
                       :title="
                         settingsDraft.hiddenServices.includes(service.kind)
-                          ? '在侧栏中显示'
-                          : '从侧栏隐藏'
+                          ? t('settings.sidebar.showInSidebar')
+                          : t('settings.sidebar.hideFromSidebar')
                       "
                     >
                       <input
@@ -4236,13 +4390,13 @@ onUnmounted(() => {
               <div class="sidebar-manager">
                 <div class="sidebar-manager-head">
                   <div>
-                    <strong>工具</strong>
+                    <strong>{{ t("common.tools") }}</strong>
                     <small>TOOLS</small>
                   </div>
                   <span>
                     {{
                       TOOLS.length - settingsDraft.hiddenTools.length
-                    }}/{{ TOOLS.length }} 显示
+                    }}/{{ TOOLS.length }} {{ t("common.show") }}
                   </span>
                 </div>
                 <div class="sidebar-manager-list">
@@ -4264,7 +4418,7 @@ onUnmounted(() => {
                   >
                     <span
                       class="sidebar-drag-handle"
-                      title="拖动排序"
+                      :title="t('settings.sidebar.drag')"
                       @pointerdown="
                         beginSidebarPointerDrag($event, 'tools', tool.id)
                       "
@@ -4282,15 +4436,15 @@ onUnmounted(() => {
                       {{ tool.icon }}
                     </span>
                     <span class="sidebar-manager-copy">
-                      <strong>{{ tool.navLabel }}</strong>
-                      <small>{{ tool.navHint }}</small>
+                    <strong>{{ t(`tools.${tool.id}.label`) }}</strong>
+                    <small>{{ t(`tools.${tool.id}.hint`) }}</small>
                     </span>
                     <label
                       class="sidebar-visibility-switch"
                       :title="
                         settingsDraft.hiddenTools.includes(tool.id)
-                          ? '在侧栏中显示'
-                          : '从侧栏隐藏'
+                          ? t('settings.sidebar.showInSidebar')
+                          : t('settings.sidebar.hideFromSidebar')
                       "
                     >
                       <input
@@ -4298,7 +4452,7 @@ onUnmounted(() => {
                         :checked="
                           !settingsDraft.hiddenTools.includes(tool.id)
                         "
-                        :aria-label="`在侧栏显示 ${tool.navLabel}`"
+                        :aria-label="`${t('settings.sidebar.showInSidebar')} ${t(`tools.${tool.id}.label`)}`"
                         @change="toggleToolVisibility(tool.id, $event)"
                       />
                       <i></i>
@@ -4318,14 +4472,14 @@ onUnmounted(() => {
           >
             <div class="settings-section-title">
               <div>
-                <h2>应用行为</h2>
-                <p>macOS 登录与窗口关闭行为</p>
+                <h2>{{ t("settings.application.behaviorTitle") }}</h2>
+                <p>{{ t("settings.application.behaviorHint") }}</p>
               </div>
             </div>
             <label class="settings-toggle-row">
               <span>
-                <strong>登录时启动智屿</strong>
-                <small>使用 macOS LaunchAgent 自动启动桌面应用</small>
+                <strong>{{ t("settings.application.launchTitle") }}</strong>
+                <small>{{ t("settings.application.launchHint") }}</small>
               </span>
               <input
                 v-model="settingsDraft.launchAtLogin"
@@ -4336,8 +4490,8 @@ onUnmounted(() => {
             </label>
             <label class="settings-toggle-row">
               <span>
-                <strong>关闭智屿后继续运行服务</strong>
-                <small>关闭时不停止 Redis、MySQL 等托管进程</small>
+                <strong>{{ t("settings.application.keepRunningTitle") }}</strong>
+                <small>{{ t("settings.application.keepRunningHint") }}</small>
               </span>
               <input
                 v-model="settingsDraft.keepServicesRunningOnClose"
@@ -4348,10 +4502,10 @@ onUnmounted(() => {
             </label>
             <div class="settings-guide-row">
               <span>
-                <strong>新手引导</strong>
-                <small>重新查看智屿的基本使用流程</small>
+                <strong>{{ t("settings.application.onboardingTitle") }}</strong>
+                <small>{{ t("settings.application.onboardingHint") }}</small>
               </span>
-              <button type="button" @click="showOnboarding">重新查看</button>
+              <button type="button" @click="showOnboarding">{{ t("settings.application.viewAgain") }}</button>
             </div>
           </section>
 
@@ -4364,12 +4518,12 @@ onUnmounted(() => {
           >
             <div class="settings-section-title">
               <div>
-                <h2>下载安装</h2>
-                <p>镜像优先级、并发和失败超时</p>
+                <h2>{{ t("settings.storage.downloadTitle") }}</h2>
+                <p>{{ t("settings.storage.downloadHint") }}</p>
               </div>
             </div>
             <div class="settings-field">
-              <label for="download-mirror">自定义下载镜像</label>
+              <label for="download-mirror">{{ t("settings.storage.customMirror") }}</label>
               <div>
                 <input
                   id="download-mirror"
@@ -4378,13 +4532,13 @@ onUnmounted(() => {
                   placeholder="https://your-cdn.example.com/zhiyu-packages"
                   @change="saveSettings"
                 />
-                <small>留空时跳过自定义镜像；镜像文件需保留原始文件名</small>
+                <small>{{ t("settings.storage.customMirrorHint") }}</small>
               </div>
             </div>
             <label class="settings-toggle-row">
               <span>
-                <strong>启用 GitHub 公共加速</strong>
-                <small>自定义镜像不可用时先尝试公共加速，再回退官方源</small>
+                <strong>{{ t("settings.storage.githubMirror") }}</strong>
+                <small>{{ t("settings.storage.githubMirrorHint") }}</small>
               </span>
               <input
                 v-model="settingsDraft.publicGithubMirror"
@@ -4395,19 +4549,16 @@ onUnmounted(() => {
             </label>
             <div class="settings-field-grid">
               <label>
-                <span>最大并行下载</span>
+                <span>{{ t("settings.storage.concurrency") }}</span>
                 <select
                   v-model.number="settingsDraft.downloadConcurrency"
                   @change="saveSettings"
                 >
-                  <option :value="1">1 个</option>
-                  <option :value="2">2 个</option>
-                  <option :value="3">3 个</option>
-                  <option :value="4">4 个</option>
+                  <option v-for="count in 4" :key="count" :value="count">{{ count }} {{ t("settings.storage.itemUnit") }}</option>
                 </select>
               </label>
               <label>
-                <span>单个下载超时</span>
+                <span>{{ t("settings.storage.timeout") }}</span>
                 <div class="settings-number">
                   <input
                     v-model.number="settingsDraft.downloadTimeoutSeconds"
@@ -4416,7 +4567,7 @@ onUnmounted(() => {
                     max="600"
                     @change="saveSettings"
                   />
-                  <em>秒</em>
+                  <em>{{ t("settings.storage.seconds") }}</em>
                 </div>
               </label>
             </div>
@@ -4429,25 +4580,25 @@ onUnmounted(() => {
           >
             <div class="settings-section-title">
               <div>
-                <h2>存储与保留策略</h2>
-                <p>程序、数据、日志、备份和安装缓存</p>
+                <h2>{{ t("settings.storage.policyTitle") }}</h2>
+                <p>{{ t("settings.storage.policyHint") }}</p>
               </div>
             </div>
             <div class="settings-field">
-              <label>默认安装目录</label>
+              <label>{{ t("settings.storage.installRoot") }}</label>
               <div class="settings-path">
                 <input
                   v-model="settingsDraft.installRoot"
                   type="text"
                   readonly
                 />
-                <button type="button" @click="chooseInstallRoot">选择</button>
-                <small>切换目录不会迁移原目录中的服务和数据</small>
+                <button type="button" @click="chooseInstallRoot">{{ t("settings.storage.choose") }}</button>
+                <small>{{ t("settings.storage.installRootHint") }}</small>
               </div>
             </div>
             <div class="settings-field-grid">
               <label>
-                <span>日志保留</span>
+                <span>{{ t("settings.storage.logRetention") }}</span>
                 <div class="settings-number">
                   <input
                     v-model.number="settingsDraft.logRetentionDays"
@@ -4456,11 +4607,11 @@ onUnmounted(() => {
                     max="365"
                     @change="saveSettings"
                   />
-                  <em>天</em>
+                  <em>{{ t("settings.storage.days") }}</em>
                 </div>
               </label>
               <label>
-                <span>每个服务保留备份</span>
+                <span>{{ t("settings.storage.backupRetention") }}</span>
                 <div class="settings-number">
                   <input
                     v-model.number="settingsDraft.backupRetentionCount"
@@ -4469,14 +4620,14 @@ onUnmounted(() => {
                     max="100"
                     @change="saveSettings"
                   />
-                  <em>份</em>
+                  <em>{{ t("settings.storage.copies") }}</em>
                 </div>
               </label>
             </div>
             <div class="settings-maintenance">
               <span>
-                <strong>全部安装缓存</strong>
-                <small>删除下载包和失败安装留下的临时文件</small>
+                <strong>{{ t("settings.storage.cacheTitle") }}</strong>
+                <small>{{ t("settings.storage.cacheHint") }}</small>
               </span>
               <button
                 type="button"
@@ -4484,7 +4635,7 @@ onUnmounted(() => {
                 @click="cleanAllCaches"
               >
                 <span v-if="allCacheCleaning" class="spinner"></span>
-                {{ allCacheCleaning ? "清理中" : "立即清理" }}
+                {{ allCacheCleaning ? t("settings.storage.cleaning") : t("settings.storage.cleanNow") }}
               </button>
             </div>
           </section>
@@ -4496,14 +4647,14 @@ onUnmounted(() => {
           >
             <div class="settings-section-title">
               <div>
-                <h2>应用更新</h2>
-                <p>检查智屿 GitHub Release</p>
+                <h2>{{ t("settings.application.updateTitle") }}</h2>
+                <p>{{ t("settings.application.updateHint") }}</p>
               </div>
             </div>
             <label class="settings-toggle-row">
               <span>
-                <strong>启动时自动检查更新</strong>
-                <small>只检查并提示，不自动安装未签名程序</small>
+                <strong>{{ t("settings.application.autoUpdateTitle") }}</strong>
+                <small>{{ t("settings.application.autoUpdateHint") }}</small>
               </span>
               <input
                 v-model="settingsDraft.autoCheckUpdates"
@@ -4514,11 +4665,11 @@ onUnmounted(() => {
             </label>
             <div class="settings-update-row">
               <span>
-                <strong>{{ updateStatus?.message ?? "尚未检查更新" }}</strong>
+                <strong>{{ updateStatus?.message ?? t("settings.application.notChecked") }}</strong>
                 <small v-if="updateStatus">
-                  当前版本 {{ updateStatus.currentVersion }}
+                  {{ t("settings.application.currentVersion") }} {{ updateStatus.currentVersion }}
                   <template v-if="updateStatus.latestVersion">
-                    · 最新版本 {{ updateStatus.latestVersion }}
+                    · {{ t("settings.application.latestVersion") }} {{ updateStatus.latestVersion }}
                   </template>
                 </small>
               </span>
@@ -4528,7 +4679,7 @@ onUnmounted(() => {
                 @click="checkForUpdates"
               >
                 <span v-if="updateChecking" class="spinner"></span>
-                {{ updateChecking ? "检查中" : "检查更新" }}
+                {{ updateChecking ? t("settings.application.checking") : t("settings.application.checkUpdates") }}
               </button>
             </div>
           </section>
@@ -4538,9 +4689,9 @@ onUnmounted(() => {
       <section v-else-if="dashboardActive" class="dashboard-page">
         <header class="dashboard-header">
           <div>
-            <span class="dashboard-eyebrow">LOCAL ENVIRONMENT</span>
-            <h1>全局概览</h1>
-            <p>集中查看智屿管理的本地服务、资源和端口状态</p>
+            <span class="dashboard-eyebrow">{{ t("dashboard.eyebrow") }}</span>
+            <h1>{{ t("dashboard.title") }}</h1>
+            <p>{{ t("dashboard.subtitle") }}</p>
           </div>
           <div class="dashboard-header-actions">
             <button
@@ -4562,7 +4713,7 @@ onUnmounted(() => {
               {{
                 stoppingAll
                   ? "正在停止"
-                  : `停止全部${runningServices.length ? ` (${runningServices.length})` : ""}`
+                  : `${t("dashboard.stopAll")}${runningServices.length ? ` (${runningServices.length})` : ""}`
               }}
             </button>
           </div>
@@ -4580,9 +4731,9 @@ onUnmounted(() => {
         <div class="dashboard-body">
           <div class="dashboard-metrics">
             <article>
-              <span>运行服务</span>
+              <span>{{ t("dashboard.runningServices") }}</span>
               <strong>{{ runningServices.length }}</strong>
-              <small>共 {{ services.length }} 个服务</small>
+              <small>{{ t("dashboard.totalServices", { count: services.length }) }}</small>
             </article>
             <article>
               <span>已安装</span>
@@ -4590,14 +4741,14 @@ onUnmounted(() => {
               <small>可直接启动</small>
             </article>
             <article>
-              <span>总 CPU</span>
+              <span>{{ t("dashboard.totalCpu") }}</span>
               <strong>{{ environmentMetrics.cpuPercent.toFixed(1) }}%</strong>
-              <small>智屿与运行服务</small>
+              <small>{{ t("dashboard.cpuHint") }}</small>
             </article>
             <article>
-              <span>总内存</span>
+              <span>{{ t("dashboard.totalMemory") }}</span>
               <strong>{{ formatBytes(environmentMetrics.memoryBytes) }}</strong>
-              <small>常驻内存合计</small>
+              <small>{{ t("dashboard.memoryHint") }}</small>
             </article>
             <article>
               <span>监听端口</span>
@@ -4622,7 +4773,7 @@ onUnmounted(() => {
               <small>可在设置中清理</small>
             </article>
             <article>
-              <span>总磁盘</span>
+              <span>{{ t("dashboard.totalDisk") }}</span>
               <strong>{{ formatBytes(environmentDiskBytes) }}</strong>
               <small>程序、数据与备份</small>
             </article>
@@ -4634,7 +4785,7 @@ onUnmounted(() => {
           >
             <div class="dashboard-panel-title">
               <div>
-                <h2>异常提醒</h2>
+                <h2>{{ t("dashboard.exceptions") }}</h2>
                 <p>PID、端口和最近操作</p>
               </div>
               <div class="dashboard-alert-actions">
@@ -4666,7 +4817,7 @@ onUnmounted(() => {
             <section class="dashboard-panel service-status-panel">
               <div class="dashboard-panel-title">
                 <div>
-                  <h2>服务状态</h2>
+                  <h2>{{ t("dashboard.serviceStatus") }}</h2>
                   <p>点击服务进入详情</p>
                 </div>
                 <div
@@ -4706,7 +4857,7 @@ onUnmounted(() => {
             <section class="dashboard-panel">
               <div class="dashboard-panel-title">
                 <div>
-                  <h2>端口占用</h2>
+                  <h2>{{ t("dashboard.portUsage") }}</h2>
                   <p>智屿服务与默认端口</p>
                 </div>
                 <span>{{ dashboardPortListeners.length }}</span>
@@ -4739,7 +4890,7 @@ onUnmounted(() => {
             <section class="dashboard-panel">
               <div class="dashboard-panel-title">
                 <div>
-                  <h2>磁盘占用排行</h2>
+                  <h2>{{ t("dashboard.diskRanking") }}</h2>
                   <p>程序、数据、日志与缓存</p>
                 </div>
               </div>
@@ -4775,12 +4926,12 @@ onUnmounted(() => {
             <section class="dashboard-panel">
               <div class="dashboard-panel-title">
                 <div>
-                  <h2>最近操作</h2>
+                  <h2>{{ t("dashboard.recentActivity") }}</h2>
                   <p>安装与生命周期记录</p>
                 </div>
               </div>
               <p v-if="activityRecords.length === 0" class="dashboard-empty">
-                暂无操作记录
+                {{ t("dashboard.noActivity") }}
               </p>
               <div v-else class="dashboard-activity-list">
                 <div
@@ -4802,10 +4953,13 @@ onUnmounted(() => {
 
       <template v-else-if="activeTool === 'ssh'"></template>
 
-      <component
-        :is="activeToolDefinition.component"
+      <div
         v-else-if="activeToolDefinition"
-      />
+        v-tool-i18n
+        class="tool-i18n-host"
+      >
+        <component :is="activeToolDefinition.component" />
+      </div>
 
       <template v-else-if="selectedService">
         <header class="detail-header">
@@ -4844,7 +4998,7 @@ onUnmounted(() => {
                 "
                 class="platform-unsupported"
               >
-                {{ selectedService.installSupportLabel }}
+                {{ localizedInstallSupportLabel(selectedService.installSupportLabel) }}
               </small>
             </div>
           </div>
@@ -4857,14 +5011,14 @@ onUnmounted(() => {
               :disabled="
                 serviceControlBusy || !selectedService.installSupported
               "
-              :title="selectedService.installSupportLabel"
+              :title="localizedInstallSupportLabel(selectedService.installSupportLabel)"
               @click="execute('install')"
             >
               <template v-if="pendingAction === 'install'">
                 <span class="spinner"></span>
-                <span>安装中</span>
+                <span>{{ t("common.installing") }}</span>
               </template>
-              <span v-else>下载并安装</span>
+              <span v-else>{{ t("common.install") }}</span>
             </button>
             <template v-else-if="selectedService.status === 'running'">
               <button
@@ -4876,7 +5030,7 @@ onUnmounted(() => {
                   v-if="pendingAction === 'restart'"
                   class="spinner"
                 ></span>
-                {{ pendingAction === "restart" ? "重启中" : "重启" }}
+                {{ pendingAction === "restart" ? t("common.restarting") : t("common.restart") }}
               </button>
               <button
                 class="danger"
@@ -4885,7 +5039,7 @@ onUnmounted(() => {
                 @click="execute('stop')"
               >
                 <span v-if="pendingAction === 'stop'" class="spinner"></span>
-                {{ pendingAction === "stop" ? "停止中" : "停止" }}
+                {{ pendingAction === "stop" ? t("common.stopping") : t("common.stop") }}
               </button>
             </template>
             <button
@@ -4896,7 +5050,7 @@ onUnmounted(() => {
               @click="execute('start')"
             >
               <span v-if="serviceControlBusy" class="spinner"></span>
-              {{ serviceControlBusy ? "处理中" : "启动服务" }}
+              {{ serviceControlBusy ? t("common.processing") : t("common.startService") }}
             </button>
           </div>
         </header>
@@ -4914,7 +5068,7 @@ onUnmounted(() => {
             :class="{ active: activeTab === tab[0] }"
             @click="openTab(tab[0] as DetailTab)"
           >
-            {{ tab[1] }}
+            {{ t(`serviceTabs.${tab[0]}`) }}
           </button>
         </nav>
 
@@ -4926,16 +5080,16 @@ onUnmounted(() => {
             <div class="redis-version-head">
               <div>
                 <p>VERSION MANAGER</p>
-                <h2>Redis 运行版本</h2>
+                <h2>{{ t("versions.title", { service: "Redis" }) }}</h2>
               </div>
-              <span>二进制独立安装 · 单个活动版本</span>
+              <span>{{ t("versions.isolatedBinary") }}</span>
             </div>
 
             <div
               v-if="redisVersionsLoading && redisVersions.length === 0"
               class="redis-version-loading"
             >
-              正在读取可用版本…
+              {{ t("versions.loading") }}
             </div>
             <div v-else class="redis-version-grid">
               <button
@@ -4956,16 +5110,16 @@ onUnmounted(() => {
                   <small>v{{ release.version }}</small>
                 </span>
                 <span class="redis-version-badges">
-                  <i v-if="release.selected">当前</i>
-                  <i v-else-if="release.installed">已安装</i>
+                  <i v-if="release.selected">{{ t("versions.current") }}</i>
+                  <i v-else-if="release.installed">{{ t("versions.installed") }}</i>
                   <i v-if="release.recommended" class="recommended">
-                    推荐
+                    {{ t("versions.recommended") }}
                   </i>
                 </span>
                 <em>
-                  {{ release.supportLabel }}
+                  {{ localizedSupportLabel(release.supportLabel) }}
                   <template v-if="!selectedService.installSupported">
-                    · 当前平台不支持
+                    · {{ t("versions.unsupported") }}
                   </template>
                 </em>
               </button>
@@ -4973,8 +5127,7 @@ onUnmounted(() => {
 
             <div class="redis-version-footer">
               <p>
-                各版本程序和数据相互隔离，数据保存在
-                <code>data/版本</code>；基础配置共用。切换前建议备份。
+                {{ t("versions.redisNote") }}
               </p>
               <div>
                 <span
@@ -4983,7 +5136,7 @@ onUnmounted(() => {
                     !selectedRedisVersionInfo?.selected
                   "
                 >
-                  请先停止 Redis
+                  {{ t("versions.stopFirst", { service: "Redis" }) }}
                 </span>
                 <button
                   v-if="selectedRedisVersionInfo?.installed"
@@ -5002,7 +5155,7 @@ onUnmounted(() => {
                     )
                   "
                 >
-                  卸载程序
+                  {{ t("versions.uninstallProgram") }}
                 </button>
                 <button
                   type="button"
@@ -5018,12 +5171,12 @@ onUnmounted(() => {
                   <span v-if="redisVersionChanging" class="spinner"></span>
                   {{
                     selectedRedisVersionInfo?.selected
-                      ? "当前版本"
+                      ? t("versions.currentVersion")
                       : redisVersionChanging
-                        ? "安装切换中"
+                        ? t("versions.switching")
                         : selectedRedisVersionInfo?.installed
-                          ? "切换版本"
-                          : "安装并切换"
+                          ? t("versions.switch")
+                          : t("versions.installAndSwitch")
                   }}
                 </button>
               </div>
@@ -5039,16 +5192,16 @@ onUnmounted(() => {
             <div class="redis-version-head">
               <div>
                 <p>VERSION MANAGER</p>
-                <h2>MySQL 运行版本</h2>
+                <h2>{{ t("versions.title", { service: "MySQL" }) }}</h2>
               </div>
-              <span>二进制与数据独立 · 单个活动版本</span>
+              <span>{{ t("versions.isolatedData") }}</span>
             </div>
 
             <div
               v-if="mysqlVersionsLoading && mysqlVersions.length === 0"
               class="redis-version-loading"
             >
-              正在读取可用版本…
+              {{ t("versions.loading") }}
             </div>
             <div v-else class="redis-version-grid">
               <button
@@ -5069,16 +5222,16 @@ onUnmounted(() => {
                   <small>v{{ release.version }}</small>
                 </span>
                 <span class="redis-version-badges">
-                  <i v-if="release.selected">当前</i>
-                  <i v-else-if="release.installed">已安装</i>
+                  <i v-if="release.selected">{{ t("versions.current") }}</i>
+                  <i v-else-if="release.installed">{{ t("versions.installed") }}</i>
                   <i v-if="release.recommended" class="recommended">
-                    推荐
+                    {{ t("versions.recommended") }}
                   </i>
                 </span>
                 <em>
-                  {{ release.supportLabel }}
+                  {{ localizedSupportLabel(release.supportLabel) }}
                   <template v-if="!selectedService.installSupported">
-                    · 当前平台不支持
+                    · {{ t("versions.unsupported") }}
                   </template>
                 </em>
               </button>
@@ -5086,8 +5239,7 @@ onUnmounted(() => {
 
             <div class="redis-version-footer">
               <p>
-                各版本程序和数据相互隔离，数据保存在
-                <code>data/版本</code>。新版本首次切换时会自动初始化空数据库。
+                {{ t("versions.mysqlNote") }}
               </p>
               <div>
                 <span
@@ -5096,7 +5248,7 @@ onUnmounted(() => {
                     !selectedMysqlVersionInfo?.selected
                   "
                 >
-                  请先停止 MySQL
+                  {{ t("versions.stopFirst", { service: "MySQL" }) }}
                 </span>
                 <button
                   v-if="selectedMysqlVersionInfo?.installed"
@@ -5115,7 +5267,7 @@ onUnmounted(() => {
                     )
                   "
                 >
-                  卸载程序
+                  {{ t("versions.uninstallProgram") }}
                 </button>
                 <button
                   type="button"
@@ -5131,12 +5283,12 @@ onUnmounted(() => {
                   <span v-if="mysqlVersionChanging" class="spinner"></span>
                   {{
                     selectedMysqlVersionInfo?.selected
-                      ? "当前版本"
+                      ? t("versions.currentVersion")
                       : mysqlVersionChanging
-                        ? "安装初始化中"
+                        ? t("versions.initializing")
                         : selectedMysqlVersionInfo?.installed
-                          ? "切换版本"
-                          : "安装并切换"
+                          ? t("versions.switch")
+                          : t("versions.installAndSwitch")
                   }}
                 </button>
               </div>
@@ -5152,9 +5304,9 @@ onUnmounted(() => {
             <div class="redis-version-head">
               <div>
                 <p>VERSION MANAGER</p>
-                <h2>PostgreSQL 运行版本</h2>
+                <h2>{{ t("versions.title", { service: "PostgreSQL" }) }}</h2>
               </div>
-              <span>源码独立构建 · 数据目录隔离</span>
+              <span>{{ t("versions.isolatedSource") }}</span>
             </div>
 
             <div
@@ -5163,7 +5315,7 @@ onUnmounted(() => {
               "
               class="redis-version-loading"
             >
-              正在读取可用版本…
+              {{ t("versions.loading") }}
             </div>
             <div v-else class="redis-version-grid">
               <button
@@ -5184,16 +5336,16 @@ onUnmounted(() => {
                   <small>v{{ release.version }}</small>
                 </span>
                 <span class="redis-version-badges">
-                  <i v-if="release.selected">当前</i>
-                  <i v-else-if="release.installed">已安装</i>
+                  <i v-if="release.selected">{{ t("versions.current") }}</i>
+                  <i v-else-if="release.installed">{{ t("versions.installed") }}</i>
                   <i v-if="release.recommended" class="recommended">
-                    推荐
+                    {{ t("versions.recommended") }}
                   </i>
                 </span>
                 <em>
-                  {{ release.supportLabel }}
+                  {{ localizedSupportLabel(release.supportLabel) }}
                   <template v-if="!selectedService.installSupported">
-                    · 当前平台不支持
+                    · {{ t("versions.unsupported") }}
                   </template>
                 </em>
               </button>
@@ -5201,8 +5353,7 @@ onUnmounted(() => {
 
             <div class="redis-version-footer">
               <p>
-                各主版本使用独立的 <code>data/版本</code> 数据目录。首次切换会编译安装并通过
-                <code>initdb</code> 创建空数据库。
+                {{ t("versions.postgresNote") }}
               </p>
               <div>
                 <span
@@ -5211,7 +5362,7 @@ onUnmounted(() => {
                     !selectedPostgresVersionInfo?.selected
                   "
                 >
-                  请先停止 PostgreSQL
+                  {{ t("versions.stopFirst", { service: "PostgreSQL" }) }}
                 </span>
                 <button
                   v-if="selectedPostgresVersionInfo?.installed"
@@ -5230,7 +5381,7 @@ onUnmounted(() => {
                     )
                   "
                 >
-                  卸载程序
+                  {{ t("versions.uninstallProgram") }}
                 </button>
                 <button
                   type="button"
@@ -5249,12 +5400,12 @@ onUnmounted(() => {
                   ></span>
                   {{
                     selectedPostgresVersionInfo?.selected
-                      ? "当前版本"
+                      ? t("versions.currentVersion")
                       : postgresVersionChanging
-                        ? "编译初始化中"
+                        ? t("versions.compiling")
                         : selectedPostgresVersionInfo?.installed
-                          ? "切换版本"
-                          : "安装并切换"
+                          ? t("versions.switch")
+                          : t("versions.installAndSwitch")
                   }}
                 </button>
               </div>
@@ -5273,9 +5424,9 @@ onUnmounted(() => {
             <div class="redis-version-head">
               <div>
                 <p>VERSION MANAGER</p>
-                <h2>{{ selectedService.name }} 运行版本</h2>
+                <h2>{{ t("versions.title", { service: selectedService.name }) }}</h2>
               </div>
-              <span>官方发布包 · 单个活动版本</span>
+              <span>{{ t("versions.verifiedPackages") }}</span>
             </div>
 
             <div
@@ -5285,7 +5436,7 @@ onUnmounted(() => {
               "
               class="panel-state"
             >
-              正在读取已验证版本…
+              {{ t("versions.loadingVerified") }}
             </div>
 
             <template
@@ -5313,12 +5464,12 @@ onUnmounted(() => {
                     <small>v{{ release.version }}</small>
                   </span>
                   <span class="redis-version-badges">
-                    <i v-if="release.selected">当前</i>
-                    <i v-else-if="release.installed">已安装</i>
-                    <i v-if="release.recommended" class="recommended">推荐</i>
+                    <i v-if="release.selected">{{ t("versions.current") }}</i>
+                    <i v-else-if="release.installed">{{ t("versions.installed") }}</i>
+                    <i v-if="release.recommended" class="recommended">{{ t("versions.recommended") }}</i>
                   </span>
                   <em>
-                    {{ release.supportLabel }}
+                    {{ localizedSupportLabel(release.supportLabel) }}
                     <template v-if="release.installationBytes > 0">
                       · {{ formatBytes(release.installationBytes) }}
                     </template>
@@ -5328,7 +5479,7 @@ onUnmounted(() => {
 
               <footer class="redis-version-footer">
                 <p>
-                  各版本程序独立存放，配置和数据保持不变。跨大版本的数据格式可能不兼容，切换前建议先创建备份。
+                  {{ t("versions.genericNote") }}
                 </p>
                 <div>
                   <button
@@ -5348,7 +5499,7 @@ onUnmounted(() => {
                       )
                     "
                   >
-                    卸载此版本
+                    {{ t("versions.uninstallVersion") }}
                   </button>
                   <button
                     type="button"
@@ -5367,12 +5518,12 @@ onUnmounted(() => {
                     ></span>
                     {{
                       selectedManagedVersionInfo?.selected
-                        ? "当前版本"
+                        ? t("versions.currentVersion")
                         : managedVersionChanging
-                          ? "安装切换中"
+                          ? t("versions.switching")
                           : selectedManagedVersionInfo?.installed
-                            ? "切换版本"
-                            : "安装并切换"
+                            ? t("versions.switch")
+                            : t("versions.installAndSwitch")
                     }}
                   </button>
                 </div>
@@ -5394,15 +5545,15 @@ onUnmounted(() => {
                     <small>v{{ selectedService.version }}</small>
                   </span>
                   <span class="redis-version-badges">
-                    <i>当前</i>
+                    <i>{{ t("versions.current") }}</i>
                     <i
                       v-if="selectedService.status !== 'not_installed'"
                     >
-                      已安装
+                      {{ t("versions.installed") }}
                     </i>
                   </span>
                   <em>
-                    {{ selectedService.installSupportLabel }}
+                    {{ localizedInstallSupportLabel(selectedService.installSupportLabel) }}
                     <template
                       v-if="
                         (selectedDiskUsage?.installationBytes ?? 0) > 0
@@ -5421,12 +5572,11 @@ onUnmounted(() => {
 
               <footer class="redis-version-footer">
                 <p>
-                  当前仅有一个经过官方来源和 SHA-256
-                  验证的稳定版本；卸载程序不会删除配置、数据和日志。
+                  {{ t("versions.singleNote") }}
                 </p>
                 <div>
                   <span v-if="selectedService.status === 'running'">
-                    请先停止服务再卸载
+                    {{ t("versions.stopBeforeUninstall") }}
                   </span>
                   <button
                     v-if="selectedService.status !== 'not_installed'"
@@ -5438,7 +5588,7 @@ onUnmounted(() => {
                     "
                     @click="requestCurrentProgramUninstall"
                   >
-                    卸载程序
+                    {{ t("versions.uninstallProgram") }}
                   </button>
                   <button
                     v-else
@@ -5455,8 +5605,8 @@ onUnmounted(() => {
                     ></span>
                     {{
                       pendingAction === "install"
-                        ? "安装中"
-                        : "下载并安装"
+                        ? t("common.installing")
+                        : t("common.install")
                     }}
                   </button>
                 </div>
@@ -5470,7 +5620,7 @@ onUnmounted(() => {
             <article class="metric-card">
               <p>MEMORY</p>
               <strong>{{ formatBytes(metrics.memoryBytes) }}</strong>
-              <small>当前进程常驻内存</small>
+              <small>{{ t("serviceOverview.memoryHint") }}</small>
             </article>
             <article class="metric-card">
               <p>CPU</p>
@@ -5479,33 +5629,33 @@ onUnmounted(() => {
                   ? "—"
                   : `${metrics.cpuPercent.toFixed(1)}%`
               }}</strong>
-              <small>当前进程使用率</small>
+              <small>{{ t("serviceOverview.cpuHint") }}</small>
             </article>
             <article class="metric-card">
               <p>UPTIME</p>
               <strong>{{ metrics.uptime ?? "—" }}</strong>
-              <small>本次连续运行时间</small>
+              <small>{{ t("serviceOverview.uptimeHint") }}</small>
             </article>
             <article class="metric-card">
               <p>DISK</p>
               <strong>{{
                 formatBytes(selectedDiskUsage?.totalBytes ?? null)
               }}</strong>
-              <small>程序、数据和下载缓存</small>
+              <small>{{ t("serviceOverview.diskHint") }}</small>
             </article>
             <article class="metric-card">
               <p>ENDPOINT</p>
               <strong class="endpoint"
                 >127.0.0.1:{{ selectedService.port }}</strong
               >
-              <small>仅监听本地连接</small>
+              <small>{{ t("serviceOverview.endpointHint") }}</small>
             </article>
           </div>
 
           <div v-if="selectedDiskUsage" class="disk-usage-strip">
             <div class="program-usage-cell">
               <span>
-                程序文件
+                {{ t("serviceOverview.programFiles") }}
                 <button
                   v-if="selectedService.status !== 'not_installed'"
                   type="button"
@@ -5518,8 +5668,8 @@ onUnmounted(() => {
                 >
                   {{
                     selectedService.status === "running"
-                      ? "运行中"
-                      : "卸载"
+                      ? t("status.running")
+                      : t("serviceOverview.uninstall")
                   }}
                 </button>
               </span>
@@ -5528,20 +5678,20 @@ onUnmounted(() => {
               }}</strong>
             </div>
             <div>
-              <span>业务数据</span>
+              <span>{{ t("serviceOverview.businessData") }}</span>
               <strong>{{ formatBytes(selectedDiskUsage.dataBytes) }}</strong>
             </div>
             <div>
-              <span>运行日志</span>
+              <span>{{ t("serviceOverview.runtimeLogs") }}</span>
               <strong>{{ formatBytes(selectedDiskUsage.logsBytes) }}</strong>
             </div>
             <div>
-              <span>配置文件</span>
+              <span>{{ t("serviceOverview.configFiles") }}</span>
               <strong>{{ formatBytes(selectedDiskUsage.configBytes) }}</strong>
             </div>
             <div class="cache-usage-cell">
               <span>
-                下载缓存
+                {{ t("serviceOverview.downloadCache") }}
                 <button
                   type="button"
                   :disabled="
@@ -5549,17 +5699,17 @@ onUnmounted(() => {
                   "
                   @click="clearInstallCache"
                 >
-                  {{ cacheCleaning ? "清理中" : "清理" }}
+                  {{ cacheCleaning ? t("serviceOverview.cleaning") : t("serviceOverview.clean") }}
                 </button>
               </span>
               <strong>{{ formatBytes(selectedDiskUsage.cacheBytes) }}</strong>
             </div>
             <div>
-              <span>备份文件</span>
+              <span>{{ t("serviceOverview.backupFiles") }}</span>
               <strong>{{ formatBytes(selectedDiskUsage.backupBytes) }}</strong>
             </div>
             <div>
-              <span>其他文件</span>
+              <span>{{ t("serviceOverview.otherFiles") }}</span>
               <strong>{{ formatBytes(selectedDiskUsage.otherBytes) }}</strong>
             </div>
           </div>
@@ -5569,19 +5719,19 @@ onUnmounted(() => {
             class="redis-stat-strip"
           >
             <div>
-              <span>Redis 内存</span>
+              <span>{{ t("serviceOverview.redisMemory") }}</span>
               <strong>{{ formatBytes(redisOverview.usedMemoryBytes) }}</strong>
             </div>
             <div>
-              <span>Key 数量</span>
+              <span>{{ t("serviceOverview.keyCount") }}</span>
               <strong>{{ redisOverview.totalKeys }}</strong>
             </div>
             <div>
-              <span>连接数</span>
+              <span>{{ t("serviceOverview.connections") }}</span>
               <strong>{{ redisOverview.connectedClients }}</strong>
             </div>
             <div>
-              <span>每秒操作</span>
+              <span>{{ t("serviceOverview.operationsPerSecond") }}</span>
               <strong>{{ redisOverview.operationsPerSecond }}</strong>
             </div>
           </div>
@@ -5594,19 +5744,19 @@ onUnmounted(() => {
             class="redis-stat-strip"
           >
             <div>
-              <span>数据库</span>
+              <span>{{ t("serviceOverview.databases") }}</span>
               <strong>{{ databaseOverview.databaseCount }}</strong>
             </div>
             <div>
-              <span>数据表</span>
+              <span>{{ t("serviceOverview.tables") }}</span>
               <strong>{{ databaseOverview.tableCount }}</strong>
             </div>
             <div>
-              <span>当前连接</span>
+              <span>{{ t("serviceOverview.activeConnections") }}</span>
               <strong>{{ databaseOverview.connectionCount }}</strong>
             </div>
             <div>
-              <span>数据大小</span>
+              <span>{{ t("serviceOverview.dataSize") }}</span>
               <strong>{{ formatBytes(databaseOverview.dataSizeBytes) }}</strong>
             </div>
           </div>
@@ -5616,19 +5766,19 @@ onUnmounted(() => {
             class="redis-stat-strip"
           >
             <div>
-              <span>数据库</span>
+              <span>{{ t("serviceOverview.databases") }}</span>
               <strong>{{ mongoOverview.databaseCount }}</strong>
             </div>
             <div>
-              <span>MongoDB 版本</span>
+              <span>{{ t("serviceOverview.mongoVersion") }}</span>
               <strong>{{ mongoOverview.version }}</strong>
             </div>
             <div>
-              <span>当前连接</span>
+              <span>{{ t("serviceOverview.activeConnections") }}</span>
               <strong>{{ mongoOverview.connectionCount }}</strong>
             </div>
             <div>
-              <span>数据大小</span>
+              <span>{{ t("serviceOverview.dataSize") }}</span>
               <strong>{{ formatBytes(mongoOverview.dataSizeBytes) }}</strong>
             </div>
           </div>
@@ -5638,21 +5788,21 @@ onUnmounted(() => {
             class="redis-stat-strip"
           >
             <div>
-              <span>已捕获邮件</span>
+              <span>{{ t("serviceOverview.capturedMail") }}</span>
               <strong>{{ mailpitOverview.total }}</strong>
             </div>
             <div>
-              <span>未读邮件</span>
+              <span>{{ t("serviceOverview.unreadMail") }}</span>
               <strong>{{ mailpitOverview.unread }}</strong>
             </div>
             <div>
-              <span>SMTP 地址</span>
+              <span>{{ t("serviceOverview.smtpAddress") }}</span>
               <strong class="small-value">{{
                 mailpitOverview.smtpAddress
               }}</strong>
             </div>
             <div>
-              <span>Web 地址</span>
+              <span>{{ t("serviceOverview.webAddress") }}</span>
               <strong class="small-value">{{
                 mailpitOverview.webAddress
               }}</strong>
@@ -5664,19 +5814,19 @@ onUnmounted(() => {
             class="redis-stat-strip"
           >
             <div>
-              <span>当前连接</span>
+              <span>{{ t("serviceOverview.activeConnections") }}</span>
               <strong>{{ natsOverview.connections }}</strong>
             </div>
             <div>
-              <span>订阅数量</span>
+              <span>{{ t("serviceOverview.subscriptions") }}</span>
               <strong>{{ natsOverview.subscriptions }}</strong>
             </div>
             <div>
-              <span>接收消息</span>
+              <span>{{ t("serviceOverview.incomingMessages") }}</span>
               <strong>{{ natsOverview.inMessages }}</strong>
             </div>
             <div>
-              <span>发出消息</span>
+              <span>{{ t("serviceOverview.outgoingMessages") }}</span>
               <strong>{{ natsOverview.outMessages }}</strong>
             </div>
           </div>
@@ -5686,11 +5836,11 @@ onUnmounted(() => {
             class="redis-stat-strip"
           >
             <div>
-              <span>兼容协议</span>
+              <span>{{ t("serviceOverview.compatibleProtocol") }}</span>
               <strong>Kafka API</strong>
             </div>
             <div>
-              <span>主题数量</span>
+              <span>{{ t("serviceOverview.topics") }}</span>
               <strong>{{ kafkaOverview.topicCount }}</strong>
             </div>
             <div>
@@ -5698,7 +5848,7 @@ onUnmounted(() => {
               <strong class="small-value">127.0.0.1:9092</strong>
             </div>
             <div>
-              <span>存储引擎</span>
+              <span>{{ t("serviceOverview.storageEngine") }}</span>
               <strong>{{ kafkaOverview.storageEngine }}</strong>
             </div>
           </div>
@@ -5708,21 +5858,21 @@ onUnmounted(() => {
             class="redis-stat-strip"
           >
             <div>
-              <span>索引数量</span>
+              <span>{{ t("serviceOverview.indexes") }}</span>
               <strong>{{ meilisearchOverview.indexCount }}</strong>
             </div>
             <div>
-              <span>文档数量</span>
+              <span>{{ t("serviceOverview.documents") }}</span>
               <strong>{{ meilisearchOverview.documentCount }}</strong>
             </div>
             <div>
-              <span>数据库大小</span>
+              <span>{{ t("serviceOverview.databaseSize") }}</span>
               <strong>{{
                 formatBytes(meilisearchOverview.databaseSizeBytes)
               }}</strong>
             </div>
             <div>
-              <span>索引任务</span>
+              <span>{{ t("serviceOverview.indexingTasks") }}</span>
               <strong>{{ meilisearchOverview.indexingCount }}</strong>
             </div>
           </div>
@@ -5732,21 +5882,21 @@ onUnmounted(() => {
               <div class="panel-title">
                 <div>
                   <p>LIVE MONITORING</p>
-                  <h2>实时资源</h2>
+                  <h2>{{ t("serviceOverview.liveResources") }}</h2>
                 </div>
-                <span class="live-badge"><i></i>2 秒刷新</span>
+                <span class="live-badge"><i></i>{{ t("serviceOverview.refreshInterval") }}</span>
               </div>
 
               <div
                 v-if="selectedService.status !== 'running'"
                 class="chart-empty"
               >
-                服务启动后显示 CPU 和内存趋势
+                {{ t("serviceOverview.chartEmpty") }}
               </div>
               <div v-else class="charts">
                 <div class="chart-block">
                   <div class="chart-label">
-                    <span>内存使用</span>
+                    <span>{{ t("serviceOverview.memoryUsage") }}</span>
                     <strong>{{ formatBytes(metrics.memoryBytes) }}</strong>
                   </div>
                   <svg viewBox="0 0 560 112" preserveAspectRatio="none">
@@ -5789,32 +5939,32 @@ onUnmounted(() => {
               <div class="panel-title">
                 <div>
                   <p>RUNTIME</p>
-                  <h2>服务信息</h2>
+                  <h2>{{ t("serviceOverview.serviceInfo") }}</h2>
                 </div>
               </div>
               <dl class="info-list">
                 <div>
-                  <dt>运行状态</dt>
+                  <dt>{{ t("serviceOverview.runtimeStatus") }}</dt>
                   <dd>{{ statusLabel[selectedService.status] }}</dd>
                 </div>
                 <div>
-                  <dt>进程 PID</dt>
+                  <dt>{{ t("serviceOverview.processPid") }}</dt>
                   <dd>{{ selectedService.pid ?? "—" }}</dd>
                 </div>
                 <div>
-                  <dt>配置文件</dt>
+                  <dt>{{ t("serviceOverview.configFile") }}</dt>
                   <dd :title="selectedService.configPath">
                     {{ selectedService.configPath }}
                   </dd>
                 </div>
                 <div>
-                  <dt>数据目录</dt>
+                  <dt>{{ t("serviceOverview.dataDirectory") }}</dt>
                   <dd :title="selectedService.dataPath">
                     {{ selectedService.dataPath }}
                   </dd>
                 </div>
                 <div>
-                  <dt>可执行文件</dt>
+                  <dt>{{ t("serviceOverview.executable") }}</dt>
                   <dd :title="selectedService.executablePath">
                     {{ selectedService.executablePath }}
                   </dd>
@@ -5964,12 +6114,12 @@ onUnmounted(() => {
           <div class="redis-version-head">
             <div>
               <p>VERSION MANAGER</p>
-              <h2>Nginx 运行版本</h2>
+              <h2>{{ t("versions.title", { service: "Nginx" }) }}</h2>
             </div>
-            <span>官方源码 · 独立版本目录</span>
+            <span>{{ t("versions.nginxSource") }}</span>
           </div>
           <div v-if="nginxVersionsLoading" class="panel-state">
-            正在读取已验证版本…
+            {{ t("versions.loadingVerified") }}
           </div>
           <template v-else>
             <div
@@ -5994,12 +6144,12 @@ onUnmounted(() => {
                   <small>v{{ release.version }}</small>
                 </span>
                 <span class="redis-version-badges">
-                  <i v-if="release.selected">当前</i>
-                  <i v-else-if="release.installed">已安装</i>
-                  <i v-if="release.recommended" class="recommended">推荐</i>
+                  <i v-if="release.selected">{{ t("versions.current") }}</i>
+                  <i v-else-if="release.installed">{{ t("versions.installed") }}</i>
+                  <i v-if="release.recommended" class="recommended">{{ t("versions.recommended") }}</i>
                 </span>
                 <em>
-                  {{ release.supportLabel }}
+                  {{ localizedSupportLabel(release.supportLabel) }}
                   <template v-if="release.installationBytes > 0">
                     · {{ formatBytes(release.installationBytes) }}
                   </template>
@@ -6007,15 +6157,15 @@ onUnmounted(() => {
               </button>
             </div>
             <p class="ns-ver-note">
-              两个版本都使用官方源码编译并校验 SHA-256；站点文件和配置在切换时保持不变。
+              {{ t("versions.nginxVerifiedNote") }}
             </p>
             <div class="redis-version-footer">
               <p>
-                各版本程序独立存放，站点文件和配置共用。切换前需要先停止 Nginx。
+                {{ t("versions.nginxNote") }}
               </p>
               <div>
               <span v-if="selectedService.status === 'running'">
-                请先停止 Nginx 再切换或卸载当前版本
+                {{ t("versions.nginxStop") }}
               </span>
               <button
                 v-if="selectedNginxVersionInfo?.installed"
@@ -6034,7 +6184,7 @@ onUnmounted(() => {
                   )
                 "
               >
-                卸载此版本
+                {{ t("versions.uninstallVersion") }}
               </button>
               <button
                 type="button"
@@ -6050,12 +6200,12 @@ onUnmounted(() => {
                 <span v-if="nginxVersionChanging" class="spinner"></span>
                 {{
                   selectedNginxVersionInfo?.selected
-                    ? "当前版本"
+                    ? t("versions.currentVersion")
                     : nginxVersionChanging
-                      ? "编译切换中"
+                      ? t("versions.compileSwitching")
                       : selectedNginxVersionInfo?.installed
-                        ? "切换版本"
-                        : "安装并切换"
+                        ? t("versions.switch")
+                        : t("versions.installAndSwitch")
                 }}
               </button>
               </div>
@@ -6176,7 +6326,7 @@ onUnmounted(() => {
           <div class="console-head">
             <div>
               <p>REDIS CLI</p>
-              <h2>命令台</h2>
+              <h2>{{ t("console.title") }}</h2>
             </div>
             <label>
               DB
@@ -6191,13 +6341,12 @@ onUnmounted(() => {
               :disabled="consoleHistory.length === 0"
               @click="consoleHistory = []"
             >
-              清空输出
+              {{ t("console.clearOutput") }}
             </button>
           </div>
           <div class="console-output">
             <div v-if="consoleHistory.length === 0" class="console-placeholder">
-              输入 Redis 命令，例如 <code>GET user:1</code> 或
-              <code>SET greeting "hello world"</code>
+              {{ t("console.redisEmpty") }}
             </div>
             <article
               v-for="(entry, index) in consoleHistory"
@@ -6223,8 +6372,8 @@ onUnmounted(() => {
               "
               :placeholder="
                 selectedService.status === 'running'
-                  ? '输入 Redis 命令'
-                  : '请先启动 Redis'
+                  ? t('console.redisInput')
+                  : t('console.redisStartFirst')
               "
             />
             <button
@@ -6235,11 +6384,11 @@ onUnmounted(() => {
                 selectedService.status !== 'running'
               "
             >
-              {{ consoleRunning ? "执行中" : "执行" }}
+              {{ consoleRunning ? t("console.executing") : t("console.execute") }}
             </button>
           </form>
           <p class="console-note">
-            命令直接发送到本机 Redis；会阻塞服务的命令已禁用，清空数据需要二次确认。
+            {{ t("console.redisNote") }}
           </p>
         </section>
 
@@ -6624,10 +6773,10 @@ onUnmounted(() => {
           <div class="console-head">
             <div>
               <p>SQL CONSOLE</p>
-              <h2>{{ selectedService.name }} 命令台</h2>
+              <h2>{{ t("console.sqlTitle", { service: selectedService.name }) }}</h2>
             </div>
             <label>
-              数据库
+              {{ t("console.database") }}
               <select
                 v-model="selectedDatabase"
                 :disabled="databaseLoading || sqlRunning"
@@ -6646,7 +6795,7 @@ onUnmounted(() => {
               :disabled="sqlHistory.length === 0"
               @click="sqlHistory = []"
             >
-              清空结果
+              {{ t("console.clearResults") }}
             </button>
           </div>
 
@@ -6655,12 +6804,12 @@ onUnmounted(() => {
             class="sql-editor"
             spellcheck="false"
             :disabled="sqlRunning || selectedService.status !== 'running'"
-            placeholder="输入 SQL，例如 SELECT * FROM users LIMIT 20;"
+            :placeholder="t('console.sqlPlaceholder')"
             @keydown.meta.enter.prevent="runSqlCommand()"
             @keydown.ctrl.enter.prevent="runSqlCommand()"
           ></textarea>
           <div class="sql-runbar">
-            <span>⌘ Enter 执行 · 最多显示 500 行</span>
+            <span>{{ t("console.sqlShortcut") }}</span>
             <button
               type="button"
               :disabled="
@@ -6671,13 +6820,13 @@ onUnmounted(() => {
               "
               @click="runSqlCommand()"
             >
-              {{ sqlRunning ? "执行中" : "执行 SQL" }}
+              {{ sqlRunning ? t("console.executing") : t("console.executeSql") }}
             </button>
           </div>
 
           <div class="sql-results">
             <div v-if="sqlHistory.length === 0" class="console-placeholder">
-              SQL 只发送到智屿管理的本地数据库。
+              {{ t("console.sqlEmpty") }}
             </div>
             <article
               v-for="(entry, entryIndex) in sqlHistory"
@@ -6687,7 +6836,7 @@ onUnmounted(() => {
               <header>
                 <strong>{{ entry.database }} &gt; {{ entry.sql }}</strong>
                 <span v-if="entry.result">
-                  {{ entry.result.summary }} · {{ entry.result.elapsedMs }} ms
+                  {{ localizedSqlSummary(entry.result.summary) }} · {{ entry.result.elapsedMs }} ms
                 </span>
               </header>
               <pre v-if="entry.error">{{ entry.error }}</pre>
@@ -6724,16 +6873,16 @@ onUnmounted(() => {
                   </table>
                 </div>
                 <p v-else class="sql-summary">
-                  {{ entry.result.summary }}
+                  {{ localizedSqlSummary(entry.result.summary) }}
                 </p>
                 <p v-if="entry.result.truncated" class="detail-note">
-                  结果超过 500 行，已截断显示。
+                  {{ t("console.truncated") }}
                 </p>
               </template>
             </article>
           </div>
           <p class="console-note">
-            删除数据库、Schema、数据表或清空表需要二次确认。
+            {{ t("console.sqlNote") }}
           </p>
         </section>
 
@@ -6744,10 +6893,10 @@ onUnmounted(() => {
           <div class="console-head">
             <div>
               <p>MONGODB JSON COMMAND</p>
-              <h2>MongoDB 命令台</h2>
+              <h2>{{ t("console.mongoTitle") }}</h2>
             </div>
             <label>
-              数据库
+              {{ t("console.database") }}
               <select
                 v-model="selectedMongoDatabase"
                 :disabled="mongoLoading || mongoCommandRunning"
@@ -6766,7 +6915,7 @@ onUnmounted(() => {
               :disabled="mongoCommandHistory.length === 0"
               @click="mongoCommandHistory = []"
             >
-              清空结果
+              {{ t("console.clearResults") }}
             </button>
           </div>
 
@@ -6777,12 +6926,12 @@ onUnmounted(() => {
             :disabled="
               mongoCommandRunning || selectedService.status !== 'running'
             "
-            placeholder='输入 JSON 命令，例如 {"find":"users","filter":{},"limit":20}'
+            :placeholder="t('console.mongoPlaceholder')"
             @keydown.meta.enter.prevent="runMongoCommand()"
             @keydown.ctrl.enter.prevent="runMongoCommand()"
           ></textarea>
           <div class="sql-runbar">
-            <span>⌘ Enter 执行 · 只接受一个 JSON 命令对象</span>
+            <span>{{ t("console.mongoShortcut") }}</span>
             <button
               type="button"
               :disabled="
@@ -6793,7 +6942,7 @@ onUnmounted(() => {
               "
               @click="runMongoCommand()"
             >
-              {{ mongoCommandRunning ? "执行中" : "执行命令" }}
+              {{ mongoCommandRunning ? t("console.executing") : t("console.executeCommand") }}
             </button>
           </div>
 
@@ -6802,7 +6951,7 @@ onUnmounted(() => {
               v-if="mongoCommandHistory.length === 0"
               class="console-placeholder"
             >
-              示例：<code>{"ping": 1}</code>、
+              {{ t("console.mongoExample") }}：<code>{"ping": 1}</code>、
               <code>{"find": "users", "limit": 20}</code>
             </div>
             <article
@@ -6820,7 +6969,7 @@ onUnmounted(() => {
             </article>
           </div>
           <p class="console-note">
-            命令直接发送到本机 MongoDB；阻塞服务器的管理命令已禁用，删除数据需要二次确认。
+            {{ t("console.mongoNote") }}
           </p>
         </section>
 
@@ -7473,9 +7622,9 @@ S3_FORCE_PATH_STYLE=true</pre>
           <div class="backup-head">
             <div>
               <p>DATA SAFETY</p>
-              <h2>备份与恢复</h2>
+              <h2>{{ t("backup.title") }}</h2>
               <span>
-                保存数据与配置到
+                {{ t("backup.location") }}
                 <code>~/.devbox/backups/{{ selectedKind }}/</code>
               </span>
             </div>
@@ -7489,7 +7638,7 @@ S3_FORCE_PATH_STYLE=true</pre>
                 "
                 @click="loadBackups"
               >
-                {{ backupLoading ? "读取中" : "刷新" }}
+                {{ backupLoading ? t("backup.reading") : t("backup.refresh") }}
               </button>
               <button
                 class="primary"
@@ -7503,7 +7652,7 @@ S3_FORCE_PATH_STYLE=true</pre>
                 @click="createBackup"
               >
                 <span v-if="backupCreating" class="spinner"></span>
-                {{ backupCreating ? "备份中" : "创建备份" }}
+                {{ backupCreating ? t("backup.creating") : t("backup.create") }}
               </button>
             </div>
           </div>
@@ -7512,27 +7661,27 @@ S3_FORCE_PATH_STYLE=true</pre>
             v-if="selectedService.status === 'running'"
             class="backup-warning"
           >
-            为保证数据一致性，请先停止 {{ selectedService.name }}，再创建或恢复备份。
+            {{ t("backup.stopWarning", { service: selectedService.name }) }}
           </div>
           <div
             v-else-if="selectedService.status === 'not_installed'"
             class="backup-warning"
           >
-            服务安装后才能创建数据备份。
+            {{ t("backup.installWarning") }}
           </div>
 
           <div class="backup-list">
             <div class="backup-list-head">
-              <span>备份时间</span>
-              <span>类型</span>
-              <span>压缩后大小</span>
-              <span>操作</span>
+              <span>{{ t("backup.time") }}</span>
+              <span>{{ t("backup.type") }}</span>
+              <span>{{ t("backup.size") }}</span>
+              <span>{{ t("backup.action") }}</span>
             </div>
             <div v-if="backupLoading && backups.length === 0" class="backup-empty">
-              正在读取备份…
+              {{ t("backup.loading") }}
             </div>
             <div v-else-if="backups.length === 0" class="backup-empty">
-              还没有备份。停止服务后点击“创建备份”。
+              {{ t("backup.empty") }}
             </div>
             <article v-for="backup in backups" :key="backup.id">
               <div>
@@ -7544,7 +7693,7 @@ S3_FORCE_PATH_STYLE=true</pre>
                   class="backup-type"
                   :class="{ automatic: backup.automatic }"
                 >
-                  {{ backup.automatic ? "恢复前安全备份" : "手动备份" }}
+                  {{ backup.automatic ? t("backup.safety") : t("backup.manual") }}
                 </span>
               </div>
               <div>
@@ -7566,7 +7715,7 @@ S3_FORCE_PATH_STYLE=true</pre>
                     class="spinner"
                   ></span>
                   {{
-                    restoringBackupId === backup.id ? "恢复中" : "恢复"
+                    restoringBackupId === backup.id ? t("backup.restoring") : t("backup.restore")
                   }}
                 </button>
               </div>
@@ -7575,12 +7724,12 @@ S3_FORCE_PATH_STYLE=true</pre>
 
           <div class="backup-notes">
             <p>
-              <strong>备份范围：</strong>
-              <code>data/</code> 与 <code>conf/</code>。日志、PID 和程序文件不会进入备份。
+              <strong>{{ t("backup.scopeTitle") }}</strong>
+              {{ t("backup.scope") }}
             </p>
             <p>
-              <strong>恢复保护：</strong>
-              恢复前会自动保存当前状态；压缩包通过路径与文件类型检查后才会替换实例目录。
+              <strong>{{ t("backup.protectionTitle") }}</strong>
+              {{ t("backup.protection") }}
             </p>
           </div>
         </section>
@@ -7646,16 +7795,18 @@ S3_FORCE_PATH_STYLE=true</pre>
           aria-labelledby="version-uninstall-title"
         >
           <header>
-            <span>SAFE UNINSTALL</span>
+            <span>{{ t("versions.safeUninstall") }}</span>
             <h2 id="version-uninstall-title">
-              卸载 {{ versionUninstallTarget.serviceName }}
-              {{ versionUninstallTarget.release.version }}
+              {{ t("versions.uninstallTitle", {
+                service: versionUninstallTarget.serviceName,
+                version: versionUninstallTarget.release.version,
+              }) }}
             </h2>
-            <p>只删除这个版本的官方程序文件</p>
+            <p>{{ t("versions.uninstallSubtitle") }}</p>
           </header>
 
           <div class="version-uninstall-size">
-            <span>预计释放空间</span>
+            <span>{{ t("versions.space") }}</span>
             <strong>{{
               formatBytes(
                 versionUninstallTarget.release.installationBytes,
@@ -7664,12 +7815,12 @@ S3_FORCE_PATH_STYLE=true</pre>
           </div>
 
           <div class="version-uninstall-preserved">
-            <strong>以下内容会完整保留</strong>
+            <strong>{{ t("versions.preserved") }}</strong>
             <div>
-              <span>✓ 数据目录</span>
-              <span>✓ 配置文件</span>
-              <span>✓ 运行日志</span>
-              <span>✓ 本地备份</span>
+              <span>{{ t("versions.dataDirectory") }}</span>
+              <span>{{ t("versions.configFiles") }}</span>
+              <span>{{ t("versions.runtimeLogs") }}</span>
+              <span>{{ t("versions.localBackups") }}</span>
             </div>
           </div>
 
@@ -7677,14 +7828,13 @@ S3_FORCE_PATH_STYLE=true</pre>
             v-if="versionUninstallTarget.fallbackVersion"
             class="version-uninstall-fallback"
           >
-            当前版本删除前会自动切换到已安装的
-            <strong>{{ versionUninstallTarget.fallbackVersion }}</strong>。
+            {{ t("versions.fallback", { version: versionUninstallTarget.fallbackVersion }) }}
           </p>
           <p v-else class="version-uninstall-note">
             {{
               versionUninstallTarget.release.selected
-                ? "这是当前版本，卸载后服务将显示为未安装；以后可以重新下载安装，原数据仍然保留。"
-                : "卸载后仍可重新安装这个版本并继续使用原来的版本数据。"
+                ? t("versions.currentNote")
+                : t("versions.otherNote")
             }}
           </p>
 
@@ -7694,7 +7844,7 @@ S3_FORCE_PATH_STYLE=true</pre>
               :disabled="versionUninstalling"
               @click="versionUninstallTarget = null"
             >
-              取消
+              {{ t("common.cancel") }}
             </button>
             <button
               type="button"
@@ -7703,7 +7853,7 @@ S3_FORCE_PATH_STYLE=true</pre>
               @click="confirmVersionUninstall"
             >
               <span v-if="versionUninstalling" class="spinner"></span>
-              {{ versionUninstalling ? "正在卸载" : "确认卸载程序" }}
+              {{ versionUninstalling ? t("versions.uninstalling") : t("versions.confirmUninstall") }}
             </button>
           </footer>
         </section>

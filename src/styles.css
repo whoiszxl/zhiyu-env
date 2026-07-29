@@ -539,6 +539,58 @@ html[data-theme="dark"] .background-mist .app-background-veil {
   );
 }
 
+.app-layout.pattern-crosshatch > .content {
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      transparent 0 20px,
+      var(--color-grid-line) 20px 21px
+    ),
+    repeating-linear-gradient(
+      135deg,
+      transparent 0 20px,
+      var(--color-grid-line) 20px 21px
+    );
+}
+
+.app-layout.pattern-circuit > .content {
+  background-image:
+    radial-gradient(circle, var(--color-grid-line) 1.5px, transparent 1.7px),
+    linear-gradient(90deg, transparent 49%, var(--color-grid-line) 50%, transparent 51%),
+    linear-gradient(transparent 49%, var(--color-grid-line) 50%, transparent 51%);
+  background-position: 0 0, 12px 12px, 12px 12px;
+  background-size: 32px 32px, 64px 64px, 64px 64px;
+}
+
+.app-layout.pattern-rings > .content {
+  background-image: repeating-radial-gradient(
+    circle at 0 0,
+    transparent 0 15px,
+    var(--color-grid-line) 16px,
+    transparent 17px 31px
+  );
+}
+
+.app-layout.pattern-paper > .content {
+  background-image:
+    linear-gradient(90deg, transparent 47px, var(--color-grid-line) 48px, transparent 49px),
+    repeating-linear-gradient(
+      transparent 0 23px,
+      var(--color-grid-line) 24px,
+      transparent 25px
+    );
+}
+
+.app-layout.pattern-checker > .content {
+  background-image: conic-gradient(
+    from 90deg,
+    var(--color-grid-line) 25%,
+    transparent 0 75%,
+    var(--color-grid-line) 0
+  );
+  background-size: 32px 32px;
+}
+
 .detail-header {
   display: flex;
   align-items: center;
@@ -1304,6 +1356,83 @@ html.sidebar-item-dragging * {
   grid-column: 1 / -1;
 }
 
+.language-setting {
+  padding: 14px 16px 16px;
+}
+
+.language-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.language-options button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 2px 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: 140ms ease;
+}
+
+.language-options button:hover {
+  border-color: var(--color-border-strong);
+}
+
+.language-options button.selected {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-focus);
+}
+
+.language-options button > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  grid-row: 1 / 3;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-bg-muted);
+  color: var(--color-accent-text);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.language-options strong {
+  align-self: end;
+  font-size: 10px;
+}
+
+.language-options small {
+  align-self: start;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.language-options em {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: none;
+  color: var(--color-accent-text);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.language-options button.selected em {
+  display: block;
+}
+
 .theme-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1576,6 +1705,58 @@ html.sidebar-item-dragging * {
     transparent 0 7px,
     var(--pattern-preview-line) 7px 8px
   );
+}
+
+.pattern-preview-crosshatch {
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      transparent 0 7px,
+      var(--pattern-preview-line) 7px 8px
+    ),
+    repeating-linear-gradient(
+      135deg,
+      transparent 0 7px,
+      var(--pattern-preview-line) 7px 8px
+    );
+}
+
+.pattern-preview-circuit {
+  background-image:
+    radial-gradient(circle, var(--pattern-preview-line) 1.3px, transparent 1.5px),
+    linear-gradient(90deg, transparent 49%, var(--pattern-preview-line) 50%, transparent 51%),
+    linear-gradient(transparent 49%, var(--pattern-preview-line) 50%, transparent 51%);
+  background-position: 0 0, 5px 5px, 5px 5px;
+  background-size: 12px 12px, 24px 24px, 24px 24px;
+}
+
+.pattern-preview-rings {
+  background-image: repeating-radial-gradient(
+    circle at 0 0,
+    transparent 0 7px,
+    var(--pattern-preview-line) 8px,
+    transparent 9px 15px
+  );
+}
+
+.pattern-preview-paper {
+  background-image:
+    linear-gradient(90deg, transparent 15px, var(--pattern-preview-line) 16px, transparent 17px),
+    repeating-linear-gradient(
+      transparent 0 7px,
+      var(--pattern-preview-line) 8px,
+      transparent 9px
+    );
+}
+
+.pattern-preview-checker {
+  background-image: conic-gradient(
+    from 90deg,
+    var(--pattern-preview-line) 25%,
+    transparent 0 75%,
+    var(--pattern-preview-line) 0
+  );
+  background-size: 12px 12px;
 }
 
 .ui-scale-setting {
@@ -7420,4 +7601,7 @@ html[data-theme="dark"] .background-preview-window {
 
 .nf-editor-textarea:focus {
   outline: 0;
+}
+.tool-i18n-host {
+  display: contents;
 }

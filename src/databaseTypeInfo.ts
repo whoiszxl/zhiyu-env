@@ -3,6 +3,48 @@ export interface DatabaseTypeInfo {
   description: string;
 }
 
+const ENGLISH_TYPE_INFO: Record<string, DatabaseTypeInfo> = {
+  "文档唯一标识": { label: "Document ID", description: "MongoDB’s 12-byte unique ObjectId, commonly used by the default _id field." },
+  "嵌套文档": { label: "Embedded Document", description: "Stores a nested set of key-value pairs for hierarchical data such as addresses or settings." },
+  "字符串": { label: "String", description: "UTF-8 text for names, titles, descriptions, and other ordinary text." },
+  "64 位整数": { label: "64-bit Integer", description: "A signed 64-bit integer for large counters, identifiers, or integer timestamps." },
+  "双精度浮点数": { label: "Double Precision", description: "An approximate floating-point number for measurements and statistics, not exact monetary values." },
+  "128 位精确小数": { label: "128-bit Decimal", description: "MongoDB Decimal128 for money, rates, and values that must avoid floating-point rounding." },
+  "二进制数据": { label: "Binary Data", description: "Raw bytes for files, hashes, encrypted content, or application-specific binary values." },
+  "正则表达式": { label: "Regular Expression", description: "A stored regular-expression value commonly used by pattern-matching queries." },
+  "空值": { label: "Null", description: "The field exists but has no value; this differs from a field that is absent." },
+  "布尔值/小整数": { label: "Boolean / Tiny Integer", description: "Usually stores 0 or 1 as false or true, and can also hold a very small integer." },
+  "大整数": { label: "Big Integer", description: "A large-range integer often used for primary keys, counters, and millisecond timestamps." },
+  "小整数": { label: "Small Integer", description: "A small-range integer suitable for status codes, levels, switches, and small counters." },
+  "中等整数": { label: "Medium Integer", description: "MySQL’s three-byte integer, with a range between SMALLINT and INT." },
+  "整数": { label: "Integer", description: "A whole number commonly used for identifiers, quantities, status codes, and counters." },
+  "精确小数": { label: "Exact Decimal", description: "Stores decimal values at a defined precision without floating-point rounding; suitable for money." },
+  "浮点数": { label: "Floating Point", description: "An approximate decimal value for measurements and statistics; not guaranteed to be exact." },
+  "可变长度文本": { label: "Variable-length Text", description: "Text that uses space according to its actual length; suitable for names and ordinary strings." },
+  "固定长度文本": { label: "Fixed-length Text", description: "Fixed-width text, usually padded with spaces; suitable for consistently sized codes." },
+  "长文本": { label: "Long Text", description: "Large or unbounded text such as articles, notes, logs, and descriptions." },
+  "枚举": { label: "Enum", description: "A value selected from a predefined set, useful for statuses and fixed categories." },
+  "选项集合": { label: "Set", description: "A MySQL value containing multiple members of a predefined set, useful for small tag groups." },
+  "布尔值": { label: "Boolean", description: "Represents true or false and is commonly used for enabled, deleted, and similar switches." },
+  "带时区日期时间": { label: "Date & Time with Time Zone", description: "Stores a precise instant and displays it using the session time zone." },
+  "日期时间": { label: "Date & Time", description: "Stores both date and time for creation, update, login, and event timestamps." },
+  "日期": { label: "Date", description: "Stores year, month, and day without a time; suitable for birthdays and calendar dates." },
+  "时间": { label: "Time", description: "Stores a time of day without a date; suitable for business hours and daily schedules." },
+  "时间间隔": { label: "Interval", description: "Represents a duration between instants, such as days, hours, or months." },
+  "年份": { label: "Year", description: "MySQL’s year-only type, suitable for annual statistics and production years." },
+  "二进制 JSON": { label: "Binary JSON", description: "PostgreSQL’s indexable JSON representation for flexible structures queried by nested fields." },
+  "JSON 文档": { label: "JSON Document", description: "Stores structured objects or arrays whose field layout may vary." },
+  "全局唯一标识": { label: "UUID", description: "A standard globally unique identifier suitable for distributed primary or business keys." },
+  "位串": { label: "Bit String", description: "Compact binary bits for permissions, masks, and groups of boolean switches." },
+  "网络地址": { label: "Network Address", description: "A PostgreSQL IP address or network range with validation and network operations." },
+  "MAC 地址": { label: "MAC Address", description: "A PostgreSQL hardware-address value that validates network-interface MAC addresses." },
+  "XML 文档": { label: "XML Document", description: "Structured XML text whose basic XML syntax is validated by the database." },
+  "空间数据": { label: "Spatial Data", description: "Geospatial coordinates and shapes such as points, lines, and regions." },
+  "PostgreSQL 系统标识": { label: "PostgreSQL System Identifier", description: "An internal object, transaction, or log-position identifier. Avoid editing system catalogs without understanding dependencies." },
+  "数组": { label: "Array", description: "Multiple values of the same type stored in one field and usually read or written together." },
+  "数据库原生类型": { label: "Database-native Type", description: "A native database type. Check the database documentation before changing system-table fields." },
+};
+
 const TYPE_INFO: Array<[RegExp, DatabaseTypeInfo]> = [
   [
     /\bobjectid\b/,
@@ -320,10 +362,21 @@ const TYPE_INFO: Array<[RegExp, DatabaseTypeInfo]> = [
 export function databaseTypeInfo(rawType: string): DatabaseTypeInfo {
   const normalized = rawType.trim().toLowerCase();
   const matched = TYPE_INFO.find(([pattern]) => pattern.test(normalized));
-  if (matched) return matched[1];
+  if (matched) {
+    const info = matched[1];
+    return document.documentElement.lang === "en-US"
+      ? ENGLISH_TYPE_INFO[info.label] ?? info
+      : info;
+  }
 
-  return {
+  const fallback = {
     label: "数据库原生类型",
     description: `这是数据库提供的 ${rawType} 类型。智屿暂时没有更具体的中文说明，修改系统表字段前请先确认数据库文档。`,
   };
+  return document.documentElement.lang === "en-US"
+    ? {
+        ...ENGLISH_TYPE_INFO["数据库原生类型"],
+        description: `${rawType} is a database-native type. Check the database documentation before changing system-table fields.`,
+      }
+    : fallback;
 }

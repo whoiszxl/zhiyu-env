@@ -1,15 +1,36 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 
 const TIME_ZONES = [
-  ["local", "本地时区"],
-  ["UTC", "UTC"],
-  ["Asia/Shanghai", "亚洲 / 上海"],
-  ["Asia/Tokyo", "亚洲 / 东京"],
-  ["America/New_York", "美国 / 纽约"],
-  ["Europe/London", "欧洲 / 伦敦"],
+  "local",
+  "UTC",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "America/New_York",
+  "Europe/London",
 ] as const;
+type TimeZoneValue = (typeof TIME_ZONES)[number];
 
+const TIME_ZONE_LABELS: Record<
+  TimeZoneValue,
+  { "zh-CN": string; "en-US": string }
+> = {
+  local: { "zh-CN": "本地时区", "en-US": "Local Time Zone" },
+  UTC: { "zh-CN": "UTC", "en-US": "UTC" },
+  "Asia/Shanghai": { "zh-CN": "亚洲 / 上海", "en-US": "Asia / Shanghai" },
+  "Asia/Tokyo": { "zh-CN": "亚洲 / 东京", "en-US": "Asia / Tokyo" },
+  "America/New_York": {
+    "zh-CN": "美国 / 纽约",
+    "en-US": "America / New York",
+  },
+  "Europe/London": {
+    "zh-CN": "欧洲 / 伦敦",
+    "en-US": "Europe / London",
+  },
+};
+
+const { locale } = useI18n();
 const now = ref(Date.now());
 const timestampInput = ref(String(Date.now()));
 const timestampUnit = ref<"auto" | "seconds" | "milliseconds">("auto");
@@ -20,9 +41,16 @@ const error = ref("");
 let timer: number | undefined;
 
 const nowSeconds = computed(() => Math.floor(now.value / 1000));
-const zoneLabel = computed(
-  () => TIME_ZONES.find(([value]) => value === selectedZone.value)?.[1] ?? selectedZone.value,
+const activeLocale = computed(() =>
+  locale.value === "en-US" ? "en-US" : "zh-CN",
 );
+const zoneLabel = computed(() => timeZoneLabel(selectedZone.value));
+
+function timeZoneLabel(value: string): string {
+  return (
+    TIME_ZONE_LABELS[value as TimeZoneValue]?.[activeLocale.value] ?? value
+  );
+}
 
 function toDatetimeLocal(date: Date): string {
   const offset = date.getTimezoneOffset() * 60_000;
@@ -30,7 +58,7 @@ function toDatetimeLocal(date: Date): string {
 }
 
 function format(date: Date, zone = selectedZone.value): string {
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(activeLocale.value, {
     dateStyle: "full",
     timeStyle: "medium",
     hour12: false,
@@ -142,7 +170,7 @@ onUnmounted(() => {
     <article class="time-panel result-panel">
       <div class="panel-title result-title">
         <div><p>CONVERSION RESULT</p><h2>转换结果</h2></div>
-        <label>显示时区<select v-model="selectedZone"><option v-for="[value, label] in TIME_ZONES" :key="value" :value="value">{{ label }}</option></select></label>
+        <label>显示时区<select v-model="selectedZone"><option v-for="value in TIME_ZONES" :key="value" :value="value">{{ timeZoneLabel(value) }}</option></select></label>
       </div>
       <div v-if="resultDate" class="result-grid">
         <button type="button" @click="copy(Math.floor(resultDate.getTime() / 1000))"><span>Unix 秒</span><code>{{ Math.floor(resultDate.getTime() / 1000) }}</code></button>
@@ -156,8 +184,8 @@ onUnmounted(() => {
     <article class="time-panel">
       <div class="panel-title"><p>TIME ZONES</p><h2>同一时刻的时区对照</h2></div>
       <div class="zone-list">
-        <div v-for="[value, label] in TIME_ZONES.slice(1)" :key="value">
-          <span>{{ label }}</span><code>{{ format(resultDate ?? new Date(now), value) }}</code>
+        <div v-for="value in TIME_ZONES.slice(1)" :key="value">
+          <span>{{ timeZoneLabel(value) }}</span><code>{{ format(resultDate ?? new Date(now), value) }}</code>
         </div>
       </div>
     </article>
@@ -165,5 +193,5 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.time-page{display:grid;gap:14px;padding:24px 32px 36px}.current-time{display:grid;grid-template-columns:minmax(280px,1fr) 220px 240px;border:1px solid var(--color-border);background:var(--color-panel-translucent)}.current-time>div,.current-time>button{min-height:72px;padding:14px 18px;border:0;border-right:1px solid var(--color-border);background:transparent;text-align:left}.current-time>*:last-child{border-right:0}.current-time p,.panel-title p{margin:0 0 5px;color:var(--color-text-muted);font:8px/1.2 "SFMono-Regular",Consolas,monospace;letter-spacing:.12em}.current-time strong{font-size:15px}.current-time span,.result-grid span{display:block;margin-bottom:6px;color:var(--color-text-muted);font-size:8px}.current-time code,.result-grid code{font:10px/1.4 "SFMono-Regular",Consolas,monospace}.time-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.time-panel{overflow:hidden;border:1px solid var(--color-border);background:var(--color-panel-translucent)}.panel-title{padding:13px 16px;border-bottom:1px solid var(--color-border)}.panel-title h2{margin:0;font-size:14px}.time-form{display:grid;grid-template-columns:minmax(180px,1fr) 130px auto;align-items:end;gap:10px;padding:16px}.time-form.date-form{grid-template-columns:minmax(220px,1fr) auto}.time-form label,.result-title label{display:grid;gap:5px;color:var(--color-text-secondary);font-size:9px}.time-form input,.time-form select,.result-title select{height:34px;padding:0 10px;font-size:10px}.time-form input{font-family:"SFMono-Regular",Consolas,monospace}.time-form button{min-height:34px}.time-hint{margin:0;padding:0 16px 14px;color:var(--color-text-muted);font-size:8px}.result-title{display:flex;align-items:center;justify-content:space-between;gap:20px}.result-title select{min-width:150px}.result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.result-grid button{min-height:68px;padding:13px 16px;border:0;border-right:1px solid var(--color-border);border-bottom:1px solid var(--color-border);background:transparent;text-align:left}.result-grid button:nth-child(2n){border-right:0}.result-grid button:nth-last-child(-n+2){border-bottom:0}.result-grid code{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.zone-list>div{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;padding:11px 16px;border-bottom:1px solid var(--color-border);font-size:9px}.zone-list>div:last-child{border-bottom:0}.zone-list span{color:var(--color-text-muted)}.zone-list code{font-family:"SFMono-Regular",Consolas,monospace}.time-empty{padding:38px;text-align:center;color:var(--color-text-muted);font-size:9px}@media(max-width:1050px){.current-time{grid-template-columns:1fr 1fr}.current-time>div{grid-column:1/-1;border-bottom:1px solid var(--color-border)}.time-grid{grid-template-columns:1fr}}
+.time-page{display:grid;gap:14px;padding:24px 32px 36px;min-width:0}.current-time{display:grid;grid-template-columns:minmax(0,1fr) minmax(160px,220px) minmax(180px,240px);border:1px solid var(--color-border);background:var(--color-panel-translucent);min-width:0}.current-time>div,.current-time>button{min-width:0;min-height:72px;padding:14px 18px;border:0;border-right:1px solid var(--color-border);background:transparent;text-align:left}.current-time>*:last-child{border-right:0}.current-time p,.panel-title p{margin:0 0 5px;color:var(--color-text-muted);font:8px/1.2 "SFMono-Regular",Consolas,monospace;letter-spacing:.12em}.current-time strong{display:block;overflow:hidden;font-size:15px;text-overflow:ellipsis;white-space:nowrap}.current-time span,.result-grid span{display:block;margin-bottom:6px;color:var(--color-text-muted);font-size:8px}.current-time code,.result-grid code{font:10px/1.4 "SFMono-Regular",Consolas,monospace}.time-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;min-width:0}.time-panel{min-width:0;overflow:hidden;border:1px solid var(--color-border);background:var(--color-panel-translucent)}.panel-title{padding:13px 16px;border-bottom:1px solid var(--color-border)}.panel-title h2{margin:0;font-size:14px}.time-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(104px,130px) auto;align-items:end;gap:10px;padding:16px;min-width:0}.time-form.date-form{grid-template-columns:minmax(0,1fr) auto}.time-form label,.result-title label{display:grid;min-width:0;gap:5px;color:var(--color-text-secondary);font-size:9px}.time-form input,.time-form select,.result-title select{box-sizing:border-box;width:100%;min-width:0;height:34px;padding:0 10px;font-size:10px}.time-form input{font-family:"SFMono-Regular",Consolas,monospace}.time-form button{min-width:max-content;min-height:34px;white-space:nowrap}.time-hint{margin:0;padding:0 16px 14px;color:var(--color-text-muted);font-size:8px}.result-title{display:flex;align-items:center;justify-content:space-between;gap:20px}.result-title select{min-width:150px}.result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.result-grid button{min-width:0;min-height:68px;padding:13px 16px;border:0;border-right:1px solid var(--color-border);border-bottom:1px solid var(--color-border);background:transparent;text-align:left}.result-grid button:nth-child(2n){border-right:0}.result-grid button:nth-last-child(-n+2){border-bottom:0}.result-grid code{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.zone-list>div{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;padding:11px 16px;border-bottom:1px solid var(--color-border);font-size:9px}.zone-list>div:last-child{border-bottom:0}.zone-list span{color:var(--color-text-muted)}.zone-list code{overflow:hidden;font-family:"SFMono-Regular",Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}.time-empty{padding:38px;text-align:center;color:var(--color-text-muted);font-size:9px}@media(max-width:1180px){.time-grid{grid-template-columns:1fr}}@media(max-width:1050px){.current-time{grid-template-columns:1fr 1fr}.current-time>div{grid-column:1/-1;border-bottom:1px solid var(--color-border)}}
 </style>

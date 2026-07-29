@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import type { ServiceKind } from "../types";
 import {
   buildServiceDocs,
@@ -13,10 +14,16 @@ const props = defineProps<{
   serviceName: string;
 }>();
 
+const { t, locale } = useI18n();
+
 const COPY_FEEDBACK_MS = 1400;
 
-const chapters = computed(() => buildServiceDocs(props.kind, props.port));
-const tagline = computed(() => serviceDocTagline(props.kind));
+const chapters = computed(() =>
+  buildServiceDocs(props.kind, props.port, locale.value as "zh-CN" | "en-US"),
+);
+const tagline = computed(() =>
+  serviceDocTagline(props.kind, locale.value as "zh-CN" | "en-US"),
+);
 
 const activeChapterId = ref(chapters.value[0]?.id ?? "");
 const activeChapter = computed(
@@ -30,9 +37,9 @@ const activeSampleLabel = ref<Record<string, string>>({});
 const copiedKey = ref("");
 let copyTimer: number | undefined;
 
-// 切换服务时回到第一章，避免停留在上一个服务的章节上
+// 切换服务或语言时回到第一章，避免停留在失效的章节 id 上
 watch(
-  () => props.kind,
+  [() => props.kind, locale],
   () => {
     activeChapterId.value = chapters.value[0]?.id ?? "";
     activeSampleLabel.value = {};
@@ -77,7 +84,7 @@ async function copyCode(key: string, code: string) {
 <template>
   <div class="docs-panel">
     <nav class="docs-toc">
-      <p class="docs-toc-label">CONTENTS</p>
+      <p class="docs-toc-label">{{ t("serviceDocs.contentsLabel") }}</p>
       <button
         v-for="chapter in chapters"
         :key="chapter.id"
@@ -92,7 +99,7 @@ async function copyCode(key: string, code: string) {
 
     <article v-if="activeChapter" class="docs-body">
       <header class="docs-head">
-        <p>{{ serviceName }} · 使用文档</p>
+        <p>{{ t("serviceDocs.breadcrumb", { service: serviceName }) }}</p>
         <h2>{{ activeChapter.title }}</h2>
         <span>{{ tagline }}</span>
       </header>
@@ -133,7 +140,11 @@ async function copyCode(key: string, code: string) {
               type="button"
               @click="copyCode(`${activeChapter.id}:${index}`, block.code)"
             >
-              {{ copiedKey === `${activeChapter.id}:${index}` ? "已复制" : "复制" }}
+              {{
+                copiedKey === `${activeChapter.id}:${index}`
+                  ? t("serviceDocs.copied")
+                  : t("serviceDocs.copy")
+              }}
             </button>
           </figcaption>
           <pre><code>{{ block.code }}</code></pre>
@@ -169,11 +180,11 @@ async function copyCode(key: string, code: string) {
                 type="button"
                 @click="copyCode(`${activeChapter.id}:${index}:${s}`, sample.code)"
               >
-                {{
-                  copiedKey === `${activeChapter.id}:${index}:${s}`
-                    ? "已复制"
-                    : "复制"
-                }}
+              {{
+                copiedKey === `${activeChapter.id}:${index}:${s}`
+                  ? t("serviceDocs.copied")
+                  : t("serviceDocs.copy")
+              }}
               </button>
             </figcaption>
             <pre><code>{{ sample.code }}</code></pre>

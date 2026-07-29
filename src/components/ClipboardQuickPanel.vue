@@ -101,7 +101,7 @@ onUnmounted(() => {});
 </script>
 
 <template>
-  <div class="quick-panel" @keydown="onKeyDown">
+  <div v-tool-i18n class="quick-panel" @keydown="onKeyDown">
     <div class="qp-header">
       <div class="qp-search">
         <span class="qp-search-icon">&#x2318;V</span>

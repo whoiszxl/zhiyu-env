@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { buildConnection, type ServiceConnection } from "../api/connectionData";
 import { testServiceConnection } from "../api/services";
 import type { ServiceKind } from "../types";
@@ -7,6 +8,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 
 const props = defineProps<{ kind: ServiceKind }>();
+const { t, locale } = useI18n();
 
 const connection = computed<ServiceConnection>(() => buildConnection(props.kind));
 const showPassword = ref(false);
@@ -14,6 +16,21 @@ const testing = ref(false);
 const testResult = ref<"idle" | "ok" | "fail">("idle");
 const testError = ref("");
 const copiedLabel = ref("");
+
+function localizedLabel(label: string) {
+  const labels: Record<string, string> = {
+    连接串: "connection.connectionString",
+    运行时: "connection.runtime",
+    持久化: "connection.persistence",
+  };
+  return labels[label] ? t(labels[label]) : label;
+}
+
+function localizedValue(value: string) {
+  return locale.value === "en-US" && value === "Tansu（无需 JVM / ZooKeeper）"
+    ? t("connection.tansuRuntime")
+    : value;
+}
 
 const togglePassword = () => { showPassword.value = !showPassword.value; };
 
@@ -48,7 +65,10 @@ async function exportEnv() {
 
   const path = await save({
     defaultPath: `.env.${props.kind}`,
-    filters: [{ name: "环境变量", extensions: ["env"] }, { name: "所有文件", extensions: ["*"] }],
+    filters: [
+      { name: t("connection.envFilter"), extensions: ["env"] },
+      { name: t("connection.allFilesFilter"), extensions: ["*"] },
+    ],
   });
   if (path) {
     await writeTextFile(path, tpl + "\n");
@@ -69,33 +89,33 @@ const selectedSample = ref(0);
       <article class="connect-metric">
         <p>HOST</p>
         <strong>{{ connection.host }}</strong>
-        <small>本地绑定地址</small>
+        <small>{{ t("connection.hostHint") }}</small>
         <button
           class="metric-copy"
           :class="{ copied: copiedLabel === 'Host' }"
           @click="copyToClipboard(connection.host, 'Host')"
-        >{{ copiedLabel === "Host" ? "\u2714 已复制" : "复制" }}</button>
+        >{{ copiedLabel === "Host" ? t("connection.copied") : t("connection.copy") }}</button>
       </article>
       <article class="connect-metric">
         <p>PORT</p>
         <strong>{{ connection.primaryPort }}</strong>
-        <small>主要通信端口</small>
+        <small>{{ t("connection.portHint") }}</small>
         <button
           class="metric-copy"
           :class="{ copied: copiedLabel === 'Port' }"
           @click="copyToClipboard(String(connection.primaryPort), 'Port')"
-        >{{ copiedLabel === "Port" ? "\u2714 已复制" : "复制" }}</button>
+        >{{ copiedLabel === "Port" ? t("connection.copied") : t("connection.copy") }}</button>
       </article>
       <article class="connect-metric" v-if="connection.hasAuth || connection.username">
         <p>USERNAME</p>
         <strong>{{ connection.username || "\u2014" }}</strong>
-        <small>本地开发账号</small>
+        <small>{{ t("connection.usernameHint") }}</small>
         <button
           v-if="connection.username"
           class="metric-copy"
           :class="{ copied: copiedLabel === 'Username' }"
           @click="copyToClipboard(connection.username, 'Username')"
-        >{{ copiedLabel === "Username" ? "\u2714 已复制" : "复制" }}</button>
+        >{{ copiedLabel === "Username" ? t("connection.copied") : t("connection.copy") }}</button>
       </article>
       <article class="connect-metric" v-if="connection.hasAuth">
         <p>PASSWORD</p>
@@ -103,10 +123,10 @@ const selectedSample = ref(0);
           <span v-if="showPassword">{{ connection.password }}</span>
           <span v-else>{{ "\u2022".repeat(Math.min(connection.password.length, 15)) }}</span>
         </strong>
-        <small>本地开发密码</small>
+        <small>{{ t("connection.passwordHint") }}</small>
         <div class="metric-btns">
-          <button class="metric-copy" @click="copyToClipboard(connection.password, 'Password')" :class="{ copied: copiedLabel === 'Password' }">{{ copiedLabel === "Password" ? "\u2714 已复制" : "复制" }}</button>
-          <button class="metric-copy" @click="togglePassword">{{ showPassword ? "隐藏" : "显示" }}</button>
+          <button class="metric-copy" @click="copyToClipboard(connection.password, 'Password')" :class="{ copied: copiedLabel === 'Password' }">{{ copiedLabel === "Password" ? t("connection.copied") : t("connection.copy") }}</button>
+          <button class="metric-copy" @click="togglePassword">{{ showPassword ? t("connection.hide") : t("connection.show") }}</button>
         </div>
       </article>
     </div>
@@ -116,7 +136,7 @@ const selectedSample = ref(0);
         <div class="connect-section-head">
           <div>
             <p>CONNECTION STRINGS</p>
-            <h2>连接字符串 &amp; 端点</h2>
+            <h2>{{ t("connection.stringsTitle") }}</h2>
           </div>
           <div class="connect-section-actions">
             <button
@@ -125,22 +145,22 @@ const selectedSample = ref(0);
               :disabled="testing"
               @click="testConnection"
             >
-              {{ testing ? "测试中…" : testResult === "ok" ? "\u2714 连接成功" : testResult === "fail" ? "\u2718 连接失败" : "测试连接" }}
+              {{ testing ? t("connection.testing") : testResult === "ok" ? t("connection.success") : testResult === "fail" ? t("connection.failed") : t("connection.test") }}
             </button>
-            <button type="button" @click="exportEnv" v-if="connection.envVars.length">导出 .env</button>
+            <button type="button" @click="exportEnv" v-if="connection.envVars.length">{{ t("connection.exportEnv") }}</button>
           </div>
         </div>
 
         <div v-if="connection.uris.length" class="uri-block">
           <div class="uri-row" v-for="uri in connection.uris" :key="uri.label">
-            <span class="uri-label">{{ uri.label }}</span>
+            <span class="uri-label">{{ localizedLabel(uri.label) }}</span>
             <div class="uri-field">
               <code>{{ uri.value }}</code>
               <button
                 class="field-copy"
                 :class="{ copied: copiedLabel === uri.label }"
                 @click="copyToClipboard(uri.value, uri.label)"
-              >{{ copiedLabel === uri.label ? "\u2714 已复制" : "复制" }}</button>
+              >{{ copiedLabel === uri.label ? t("connection.copied") : t("connection.copy") }}</button>
             </div>
           </div>
         </div>
@@ -148,14 +168,14 @@ const selectedSample = ref(0);
         <div v-if="connection.extras.length" class="uri-block">
           <p class="extras-label">ADDITIONAL ENDPOINTS</p>
           <div class="uri-row" v-for="extra in connection.extras" :key="extra.label">
-            <span class="uri-label">{{ extra.label }}</span>
+            <span class="uri-label">{{ localizedLabel(extra.label) }}</span>
             <div class="uri-field">
-              <code>{{ extra.value }}</code>
+              <code>{{ localizedValue(extra.value) }}</code>
               <button
                 class="field-copy"
                 :class="{ copied: copiedLabel === extra.label }"
                 @click="copyToClipboard(extra.value, extra.label)"
-              >{{ copiedLabel === extra.label ? "\u2714 已复制" : "复制" }}</button>
+              >{{ copiedLabel === extra.label ? t("connection.copied") : t("connection.copy") }}</button>
             </div>
           </div>
         </div>
@@ -166,7 +186,7 @@ const selectedSample = ref(0);
       <div class="connect-section-head">
         <div>
           <p>CLIENT EXAMPLES</p>
-          <h2>客户端配置示例</h2>
+          <h2>{{ t("connection.examplesTitle") }}</h2>
         </div>
       </div>
       <div class="samples-body">
@@ -185,7 +205,7 @@ const selectedSample = ref(0);
             class="sample-copy-btn"
             :class="{ copied: copiedLabel === 'config' }"
             @click="copyToClipboard(connection.configSamples[selectedSample].code, 'config')"
-          >{{ copiedLabel === "config" ? "\u2714 已复制" : "复制代码" }}</button>
+          >{{ copiedLabel === "config" ? t("connection.copied") : t("connection.copyCode") }}</button>
         </div>
       </div>
     </section>

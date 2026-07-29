@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { toolUiText } from "../../i18n/toolUi";
 
 interface RegexMatch {
   index: number;
@@ -18,7 +19,12 @@ const PRESETS = [
 ] as const;
 
 const pattern = ref("(\\w+)@(\\w+\\.\\w+)");
-const testText = ref("联系 alice@example.com 或 bob@test.dev 获取帮助。");
+const testText = ref(
+  toolUiText(
+    "联系 alice@example.com 或 bob@test.dev 获取帮助。",
+    "Contact alice@example.com or bob@test.dev for help.",
+  ),
+);
 const replacement = ref("$1 [at] $2");
 const flagGlobal = ref(true);
 const flagIgnoreCase = ref(false);

@@ -31,6 +31,7 @@ struct TraySnapshot {
     running_count: usize,
     memory_bytes: Option<u64>,
     launch_at_login: bool,
+    english: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -123,16 +124,24 @@ fn show_main_window(app: &AppHandle) {
 
 fn spawn_service_action(app: AppHandle, kind: ServiceKindInput, action: LifecycleAction) {
     thread::spawn(move || {
-        let action_name = match action {
-            LifecycleAction::Start => "启动",
-            LifecycleAction::Stop => "停止",
-            LifecycleAction::Restart => "重启",
+        let english = locale_is_english(&settings::load_settings().locale);
+        let action_name = match (action, english) {
+            (LifecycleAction::Start, false) => "启动",
+            (LifecycleAction::Stop, false) => "停止",
+            (LifecycleAction::Restart, false) => "重启",
+            (LifecycleAction::Start, true) => "started",
+            (LifecycleAction::Stop, true) => "stopped",
+            (LifecycleAction::Restart, true) => "restarted",
         };
         let result = commands::lifecycle_action(kind, action);
         let event = match result {
             Ok(service) => ServiceActionEvent {
                 success: true,
-                message: format!("{}{}成功", service.name, action_name),
+                message: if english {
+                    format!("{} {action_name} successfully", service.name)
+                } else {
+                    format!("{}{}成功", service.name, action_name)
+                },
             },
             Err(error) => ServiceActionEvent {
                 success: false,
@@ -321,12 +330,14 @@ fn collect_snapshot() -> TraySnapshot {
     let memory_bytes = commands::collect_environment_metrics_from(&services)
         .ok()
         .map(|metrics| metrics.memory_bytes);
-    let launch_at_login = settings::load_settings().launch_at_login;
+    let settings = settings::load_settings();
+    let launch_at_login = settings.launch_at_login;
     TraySnapshot {
         services: services.into_iter().filter_map(tray_service).collect(),
         running_count,
         memory_bytes,
         launch_at_login,
+        english: locale_is_english(&settings.locale),
     }
 }
 
@@ -350,16 +361,28 @@ fn apply_snapshot(app: &AppHandle, snapshot: &TraySnapshot) -> tauri::Result<()>
 }
 
 fn build_menu(app: &AppHandle, snapshot: &TraySnapshot) -> tauri::Result<Menu<tauri::Wry>> {
+    let english = snapshot.english;
     let summary = MenuItemBuilder::with_id(
         "tray.summary",
-        format!(
-            "智屿 · {} 个服务运行中 · {}",
-            snapshot.running_count,
-            snapshot
-                .memory_bytes
-                .map(format_bytes)
-                .unwrap_or_else(|| "内存暂不可用".into())
-        ),
+        if english {
+            format!(
+                "Zhiyu · {} running · {}",
+                snapshot.running_count,
+                snapshot
+                    .memory_bytes
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "Memory unavailable".into())
+            )
+        } else {
+            format!(
+                "智屿 · {} 个服务运行中 · {}",
+                snapshot.running_count,
+                snapshot
+                    .memory_bytes
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "内存暂不可用".into())
+            )
+        },
     )
     .enabled(false)
     .build(app)?;
@@ -367,12 +390,23 @@ fn build_menu(app: &AppHandle, snapshot: &TraySnapshot) -> tauri::Result<Menu<ta
     let mut services = SubmenuBuilder::with_id(
         app,
         "tray.services",
-        format!("服务管理（{} 个运行）", snapshot.running_count),
+        if english {
+            format!("Services ({} running)", snapshot.running_count)
+        } else {
+            format!("服务管理（{} 个运行）", snapshot.running_count)
+        },
     );
     if snapshot.services.is_empty() {
-        let empty = MenuItemBuilder::with_id("tray.services.empty", "暂无已安装服务")
-            .enabled(false)
-            .build(app)?;
+        let empty = MenuItemBuilder::with_id(
+            "tray.services.empty",
+            if english {
+                "No installed services"
+            } else {
+                "暂无已安装服务"
+            },
+        )
+        .enabled(false)
+        .build(app)?;
         services = services.item(&empty);
     } else {
         for service in &snapshot.services {
@@ -393,42 +427,102 @@ fn build_menu(app: &AppHandle, snapshot: &TraySnapshot) -> tauri::Result<Menu<ta
             );
             let status = MenuItemBuilder::with_id(
                 format!("tray.status.{}", service.id),
-                service_status_label(service.status),
+                service_status_label(service.status, english),
             )
             .enabled(false)
             .build(app)?;
             submenu = submenu.item(&status);
             if service.status == "running" {
                 submenu = submenu
-                    .text(format!("tray.action.{}.restart", service.id), "重新启动")
-                    .text(format!("tray.action.{}.stop", service.id), "停止");
+                    .text(
+                        format!("tray.action.{}.restart", service.id),
+                        if english { "Restart" } else { "重新启动" },
+                    )
+                    .text(
+                        format!("tray.action.{}.stop", service.id),
+                        if english { "Stop" } else { "停止" },
+                    );
             } else {
-                submenu = submenu.text(format!("tray.action.{}.start", service.id), "启动");
+                submenu = submenu.text(
+                    format!("tray.action.{}.start", service.id),
+                    if english { "Start" } else { "启动" },
+                );
             }
-            submenu = submenu
-                .separator()
-                .text(format!("tray.open_service.{}", service.id), "打开详情");
+            submenu = submenu.separator().text(
+                format!("tray.open_service.{}", service.id),
+                if english {
+                    "Open details"
+                } else {
+                    "打开详情"
+                },
+            );
             services = services.item(&submenu.build()?);
         }
     }
     let services = services.build()?;
-    let clipboard_label = MenuItemBuilder::with_id("tray.clipboard.label", "剪贴板历史")
-        .enabled(false)
-        .build(app)?;
-    let clipboard_toggle =
-        MenuItemBuilder::with_id("tray.clipboard.toggle", "开启 / 暂停记录").build(app)?;
-    let clipboard_open =
-        MenuItemBuilder::with_id("tray.clipboard.open", "打开剪贴板历史").build(app)?;
-    let clipboard_clear =
-        MenuItemBuilder::with_id("tray.clipboard.clear", "清空未置顶记录").build(app)?;
-    let autostart = CheckMenuItemBuilder::with_id("tray.toggle_autostart", "开机启动智屿")
-        .checked(snapshot.launch_at_login)
-        .build(app)?;
-    let stop_all = MenuItemBuilder::with_id("tray.stop_all", "停止全部服务")
-        .enabled(snapshot.running_count > 0)
-        .build(app)?;
-    let quit_text = if snapshot.running_count > 0 {
+    let clipboard_label = MenuItemBuilder::with_id(
+        "tray.clipboard.label",
+        if english {
+            "Clipboard history"
+        } else {
+            "剪贴板历史"
+        },
+    )
+    .enabled(false)
+    .build(app)?;
+    let clipboard_toggle = MenuItemBuilder::with_id(
+        "tray.clipboard.toggle",
+        if english {
+            "Start / pause capture"
+        } else {
+            "开启 / 暂停记录"
+        },
+    )
+    .build(app)?;
+    let clipboard_open = MenuItemBuilder::with_id(
+        "tray.clipboard.open",
+        if english {
+            "Open clipboard history"
+        } else {
+            "打开剪贴板历史"
+        },
+    )
+    .build(app)?;
+    let clipboard_clear = MenuItemBuilder::with_id(
+        "tray.clipboard.clear",
+        if english {
+            "Clear unpinned items"
+        } else {
+            "清空未置顶记录"
+        },
+    )
+    .build(app)?;
+    let autostart = CheckMenuItemBuilder::with_id(
+        "tray.toggle_autostart",
+        if english {
+            "Launch Zhiyu at login"
+        } else {
+            "开机启动智屿"
+        },
+    )
+    .checked(snapshot.launch_at_login)
+    .build(app)?;
+    let stop_all = MenuItemBuilder::with_id(
+        "tray.stop_all",
+        if english {
+            "Stop all services"
+        } else {
+            "停止全部服务"
+        },
+    )
+    .enabled(snapshot.running_count > 0)
+    .build(app)?;
+    let quit_text = if snapshot.running_count > 0 && english {
+        "Quit Zhiyu (keep services running)"
+    } else if snapshot.running_count > 0 {
         "退出智屿（服务继续运行）"
+    } else if english {
+        "Quit Zhiyu"
     } else {
         "退出智屿"
     };
@@ -436,8 +530,22 @@ fn build_menu(app: &AppHandle, snapshot: &TraySnapshot) -> tauri::Result<Menu<ta
     MenuBuilder::with_id(app, "zhiyu-tray-menu")
         .item(&summary)
         .separator()
-        .text("tray.open", "打开智屿")
-        .text("tray.overview", "打开全局概览")
+        .text(
+            "tray.open",
+            if english {
+                "Open Zhiyu"
+            } else {
+                "打开智屿"
+            },
+        )
+        .text(
+            "tray.overview",
+            if english {
+                "Open global overview"
+            } else {
+                "打开全局概览"
+            },
+        )
         .separator()
         .item(&services)
         .separator()
@@ -449,7 +557,10 @@ fn build_menu(app: &AppHandle, snapshot: &TraySnapshot) -> tauri::Result<Menu<ta
         .item(&stop_all)
         .separator()
         .item(&autostart)
-        .text("tray.settings", "设置中心")
+        .text(
+            "tray.settings",
+            if english { "Settings" } else { "设置中心" },
+        )
         .separator()
         .text("tray.quit", quit_text)
         .build()
@@ -511,18 +622,37 @@ fn service_id(kind: ServiceKindInput) -> &'static str {
     }
 }
 
-fn service_status_label(status: &str) -> &'static str {
-    match status {
-        "running" => "运行中",
-        "stopped" => "已停止",
-        "crashed" => "进程意外退出",
-        "stale_pid" => "PID 状态异常",
-        _ => "状态未知",
+fn service_status_label(status: &str, english: bool) -> &'static str {
+    match (status, english) {
+        ("running", false) => "运行中",
+        ("stopped", false) => "已停止",
+        ("crashed", false) => "进程意外退出",
+        ("stale_pid", false) => "PID 状态异常",
+        (_, false) => "状态未知",
+        ("running", true) => "Running",
+        ("stopped", true) => "Stopped",
+        ("crashed", true) => "Exited unexpectedly",
+        ("stale_pid", true) => "PID state issue",
+        (_, true) => "Unknown state",
     }
 }
 
 fn tooltip(snapshot: &TraySnapshot) -> String {
-    format!("智屿 · {} 个服务运行中", snapshot.running_count)
+    if snapshot.english {
+        format!("Zhiyu · {} services running", snapshot.running_count)
+    } else {
+        format!("智屿 · {} 个服务运行中", snapshot.running_count)
+    }
+}
+
+fn locale_is_english(locale: &str) -> bool {
+    if locale == "en-US" {
+        return true;
+    }
+    locale == "system"
+        && std::env::var("LANG")
+            .map(|value| value.to_ascii_lowercase().starts_with("en"))
+            .unwrap_or(false)
 }
 
 fn format_bytes(bytes: u64) -> String {

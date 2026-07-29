@@ -10,6 +10,7 @@ use tauri_plugin_autostart::ManagerExt;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
+    pub locale: String,
     pub theme_mode: String,
     pub color_theme: String,
     pub background_pattern: String,
@@ -38,6 +39,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            locale: "zh-CN".into(),
             theme_mode: "system".into(),
             color_theme: "classic".into(),
             background_pattern: "auto".into(),
@@ -139,11 +141,23 @@ fn settings_path() -> Option<PathBuf> {
 }
 
 fn validate(settings: &mut AppSettings) -> Result<(), String> {
+    if !matches!(settings.locale.as_str(), "system" | "zh-CN" | "en-US") {
+        return Err("界面语言不受支持".into());
+    }
     validate_theme_mode(&settings.theme_mode)?;
     validate_color_theme(&settings.color_theme)?;
     if !matches!(
         settings.background_pattern.as_str(),
-        "auto" | "none" | "grid" | "dots" | "diagonal"
+        "auto"
+            | "none"
+            | "grid"
+            | "dots"
+            | "diagonal"
+            | "crosshatch"
+            | "circuit"
+            | "rings"
+            | "paper"
+            | "checker"
     ) {
         return Err("背景纹理不受支持".into());
     }
@@ -296,6 +310,11 @@ fn validate_color_theme(color_theme: &str) -> Result<(), String> {
             | "coral"
             | "sunset"
             | "neon"
+            | "nord"
+            | "sakura"
+            | "coffee"
+            | "solarized"
+            | "lavender"
     ) {
         Ok(())
     } else {
@@ -605,8 +624,21 @@ mod tests {
     #[test]
     fn valid_color_themes_are_accepted() {
         for theme in [
-            "classic", "ocean", "forest", "sand", "twilight", "aurora", "graphite", "coral",
-            "sunset", "neon",
+            "classic",
+            "ocean",
+            "forest",
+            "sand",
+            "twilight",
+            "aurora",
+            "graphite",
+            "coral",
+            "sunset",
+            "neon",
+            "nord",
+            "sakura",
+            "coffee",
+            "solarized",
+            "lavender",
         ] {
             assert!(validate_color_theme(theme).is_ok());
         }
@@ -623,6 +655,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.theme_mode, "system");
+        assert_eq!(settings.locale, "zh-CN");
         assert_eq!(settings.color_theme, "classic");
         assert_eq!(settings.background_pattern, "auto");
         assert_eq!(settings.ui_scale, 100);
@@ -634,6 +667,22 @@ mod tests {
         assert!(settings.hidden_tools.is_empty());
         assert!(settings.tool_order.is_empty());
         assert!(!settings.onboarding_completed);
+    }
+
+    #[test]
+    fn locale_only_accepts_supported_values() {
+        for locale in ["system", "zh-CN", "en-US"] {
+            let mut settings = AppSettings {
+                locale: locale.into(),
+                ..AppSettings::default()
+            };
+            assert!(validate(&mut settings).is_ok());
+        }
+        let mut settings = AppSettings {
+            locale: "fr-FR".into(),
+            ..AppSettings::default()
+        };
+        assert!(validate(&mut settings).is_err());
     }
 
     #[test]
@@ -672,6 +721,28 @@ mod tests {
             ..AppSettings::default()
         };
         assert!(validate(&mut settings).is_err());
+    }
+
+    #[test]
+    fn all_background_patterns_are_accepted() {
+        for pattern in [
+            "auto",
+            "none",
+            "grid",
+            "dots",
+            "diagonal",
+            "crosshatch",
+            "circuit",
+            "rings",
+            "paper",
+            "checker",
+        ] {
+            let mut settings = AppSettings {
+                background_pattern: pattern.into(),
+                ..AppSettings::default()
+            };
+            assert!(validate(&mut settings).is_ok());
+        }
     }
 
     #[test]

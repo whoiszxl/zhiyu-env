@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { toolUiText } from "../../i18n/toolUi";
 import {
   diffJson,
   queryJsonPath,
@@ -61,8 +62,18 @@ const transformed = ref<TransformResult | null>(null);
 const converting = ref(false);
 
 // ── JSON 差异 ──────────────────────────────────────────────
-const leftInput = ref('{\n  "name": "张三",\n  "age": 28\n}');
-const rightInput = ref('{\n  "name": "张三",\n  "age": 30,\n  "city": "杭州"\n}');
+const leftInput = ref(
+  toolUiText(
+    '{\n  "name": "张三",\n  "age": 28\n}',
+    '{\n  "name": "Alice",\n  "age": 28\n}',
+  ),
+);
+const rightInput = ref(
+  toolUiText(
+    '{\n  "name": "张三",\n  "age": 30,\n  "city": "杭州"\n}',
+    '{\n  "name": "Alice",\n  "age": 30,\n  "city": "London"\n}',
+  ),
+);
 const diffResult = ref<JsonDiffResult | null>(null);
 const diffing = ref(false);
 
@@ -73,14 +84,21 @@ const pathResult = ref<JsonPathResult | null>(null);
 const querying = ref(false);
 
 // ── CSV / JSON ────────────────────────────────────────────
-const csvInput = ref("name,age,city\n张三,28,杭州\n李四,31,上海\n");
+const csvInput = ref(
+  toolUiText(
+    "name,age,city\n张三,28,杭州\n李四,31,上海\n",
+    "name,age,city\nAlice,28,London\nBob,31,New York\n",
+  ),
+);
 const csvDirection = ref<CsvDirection>("csvToJson");
 const csvDelimiter = ref<CsvDelimiter>("comma");
 const csvResult = ref<CsvTransformResult | null>(null);
 const csvConverting = ref(false);
 
 // ── 编码与转义（纯前端字符串操作，无需往返后端）───────────────
-const escapeInput = ref('他说："你好"\t换行\n结束');
+const escapeInput = ref(
+  toolUiText('他说："你好"\t换行\n结束', 'She said: "Hello"\tTab\nEnd'),
+);
 const escapeOutput = ref("");
 const encodingKind = ref<EncodingKind>("json");
 
@@ -170,13 +188,24 @@ function loadCsvSample() {
   }[csvDelimiter.value];
   csvInput.value =
     csvDirection.value === "csvToJson"
-      ? [
-          ["name", "age", "city"].join(separator),
-          ["张三", "28", "杭州"].join(separator),
-          ["李四", "31", "上海"].join(separator),
-          "",
-        ].join("\n")
-      : '[\n  { "name": "张三", "age": 28, "city": "杭州" },\n  { "name": "李四", "age": 31, "city": "上海" }\n]';
+      ? toolUiText(
+          [
+            ["name", "age", "city"].join(separator),
+            ["张三", "28", "杭州"].join(separator),
+            ["李四", "31", "上海"].join(separator),
+            "",
+          ].join("\n"),
+          [
+            ["name", "age", "city"].join(separator),
+            ["Alice", "28", "London"].join(separator),
+            ["Bob", "31", "New York"].join(separator),
+            "",
+          ].join("\n"),
+        )
+      : toolUiText(
+          '[\n  { "name": "张三", "age": 28, "city": "杭州" },\n  { "name": "李四", "age": 31, "city": "上海" }\n]',
+          '[\n  { "name": "Alice", "age": 28, "city": "London" },\n  { "name": "Bob", "age": 31, "city": "New York" }\n]',
+        );
   csvResult.value = null;
 }
 

@@ -29,6 +29,7 @@ import type {
   SshProfile,
   SshTerminalEvent,
 } from "../../types";
+import { toolUiText } from "../../i18n/toolUi";
 
 const props = withDefaults(defineProps<{ visible?: boolean }>(), {
   visible: true,
@@ -184,7 +185,10 @@ function resetIdleDisconnectTimer() {
     idleDisconnectTimer = null;
     if (!terminalSessionId.value) return;
     terminal?.writeln(
-      `\r\n\x1b[33m[已闲置 ${idleTimeoutMinutes.value} 分钟，智屿自动断开 SSH 连接]\x1b[0m`,
+      toolUiText(
+        `\r\n\x1b[33m[已闲置 ${idleTimeoutMinutes.value} 分钟，智屿自动断开 SSH 连接]\x1b[0m`,
+        `\r\n\x1b[33m[Idle for ${idleTimeoutMinutes.value} minutes. Zhiyu disconnected the SSH session.]\x1b[0m`,
+      ),
     );
     void disconnectTerminal();
   }, idleTimeoutMinutes.value * 60 * 1000);
@@ -385,11 +389,22 @@ async function testConnection() {
 
 function writeTerminalWelcome() {
   if (!terminal) return;
-  terminal.writeln("\x1b[38;2;114;180;133m智屿 SSH 交互终端\x1b[0m");
+  terminal.writeln(
+    toolUiText(
+      "\x1b[38;2;114;180;133m智屿 SSH 交互终端\x1b[0m",
+      "\x1b[38;2;114;180;133mZhiyu SSH Interactive Terminal\x1b[0m",
+    ),
+  );
   terminal.writeln(
     selectedProfile.value
-      ? `点击“连接终端”进入 ${selectedProfile.value.name}。`
-      : "请先选择或创建一个 SSH 连接。",
+      ? toolUiText(
+          `点击“连接终端”进入 ${selectedProfile.value.name}。`,
+          `Select “Connect Terminal” to open ${selectedProfile.value.name}.`,
+        )
+      : toolUiText(
+          "请先选择或创建一个 SSH 连接。",
+          "Select or create an SSH connection first.",
+        ),
   );
   terminal.writeln("");
 }
@@ -486,12 +501,22 @@ async function initializeTerminal() {
       if (payload.event === "data") {
         terminal.write(decodeTerminalData(payload.data));
       } else if (payload.event === "error") {
-        terminal.writeln(`\r\n\x1b[31m终端错误：${payload.data}\x1b[0m`);
+        terminal.writeln(
+          toolUiText(
+            `\r\n\x1b[31m终端错误：${payload.data}\x1b[0m`,
+            `\r\n\x1b[31mTerminal error: ${payload.data}\x1b[0m`,
+          ),
+        );
       } else {
         clearIdleDisconnectTimer();
         terminalSessionId.value = "";
         terminalStatus.value = "disconnected";
-        terminal.writeln("\r\n\x1b[90m[SSH 连接已断开]\x1b[0m");
+        terminal.writeln(
+          toolUiText(
+            "\r\n\x1b[90m[SSH 连接已断开]\x1b[0m",
+            "\r\n\x1b[90m[SSH connection closed]\x1b[0m",
+          ),
+        );
       }
     },
   );
@@ -511,7 +536,10 @@ async function connectTerminal() {
   terminalSessionId.value = sessionId;
   terminal?.reset();
   terminal?.writeln(
-    `\x1b[90m正在连接 ${profile.username}@${profile.host}:${profile.port}…\x1b[0m`,
+    toolUiText(
+      `\x1b[90m正在连接 ${profile.username}@${profile.host}:${profile.port}…\x1b[0m`,
+      `\x1b[90mConnecting to ${profile.username}@${profile.host}:${profile.port}…\x1b[0m`,
+    ),
   );
   try {
     await connectSshTerminal(
@@ -529,7 +557,12 @@ async function connectTerminal() {
     terminalSessionId.value = "";
     terminalStatus.value = "disconnected";
     error.value = String(cause);
-    terminal?.writeln(`\r\n\x1b[31m连接失败：${String(cause)}\x1b[0m`);
+    terminal?.writeln(
+      toolUiText(
+        `\r\n\x1b[31m连接失败：${String(cause)}\x1b[0m`,
+        `\r\n\x1b[31mConnection failed: ${String(cause)}\x1b[0m`,
+      ),
+    );
   } finally {
     terminalConnecting.value = false;
   }
@@ -546,7 +579,12 @@ async function disconnectTerminal() {
   } catch (cause) {
     error.value = String(cause);
   }
-  terminal?.writeln("\r\n\x1b[90m[SSH 连接已断开]\x1b[0m");
+  terminal?.writeln(
+    toolUiText(
+      "\r\n\x1b[90m[SSH 连接已断开]\x1b[0m",
+      "\r\n\x1b[90m[SSH connection closed]\x1b[0m",
+    ),
+  );
 }
 
 onMounted(() => {
