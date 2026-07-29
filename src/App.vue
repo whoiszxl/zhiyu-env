@@ -234,6 +234,18 @@ const activeTool = ref<ToolId | null>(null);
 const sshToolMounted = ref(false);
 const dashboardActive = ref(true);
 const settingsActive = ref(false);
+type SettingsTab = "appearance" | "sidebar" | "application" | "storage";
+const activeSettingsTab = ref<SettingsTab>("appearance");
+const settingsTabs: Array<{
+  id: SettingsTab;
+  label: string;
+  hint: string;
+}> = [
+  { id: "appearance", label: "外观", hint: "主题与背景" },
+  { id: "sidebar", label: "侧栏", hint: "显示与排序" },
+  { id: "application", label: "应用", hint: "行为与更新" },
+  { id: "storage", label: "下载与存储", hint: "镜像与保留" },
+];
 const activeToolDefinition = computed(() => findTool(activeTool.value));
 const activeTab = ref<DetailTab>("overview");
 const loading = ref(true);
@@ -267,6 +279,10 @@ const appSettings = ref<AppSettings>({
   backgroundStyle: "off",
   backgroundPosition: "center",
   backgroundOverlay: 58,
+  hiddenServices: [],
+  serviceOrder: [],
+  hiddenTools: [],
+  toolOrder: [],
   launchAtLogin: false,
   keepServicesRunningOnClose: true,
   downloadMirror: "",
@@ -386,6 +402,66 @@ const backgroundImporting = ref(false);
 const visualSettings = computed(() =>
   settingsActive.value ? settingsDraft.value : appSettings.value,
 );
+function orderByPreference<T>(
+  items: readonly T[],
+  getId: (item: T) => string,
+  order: readonly string[],
+): T[] {
+  const positions = new Map(order.map((id, index) => [id, index]));
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftPosition = positions.get(getId(left.item));
+      const rightPosition = positions.get(getId(right.item));
+      if (leftPosition !== undefined && rightPosition !== undefined) {
+        return leftPosition - rightPosition;
+      }
+      if (leftPosition !== undefined) return -1;
+      if (rightPosition !== undefined) return 1;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
+}
+const sidebarServices = computed(() => {
+  const hidden = new Set(visualSettings.value.hiddenServices);
+  return orderByPreference(
+    services.value,
+    (service) => service.kind,
+    visualSettings.value.serviceOrder,
+  ).filter((service) => !hidden.has(service.kind));
+});
+const sidebarTools = computed(() => {
+  const hidden = new Set(visualSettings.value.hiddenTools);
+  return orderByPreference(
+    TOOLS,
+    (tool) => tool.id,
+    visualSettings.value.toolOrder,
+  ).filter((tool) => !hidden.has(tool.id));
+});
+const settingsOrderedServices = computed(() =>
+  orderByPreference(
+    services.value,
+    (service) => service.kind,
+    settingsDraft.value.serviceOrder,
+  ),
+);
+const settingsOrderedTools = computed(() =>
+  orderByPreference(
+    TOOLS,
+    (tool) => tool.id,
+    settingsDraft.value.toolOrder,
+  ),
+);
+const draggingSidebarItem = ref<{
+  group: "services" | "tools";
+  id: string;
+} | null>(null);
+const sidebarDropTarget = ref("");
+const sidebarPointerDrop = ref<{
+  group: "services" | "tools";
+  id: string;
+  after: boolean;
+} | null>(null);
 const hasCustomBackground = computed(
   () =>
     Boolean(visualSettings.value.backgroundImagePath) &&
@@ -736,6 +812,17 @@ const latestInstallLog = computed(
 );
 const runningServices = computed(() =>
   services.value.filter((service) => service.status === "running"),
+);
+const installedServiceCount = computed(
+  () =>
+    services.value.filter((service) => service.status !== "not_installed")
+      .length,
+);
+const dashboardCacheBytes = computed(() =>
+  Object.values(diskUsageByKind.value).reduce(
+    (total, usage) => total + (usage?.cacheBytes ?? 0),
+    0,
+  ),
 );
 const dashboardDiskRanking = computed(() =>
   services.value
@@ -1511,6 +1598,123 @@ function previewColorTheme(theme: ColorTheme) {
 function previewBackgroundPattern(pattern: BackgroundPattern) {
   settingsDraft.value.backgroundPattern = pattern;
   void saveSettings();
+}
+
+function toggleServiceVisibility(kind: ServiceKind, event: Event) {
+  const visible = (event.currentTarget as HTMLInputElement).checked;
+  const hidden = new Set(settingsDraft.value.hiddenServices);
+  if (visible) hidden.delete(kind);
+  else hidden.add(kind);
+  settingsDraft.value.hiddenServices = [...hidden];
+  void saveSettings();
+}
+
+function toggleToolVisibility(id: ToolId, event: Event) {
+  const visible = (event.currentTarget as HTMLInputElement).checked;
+  const hidden = new Set(settingsDraft.value.hiddenTools);
+  if (visible) hidden.delete(id);
+  else hidden.add(id);
+  settingsDraft.value.hiddenTools = [...hidden];
+  void saveSettings();
+}
+
+function beginSidebarPointerDrag(
+  event: PointerEvent,
+  group: "services" | "tools",
+  id: string,
+) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  draggingSidebarItem.value = { group, id };
+  sidebarPointerDrop.value = null;
+  sidebarDropTarget.value = "";
+  document.documentElement.classList.add("sidebar-item-dragging");
+  window.addEventListener("pointermove", moveSidebarPointerDrag);
+  window.addEventListener("pointerup", finishSidebarPointerDrag, {
+    once: true,
+  });
+  window.addEventListener("pointercancel", cancelSidebarPointerDrag, {
+    once: true,
+  });
+}
+
+function moveSidebarPointerDrag(event: PointerEvent) {
+  const dragging = draggingSidebarItem.value;
+  if (!dragging) return;
+  event.preventDefault();
+  const target = document
+    .elementFromPoint(event.clientX, event.clientY)
+    ?.closest<HTMLElement>(".sidebar-manager-item");
+  const group = target?.dataset.sidebarGroup;
+  const id = target?.dataset.sidebarId;
+  if (
+    !target ||
+    group !== dragging.group ||
+    !id ||
+    id === dragging.id
+  ) {
+    sidebarPointerDrop.value = null;
+    sidebarDropTarget.value = "";
+    return;
+  }
+  const bounds = target.getBoundingClientRect();
+  const after = event.clientY >= bounds.top + bounds.height / 2;
+  sidebarPointerDrop.value = {
+    group: dragging.group,
+    id,
+    after,
+  };
+  sidebarDropTarget.value = `${dragging.group}:${id}:${after ? "after" : "before"}`;
+}
+
+function finishSidebarPointerDrag(event: PointerEvent) {
+  event.preventDefault();
+  const dragging = draggingSidebarItem.value;
+  const drop = sidebarPointerDrop.value;
+  if (!dragging || !drop || dragging.group !== drop.group) {
+    endSidebarPointerDrag();
+    return;
+  }
+  reorderSidebarItem(dragging.group, dragging.id, drop.id, drop.after);
+  endSidebarPointerDrag();
+  void saveSettings();
+}
+
+function reorderSidebarItem(
+  group: "services" | "tools",
+  sourceId: string,
+  targetId: string,
+  after: boolean,
+) {
+  const current: string[] =
+    group === "services"
+      ? settingsOrderedServices.value.map((service) => service.kind)
+      : settingsOrderedTools.value.map((tool) => tool.id);
+  const next = current.filter((id) => id !== sourceId);
+  const targetIndex = next.indexOf(targetId);
+  const insertAt =
+    targetIndex < 0 ? next.length : targetIndex + (after ? 1 : 0);
+  next.splice(insertAt, 0, sourceId);
+  if (group === "services") {
+    settingsDraft.value.serviceOrder = next as ServiceKind[];
+  } else {
+    settingsDraft.value.toolOrder = next;
+  }
+}
+
+function cancelSidebarPointerDrag() {
+  endSidebarPointerDrag();
+}
+
+function endSidebarPointerDrag() {
+  window.removeEventListener("pointermove", moveSidebarPointerDrag);
+  window.removeEventListener("pointerup", finishSidebarPointerDrag);
+  window.removeEventListener("pointercancel", cancelSidebarPointerDrag);
+  document.documentElement.classList.remove("sidebar-item-dragging");
+  draggingSidebarItem.value = null;
+  sidebarPointerDrop.value = null;
+  sidebarDropTarget.value = "";
 }
 
 function previewUiScale(scale: UiScale) {
@@ -3394,6 +3598,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  endSidebarPointerDrag();
   unlistenInstallProgress?.();
   unlistenCloseRequested?.();
   unlistenTrayNavigation?.();
@@ -3455,7 +3660,7 @@ onUnmounted(() => {
 
         <p class="nav-label">SERVICES</p>
         <button
-          v-for="service in services"
+          v-for="service in sidebarServices"
           :key="service.kind"
           type="button"
           class="service-nav-item"
@@ -3487,7 +3692,7 @@ onUnmounted(() => {
 
         <p class="nav-label tool-label">TOOLS</p>
         <button
-          v-for="tool in TOOLS"
+          v-for="tool in sidebarTools"
           :key="tool.id"
           type="button"
           class="service-nav-item"
@@ -3624,6 +3829,23 @@ onUnmounted(() => {
           </div>
         </header>
 
+        <nav class="settings-tabs" role="tablist" aria-label="设置分类">
+          <button
+            v-for="tab in settingsTabs"
+            :id="`settings-tab-${tab.id}`"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            :class="{ active: activeSettingsTab === tab.id }"
+            :aria-selected="activeSettingsTab === tab.id"
+            :aria-controls="`settings-panel-${tab.id}`"
+            @click="activeSettingsTab = tab.id"
+          >
+            <strong>{{ tab.label }}</strong>
+            <small>{{ tab.hint }}</small>
+          </button>
+        </nav>
+
         <div v-if="notice" class="notice settings-notice">
           <span>{{ notice }}</span>
           <button type="button" @click="notice = ''">×</button>
@@ -3634,7 +3856,13 @@ onUnmounted(() => {
         </div>
 
         <div class="settings-body">
-          <section class="settings-section settings-appearance">
+          <section
+            v-show="activeSettingsTab === 'appearance'"
+            id="settings-panel-appearance"
+            class="settings-section settings-appearance"
+            role="tabpanel"
+            aria-labelledby="settings-tab-appearance"
+          >
             <div class="settings-section-title">
               <div>
                 <h2>外观</h2>
@@ -3908,7 +4136,186 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <section class="settings-section">
+          <section
+            v-show="activeSettingsTab === 'sidebar'"
+            id="settings-panel-sidebar"
+            class="settings-section sidebar-settings-section"
+            role="tabpanel"
+            aria-labelledby="settings-tab-sidebar"
+          >
+            <div class="settings-section-title">
+              <div>
+                <h2>侧栏管理</h2>
+                <p>选择显示内容，拖动把常用服务和工具排到前面</p>
+              </div>
+            </div>
+            <div class="sidebar-manager-grid">
+              <div class="sidebar-manager">
+                <div class="sidebar-manager-head">
+                  <div>
+                    <strong>服务</strong>
+                    <small>SERVICES</small>
+                  </div>
+                  <span>
+                    {{
+                      services.length -
+                      settingsDraft.hiddenServices.length
+                    }}/{{ services.length }} 显示
+                  </span>
+                </div>
+                <div class="sidebar-manager-list">
+                  <div
+                    v-for="service in settingsOrderedServices"
+                    :key="service.kind"
+                    class="sidebar-manager-item"
+                    data-sidebar-group="services"
+                    :data-sidebar-id="service.kind"
+                    :class="{
+                      dragging:
+                        draggingSidebarItem?.group === 'services' &&
+                        draggingSidebarItem.id === service.kind,
+                      'drop-before':
+                        sidebarDropTarget ===
+                        `services:${service.kind}:before`,
+                      'drop-after':
+                        sidebarDropTarget ===
+                        `services:${service.kind}:after`,
+                    }"
+                  >
+                    <span
+                      class="sidebar-drag-handle"
+                      title="拖动排序"
+                      @pointerdown="
+                        beginSidebarPointerDrag(
+                          $event,
+                          'services',
+                          service.kind,
+                        )
+                      "
+                    >
+                      <svg viewBox="0 0 12 18" aria-hidden="true">
+                        <circle cx="3" cy="3" r="1.2"></circle>
+                        <circle cx="9" cy="3" r="1.2"></circle>
+                        <circle cx="3" cy="9" r="1.2"></circle>
+                        <circle cx="9" cy="9" r="1.2"></circle>
+                        <circle cx="3" cy="15" r="1.2"></circle>
+                        <circle cx="9" cy="15" r="1.2"></circle>
+                      </svg>
+                    </span>
+                    <span class="nav-icon" :class="service.kind">
+                      {{ iconLetter[service.kind] }}
+                    </span>
+                    <span class="sidebar-manager-copy">
+                      <strong>{{ service.name }}</strong>
+                      <small>v{{ service.version }} · :{{ service.port }}</small>
+                    </span>
+                    <label
+                      class="sidebar-visibility-switch"
+                      :title="
+                        settingsDraft.hiddenServices.includes(service.kind)
+                          ? '在侧栏中显示'
+                          : '从侧栏隐藏'
+                      "
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="
+                          !settingsDraft.hiddenServices.includes(service.kind)
+                        "
+                        :aria-label="`在侧栏显示 ${service.name}`"
+                        @change="
+                          toggleServiceVisibility(service.kind, $event)
+                        "
+                      />
+                      <i></i>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sidebar-manager">
+                <div class="sidebar-manager-head">
+                  <div>
+                    <strong>工具</strong>
+                    <small>TOOLS</small>
+                  </div>
+                  <span>
+                    {{
+                      TOOLS.length - settingsDraft.hiddenTools.length
+                    }}/{{ TOOLS.length }} 显示
+                  </span>
+                </div>
+                <div class="sidebar-manager-list">
+                  <div
+                    v-for="tool in settingsOrderedTools"
+                    :key="tool.id"
+                    class="sidebar-manager-item"
+                    data-sidebar-group="tools"
+                    :data-sidebar-id="tool.id"
+                    :class="{
+                      dragging:
+                        draggingSidebarItem?.group === 'tools' &&
+                        draggingSidebarItem.id === tool.id,
+                      'drop-before':
+                        sidebarDropTarget === `tools:${tool.id}:before`,
+                      'drop-after':
+                        sidebarDropTarget === `tools:${tool.id}:after`,
+                    }"
+                  >
+                    <span
+                      class="sidebar-drag-handle"
+                      title="拖动排序"
+                      @pointerdown="
+                        beginSidebarPointerDrag($event, 'tools', tool.id)
+                      "
+                    >
+                      <svg viewBox="0 0 12 18" aria-hidden="true">
+                        <circle cx="3" cy="3" r="1.2"></circle>
+                        <circle cx="9" cy="3" r="1.2"></circle>
+                        <circle cx="3" cy="9" r="1.2"></circle>
+                        <circle cx="9" cy="9" r="1.2"></circle>
+                        <circle cx="3" cy="15" r="1.2"></circle>
+                        <circle cx="9" cy="15" r="1.2"></circle>
+                      </svg>
+                    </span>
+                    <span class="nav-icon" :class="tool.id">
+                      {{ tool.icon }}
+                    </span>
+                    <span class="sidebar-manager-copy">
+                      <strong>{{ tool.navLabel }}</strong>
+                      <small>{{ tool.navHint }}</small>
+                    </span>
+                    <label
+                      class="sidebar-visibility-switch"
+                      :title="
+                        settingsDraft.hiddenTools.includes(tool.id)
+                          ? '在侧栏中显示'
+                          : '从侧栏隐藏'
+                      "
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="
+                          !settingsDraft.hiddenTools.includes(tool.id)
+                        "
+                        :aria-label="`在侧栏显示 ${tool.navLabel}`"
+                        @change="toggleToolVisibility(tool.id, $event)"
+                      />
+                      <i></i>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
+            v-show="activeSettingsTab === 'application'"
+            id="settings-panel-application"
+            class="settings-section"
+            role="tabpanel"
+            aria-labelledby="settings-tab-application"
+          >
             <div class="settings-section-title">
               <div>
                 <h2>应用行为</h2>
@@ -3948,7 +4355,13 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <section class="settings-section">
+          <section
+            v-show="activeSettingsTab === 'storage'"
+            id="settings-panel-storage"
+            class="settings-section"
+            role="tabpanel"
+            aria-labelledby="settings-tab-storage"
+          >
             <div class="settings-section-title">
               <div>
                 <h2>下载安装</h2>
@@ -4009,7 +4422,11 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <section class="settings-section">
+          <section
+            v-show="activeSettingsTab === 'storage'"
+            class="settings-section"
+            aria-labelledby="settings-tab-storage"
+          >
             <div class="settings-section-title">
               <div>
                 <h2>存储与保留策略</h2>
@@ -4072,7 +4489,11 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <section class="settings-section">
+          <section
+            v-show="activeSettingsTab === 'application'"
+            class="settings-section"
+            aria-labelledby="settings-tab-application"
+          >
             <div class="settings-section-title">
               <div>
                 <h2>应用更新</h2>
@@ -4164,6 +4585,11 @@ onUnmounted(() => {
               <small>共 {{ services.length }} 个服务</small>
             </article>
             <article>
+              <span>已安装</span>
+              <strong>{{ installedServiceCount }}</strong>
+              <small>可直接启动</small>
+            </article>
+            <article>
               <span>总 CPU</span>
               <strong>{{ environmentMetrics.cpuPercent.toFixed(1) }}%</strong>
               <small>智屿与运行服务</small>
@@ -4174,15 +4600,37 @@ onUnmounted(() => {
               <small>常驻内存合计</small>
             </article>
             <article>
+              <span>监听端口</span>
+              <strong>{{ dashboardPortListeners.length }}</strong>
+              <small>相关服务端口</small>
+            </article>
+            <article
+              :class="{
+                healthy: dashboardAlerts.length === 0,
+                danger: dashboardAlerts.length > 0,
+              }"
+            >
+              <span>异常项</span>
+              <strong>{{ dashboardAlerts.length }}</strong>
+              <small>{{
+                dashboardAlerts.length === 0 ? "环境正常" : "需要处理"
+              }}</small>
+            </article>
+            <article>
+              <span>安装缓存</span>
+              <strong>{{ formatBytes(dashboardCacheBytes) }}</strong>
+              <small>可在设置中清理</small>
+            </article>
+            <article>
               <span>总磁盘</span>
               <strong>{{ formatBytes(environmentDiskBytes) }}</strong>
-              <small>{{ appSettings.installRoot || "~/.devbox" }}</small>
+              <small>程序、数据与备份</small>
             </article>
           </div>
 
           <section
+            v-if="dashboardAlerts.length > 0"
             class="dashboard-panel dashboard-alerts"
-            :class="{ clear: dashboardAlerts.length === 0 }"
           >
             <div class="dashboard-panel-title">
               <div>
@@ -4202,10 +4650,7 @@ onUnmounted(() => {
                 <span>{{ dashboardAlerts.length }}</span>
               </div>
             </div>
-            <p v-if="dashboardAlerts.length === 0" class="dashboard-empty">
-              当前没有发现异常
-            </p>
-            <ul v-else>
+            <ul>
               <li
                 v-for="alert in dashboardAlerts"
                 :key="alert.message"
@@ -4222,27 +4667,40 @@ onUnmounted(() => {
               <div class="dashboard-panel-title">
                 <div>
                   <h2>服务状态</h2>
-                  <p>点击进入服务详情</p>
+                  <p>点击服务进入详情</p>
+                </div>
+                <div
+                  class="dashboard-service-summary"
+                  :aria-label="`${runningServices.length} 个运行中，${services.length - runningServices.length} 个未运行`"
+                >
+                  <span title="运行中">
+                    <i class="running"></i>{{ runningServices.length }}
+                  </span>
+                  <span title="未运行">
+                    <i></i>{{ services.length - runningServices.length }}
+                  </span>
                 </div>
               </div>
-              <button
-                v-for="service in services"
-                :key="service.kind"
-                type="button"
-                class="dashboard-service-row"
-                @click="selectService(service.kind)"
-              >
-                <span class="nav-icon" :class="service.kind">
-                  {{ iconLetter[service.kind] }}
-                </span>
-                <span>
+              <div class="dashboard-service-grid">
+                <button
+                  v-for="service in services"
+                  :key="service.kind"
+                  type="button"
+                  class="dashboard-service-row"
+                  :aria-label="`${service.name}，${statusLabel[service.status]}，端口 ${service.port}`"
+                  @click="selectService(service.kind)"
+                >
+                  <span class="nav-icon" :class="service.kind">
+                    {{ iconLetter[service.kind] }}
+                  </span>
+                  <em
+                    :class="service.status"
+                    :title="statusLabel[service.status]"
+                  ></em>
                   <strong>{{ service.name }}</strong>
-                  <small>v{{ service.version }} · {{ service.port }}</small>
-                </span>
-                <em :class="service.status">
-                  {{ statusLabel[service.status] }}
-                </em>
-              </button>
+                  <small>v{{ service.version }} · :{{ service.port }}</small>
+                </button>
+              </div>
             </section>
 
             <section class="dashboard-panel">

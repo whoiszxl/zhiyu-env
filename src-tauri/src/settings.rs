@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -17,6 +18,10 @@ pub struct AppSettings {
     pub background_style: String,
     pub background_position: String,
     pub background_overlay: u8,
+    pub hidden_services: Vec<String>,
+    pub service_order: Vec<String>,
+    pub hidden_tools: Vec<String>,
+    pub tool_order: Vec<String>,
     pub launch_at_login: bool,
     pub keep_services_running_on_close: bool,
     pub download_mirror: String,
@@ -41,6 +46,10 @@ impl Default for AppSettings {
             background_style: "off".into(),
             background_position: "center".into(),
             background_overlay: 58,
+            hidden_services: Vec::new(),
+            service_order: Vec::new(),
+            hidden_tools: Vec::new(),
+            tool_order: Vec::new(),
             launch_at_login: false,
             keep_services_running_on_close: true,
             download_mirror: String::new(),
@@ -156,6 +165,88 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
     if !(20..=90).contains(&settings.background_overlay) {
         return Err("背景遮罩强度必须在 20% 到 90% 之间".into());
     }
+    normalize_ids(
+        &mut settings.hidden_services,
+        &[
+            "redis",
+            "mysql",
+            "postgres",
+            "mongodb",
+            "mailpit",
+            "nats",
+            "kafka",
+            "meilisearch",
+            "minio",
+            "rustfs",
+            "etcd",
+            "consul",
+            "rnacos",
+            "rabbitmq",
+            "nginx",
+            "caddy",
+        ],
+    );
+    normalize_ids(
+        &mut settings.service_order,
+        &[
+            "redis",
+            "mysql",
+            "postgres",
+            "mongodb",
+            "mailpit",
+            "nats",
+            "kafka",
+            "meilisearch",
+            "minio",
+            "rustfs",
+            "etcd",
+            "consul",
+            "rnacos",
+            "rabbitmq",
+            "nginx",
+            "caddy",
+        ],
+    );
+    normalize_ids(
+        &mut settings.hidden_tools,
+        &[
+            "ports",
+            "mockapi",
+            "http",
+            "realtime",
+            "time",
+            "regex",
+            "cron",
+            "qrcode",
+            "ssh",
+            "duckdb",
+            "sqlite",
+            "dataformat",
+            "jwt",
+            "clipboard",
+            "s3",
+        ],
+    );
+    normalize_ids(
+        &mut settings.tool_order,
+        &[
+            "ports",
+            "mockapi",
+            "http",
+            "realtime",
+            "time",
+            "regex",
+            "cron",
+            "qrcode",
+            "ssh",
+            "duckdb",
+            "sqlite",
+            "dataformat",
+            "jwt",
+            "clipboard",
+            "s3",
+        ],
+    );
     settings.download_mirror = settings
         .download_mirror
         .trim()
@@ -177,6 +268,11 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
         return Err("备份保留数量必须在 1 到 100 之间".into());
     }
     validate_install_root(Path::new(&settings.install_root))
+}
+
+fn normalize_ids(values: &mut Vec<String>, supported: &[&str]) {
+    let mut seen = HashSet::new();
+    values.retain(|value| supported.contains(&value.as_str()) && seen.insert(value.clone()));
 }
 
 fn validate_theme_mode(theme_mode: &str) -> Result<(), String> {
@@ -533,6 +629,10 @@ mod tests {
         assert_eq!(settings.background_style, "off");
         assert_eq!(settings.background_position, "center");
         assert_eq!(settings.background_overlay, 58);
+        assert!(settings.hidden_services.is_empty());
+        assert!(settings.service_order.is_empty());
+        assert!(settings.hidden_tools.is_empty());
+        assert!(settings.tool_order.is_empty());
         assert!(!settings.onboarding_completed);
     }
 
@@ -588,5 +688,21 @@ mod tests {
             ..AppSettings::default()
         };
         assert!(validate(&mut settings).is_err());
+    }
+
+    #[test]
+    fn sidebar_preferences_remove_unknown_and_duplicate_ids() {
+        let mut settings = AppSettings {
+            hidden_services: vec!["redis".into(), "unknown".into(), "redis".into()],
+            service_order: vec!["mysql".into(), "mysql".into(), "postgres".into()],
+            hidden_tools: vec!["ssh".into(), "removed".into()],
+            tool_order: vec!["http".into(), "http".into(), "ports".into()],
+            ..AppSettings::default()
+        };
+        validate(&mut settings).unwrap();
+        assert_eq!(settings.hidden_services, ["redis"]);
+        assert_eq!(settings.service_order, ["mysql", "postgres"]);
+        assert_eq!(settings.hidden_tools, ["ssh"]);
+        assert_eq!(settings.tool_order, ["http", "ports"]);
     }
 }

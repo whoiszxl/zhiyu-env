@@ -122,6 +122,10 @@ export interface AppSettings {
   backgroundStyle: BackgroundStyle;
   backgroundPosition: BackgroundPosition;
   backgroundOverlay: number;
+  hiddenServices: ServiceKind[];
+  serviceOrder: ServiceKind[];
+  hiddenTools: string[];
+  toolOrder: string[];
   launchAtLogin: boolean;
   keepServicesRunningOnClose: boolean;
   downloadMirror: string;
