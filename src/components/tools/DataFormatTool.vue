@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { diffJson, queryJsonPath, transformDataFormat } from "../../api/tools";
+import {
+  diffJson,
+  queryJsonPath,
+  transformCsv,
+  transformDataFormat,
+} from "../../api/tools";
 import type {
+  CsvDelimiter,
+  CsvDirection,
+  CsvTransformResult,
   DataFormat,
   JsonDiffResult,
   JsonPathResult,
@@ -10,13 +18,15 @@ import type {
 } from "../../types";
 import { formatBytes } from "../../utils/format";
 
-type Mode = "convert" | "diff" | "jsonpath" | "escape";
+type Mode = "convert" | "csv" | "diff" | "jsonpath" | "escape";
+type EncodingKind = "json" | "base64" | "url" | "html";
 
 const MODES: Array<[Mode, string, string]> = [
   ["convert", "格式化与转换", "JSON · YAML · TOML"],
+  ["csv", "CSV / JSON", "表格数据互转"],
   ["diff", "JSON 差异", "逐字段比较"],
   ["jsonpath", "JSONPath", "按路径提取"],
-  ["escape", "转义工具", "字符串转义"],
+  ["escape", "编码与转义", "Base64 · URL · HTML"],
 ];
 
 const SOURCE_FORMATS: Array<[DataFormat, string]> = [
@@ -62,9 +72,17 @@ const pathExpression = ref("$.tags[*]");
 const pathResult = ref<JsonPathResult | null>(null);
 const querying = ref(false);
 
-// ── 转义（纯前端字符串操作，无需往返后端）────────────────────
+// ── CSV / JSON ────────────────────────────────────────────
+const csvInput = ref("name,age,city\n张三,28,杭州\n李四,31,上海\n");
+const csvDirection = ref<CsvDirection>("csvToJson");
+const csvDelimiter = ref<CsvDelimiter>("comma");
+const csvResult = ref<CsvTransformResult | null>(null);
+const csvConverting = ref(false);
+
+// ── 编码与转义（纯前端字符串操作，无需往返后端）───────────────
 const escapeInput = ref('他说："你好"\t换行\n结束');
 const escapeOutput = ref("");
+const encodingKind = ref<EncodingKind>("json");
 
 const compressionRatio = computed(() => {
   const result = transformed.value;
@@ -125,19 +143,117 @@ async function runJsonPath() {
   }
 }
 
-function runEscape() {
-  error.value = "";
-  // JSON.stringify 会补上首尾引号，这里去掉只保留转义后的内容
-  escapeOutput.value = JSON.stringify(escapeInput.value).slice(1, -1);
-}
-
-function runUnescape() {
+async function runCsvTransform() {
+  if (csvConverting.value) return;
+  csvConverting.value = true;
   error.value = "";
   try {
-    escapeOutput.value = JSON.parse(`"${escapeInput.value}"`);
-  } catch {
-    error.value = "无法反转义：内容不是合法的转义字符串，请检查反斜杠与引号";
+    csvResult.value = await transformCsv(
+      csvInput.value,
+      csvDirection.value,
+      csvDelimiter.value,
+    );
+  } catch (cause) {
+    csvResult.value = null;
+    error.value = String(cause);
+  } finally {
+    csvConverting.value = false;
   }
+}
+
+function loadCsvSample() {
+  const separator = {
+    comma: ",",
+    tab: "\t",
+    semicolon: ";",
+    pipe: "|",
+  }[csvDelimiter.value];
+  csvInput.value =
+    csvDirection.value === "csvToJson"
+      ? [
+          ["name", "age", "city"].join(separator),
+          ["张三", "28", "杭州"].join(separator),
+          ["李四", "31", "上海"].join(separator),
+          "",
+        ].join("\n")
+      : '[\n  { "name": "张三", "age": 28, "city": "杭州" },\n  { "name": "李四", "age": 31, "city": "上海" }\n]';
+  csvResult.value = null;
+}
+
+function encodeText() {
+  error.value = "";
+  try {
+    switch (encodingKind.value) {
+      case "json":
+        escapeOutput.value = JSON.stringify(escapeInput.value).slice(1, -1);
+        break;
+      case "base64":
+        escapeOutput.value = encodeBase64Utf8(escapeInput.value);
+        break;
+      case "url":
+        escapeOutput.value = encodeURIComponent(escapeInput.value);
+        break;
+      case "html":
+        escapeOutput.value = escapeInput.value
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+        break;
+    }
+  } catch (cause) {
+    error.value = `编码失败：${String(cause)}`;
+  }
+}
+
+function decodeText() {
+  error.value = "";
+  try {
+    switch (encodingKind.value) {
+      case "json":
+        escapeOutput.value = JSON.parse(`"${escapeInput.value}"`);
+        break;
+      case "base64":
+        escapeOutput.value = decodeBase64Utf8(escapeInput.value);
+        break;
+      case "url":
+        escapeOutput.value = decodeURIComponent(escapeInput.value);
+        break;
+      case "html": {
+        const textarea = document.createElement("textarea");
+        textarea.innerHTML = escapeInput.value;
+        escapeOutput.value = textarea.value;
+        break;
+      }
+    }
+  } catch {
+    error.value = `无法解码：请确认输入是合法的${encodingKindLabel(encodingKind.value)}内容`;
+  }
+}
+
+function encodeBase64Utf8(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+  }
+  return btoa(binary);
+}
+
+function decodeBase64Utf8(value: string): string {
+  const binary = atob(value.replace(/\s+/g, ""));
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
+function encodingKindLabel(kind: EncodingKind): string {
+  return {
+    json: "JSON 字符串",
+    base64: "Base64",
+    url: "URL Component",
+    html: "HTML 实体",
+  }[kind];
 }
 
 /** 转义结果回填到输入框，方便连续做「转义 → 反转义」的往返验证。 */
@@ -167,10 +283,10 @@ function switchMode(next: Mode) {
       <span class="service-logo dataformat">{ }</span>
       <div>
         <div class="title-line">
-          <h1>JSON / YAML / TOML 工具箱</h1>
+          <h1>数据格式工具箱</h1>
           <span>LOCAL ONLY</span>
         </div>
-        <p>格式化、互转、差异比较与路径查询，全部在本机完成，内容不出网</p>
+        <p>格式转换、CSV、差异比较、路径查询与常用编码，全部在本机完成</p>
       </div>
     </div>
   </header>
@@ -266,6 +382,76 @@ function switchMode(next: Mode) {
       </div>
     </div>
 
+    <!-- CSV / JSON -->
+    <div v-else-if="mode === 'csv'" class="tool-panel">
+      <div class="tool-controls">
+        <label>
+          转换方向
+          <select v-model="csvDirection" @change="csvResult = null">
+            <option value="csvToJson">CSV → JSON</option>
+            <option value="jsonToCsv">JSON → CSV</option>
+          </select>
+        </label>
+        <label>
+          分隔符
+          <select v-model="csvDelimiter">
+            <option value="comma">逗号 ,</option>
+            <option value="tab">制表符 Tab</option>
+            <option value="semicolon">分号 ;</option>
+            <option value="pipe">竖线 |</option>
+          </select>
+        </label>
+        <button
+          class="primary"
+          type="button"
+          :disabled="csvConverting"
+          @click="runCsvTransform"
+        >
+          <span v-if="csvConverting" class="spinner"></span>
+          {{ csvConverting ? "转换中" : "开始转换" }}
+        </button>
+        <button type="button" @click="loadCsvSample">载入示例</button>
+        <span v-if="csvResult" class="tool-summary">
+          {{ csvResult.rowCount }} 行 · {{ csvResult.columnCount }} 列 ·
+          {{ formatBytes(csvResult.outputBytes) }}
+        </span>
+      </div>
+
+      <div class="tool-split">
+        <div class="tool-pane">
+          <div class="tool-pane-head">
+            <p>{{ csvDirection === "csvToJson" ? "CSV INPUT" : "JSON INPUT" }}</p>
+            <span>{{ formatBytes(csvInput.length) }}</span>
+          </div>
+          <textarea
+            v-model="csvInput"
+            spellcheck="false"
+            :placeholder="csvDirection === 'csvToJson' ? '第一行需要包含表头' : '输入 JSON 对象数组'"
+          ></textarea>
+        </div>
+        <div class="tool-pane">
+          <div class="tool-pane-head">
+            <p>{{ csvDirection === "csvToJson" ? "JSON OUTPUT" : "CSV OUTPUT" }}</p>
+            <button
+              v-if="csvResult"
+              type="button"
+              class="tool-copy"
+              @click="copy(csvResult.output)"
+            >
+              复制
+            </button>
+          </div>
+          <pre v-if="csvResult" class="tool-output">{{ csvResult.output }}</pre>
+          <div v-else class="tool-empty">设置转换方向后点击「开始转换」</div>
+        </div>
+      </div>
+
+      <p class="tool-note">
+        CSV 第一行作为字段名；JSON 必须是对象数组。嵌套对象和数组会保留为紧凑 JSON
+        字符串。单次最多处理 5 MiB、10000 行。
+      </p>
+    </div>
+
     <!-- JSON 差异 -->
     <div v-else-if="mode === 'diff'" class="tool-panel">
       <div class="tool-controls">
@@ -359,11 +545,20 @@ function switchMode(next: Mode) {
       </p>
     </div>
 
-    <!-- 转义 -->
+    <!-- 编码与转义 -->
     <div v-else class="tool-panel">
       <div class="tool-controls">
-        <button class="primary" type="button" @click="runEscape">转义</button>
-        <button type="button" @click="runUnescape">反转义</button>
+        <label>
+          处理类型
+          <select v-model="encodingKind" @change="escapeOutput = ''">
+            <option value="json">JSON 字符串</option>
+            <option value="base64">Base64 UTF-8</option>
+            <option value="url">URL Component</option>
+            <option value="html">HTML 实体</option>
+          </select>
+        </label>
+        <button class="primary" type="button" @click="encodeText">编码</button>
+        <button type="button" @click="decodeText">解码</button>
         <button v-if="escapeOutput" type="button" @click="moveOutputToInput">
           结果放回输入
         </button>
@@ -372,19 +567,24 @@ function switchMode(next: Mode) {
 
       <div class="tool-split">
         <div class="tool-pane">
-          <div class="tool-pane-head"><p>INPUT</p></div>
+          <div class="tool-pane-head">
+            <p>{{ encodingKindLabel(encodingKind).toUpperCase() }} INPUT</p>
+          </div>
           <textarea v-model="escapeInput" spellcheck="false"></textarea>
         </div>
         <div class="tool-pane">
           <div class="tool-pane-head"><p>OUTPUT</p></div>
           <pre v-if="escapeOutput" class="tool-output">{{ escapeOutput }}</pre>
-          <div v-else class="tool-empty">把内容按 JSON 字符串规则转义或还原</div>
+          <div v-else class="tool-empty">
+            选择处理类型，然后对内容进行编码或解码
+          </div>
         </div>
       </div>
 
       <p class="tool-note">
-        转义会把换行、制表符和引号变成 <code>\n</code>、<code>\t</code>、<code>\"</code>，
-        便于把一段文本安全地嵌进 JSON 字符串；反转义是相反的过程。
+        Base64 使用 UTF-8，可正确处理中文；URL 模式使用
+        <code>encodeURIComponent</code>；HTML 模式处理
+        <code>&amp;</code>、<code>&lt;</code>、引号等常用实体。
       </p>
     </div>
   </section>

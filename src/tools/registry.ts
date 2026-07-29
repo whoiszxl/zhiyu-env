@@ -7,6 +7,12 @@ import ClipboardTool from "../components/tools/ClipboardTool.vue";
 import S3BrowserTool from "../components/tools/S3BrowserTool.vue";
 import MockApiTool from "../components/tools/MockApiTool.vue";
 import HttpRequestTool from "../components/tools/HttpRequestTool.vue";
+import RealtimeTool from "../components/tools/RealtimeTool.vue";
+import TimeTool from "../components/tools/TimeTool.vue";
+import RegexTool from "../components/tools/RegexTool.vue";
+import CronTool from "../components/tools/CronTool.vue";
+import QrCodeTool from "../components/tools/QrCodeTool.vue";
+import SshTool from "../components/tools/SshTool.vue";
 import type { ToolDefinition, ToolId } from "./types";
 
 /**
@@ -36,9 +42,51 @@ export const TOOLS: ToolDefinition[] = [
     component: HttpRequestTool,
   },
   {
+    id: "realtime",
+    navLabel: "WebSocket / SSE",
+    navHint: "REALTIME CLIENT",
+    icon: "↯",
+    component: RealtimeTool,
+  },
+  {
+    id: "time",
+    navLabel: "时间与时间戳",
+    navHint: "TIME CONVERTER",
+    icon: "T",
+    component: TimeTool,
+  },
+  {
+    id: "regex",
+    navLabel: "正则表达式调试器",
+    navHint: "REGEX TESTER",
+    icon: ".*",
+    component: RegexTool,
+  },
+  {
+    id: "cron",
+    navLabel: "Cron 表达式",
+    navHint: "SCHEDULE",
+    icon: "C",
+    component: CronTool,
+  },
+  {
+    id: "qrcode",
+    navLabel: "QR Code 工具",
+    navHint: "LOCAL QR",
+    icon: "▦",
+    component: QrCodeTool,
+  },
+  {
+    id: "ssh",
+    navLabel: "SSH 连接管理",
+    navHint: "SECURE SHELL",
+    icon: ">_",
+    component: SshTool,
+  },
+  {
     id: "dataformat",
     navLabel: "数据格式工具箱",
-    navHint: "JSON · YAML · TOML",
+    navHint: "JSON · CSV · ENCODE",
     icon: "{ }",
     component: DataFormatTool,
   },

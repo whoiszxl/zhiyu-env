@@ -98,10 +98,16 @@ export interface DiagnosticRepairResult {
 
 export type ThemeMode = "system" | "light" | "dark";
 export type UiScale = 90 | 100 | 110 | 120;
+export type BackgroundStyle = "off" | "original" | "frosted" | "blur" | "mist";
+export type BackgroundPosition = "center" | "top" | "bottom";
 
 export interface AppSettings {
   themeMode: ThemeMode;
   uiScale: UiScale;
+  backgroundImagePath: string;
+  backgroundStyle: BackgroundStyle;
+  backgroundPosition: BackgroundPosition;
+  backgroundOverlay: number;
   launchAtLogin: boolean;
   keepServicesRunningOnClose: boolean;
   downloadMirror: string;
@@ -475,6 +481,17 @@ export interface TransformResult {
   outputBytes: number;
 }
 
+export type CsvDirection = "csvToJson" | "jsonToCsv";
+export type CsvDelimiter = "comma" | "tab" | "semicolon" | "pipe";
+
+export interface CsvTransformResult {
+  output: string;
+  rowCount: number;
+  columnCount: number;
+  inputBytes: number;
+  outputBytes: number;
+}
+
 export type JsonDiffKind = "added" | "removed" | "changed";
 
 export interface JsonDiffEntry {
@@ -677,4 +694,50 @@ export interface HttpResponseOutput {
   sizeBytes: number;
   truncated: boolean;
   effectiveUrl: string;
+}
+
+export interface QrCodeResult {
+  svg: string;
+  modules: number;
+  contentBytes: number;
+}
+
+// ── SSH 远程连接 ──────────────────────────────────────────
+
+export interface SshProfile {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  identityFile: string;
+  authMethod: "key" | "password";
+  createdAtMillis: number;
+  updatedAtMillis: number;
+}
+
+export interface SshHostKey {
+  host: string;
+  keyType: string;
+  fingerprint: string;
+}
+
+export interface SshCommandResult {
+  success: boolean;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  elapsedMillis: number;
+  truncated: boolean;
+  timedOut: boolean;
+}
+
+export interface SshTerminalConnection {
+  sessionId: string;
+}
+
+export interface SshTerminalEvent {
+  sessionId: string;
+  event: "data" | "closed" | "error";
+  data: string;
 }

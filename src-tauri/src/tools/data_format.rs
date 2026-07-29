@@ -2,10 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 /// JavaScript Number 能精确表示的最大整数（2^53 - 1）。
 /// 超过这个范围的整数传到前端会丢精度，需要提示用户。
 const JS_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+const MAX_CSV_INPUT_BYTES: usize = 5 * 1024 * 1024;
+const MAX_CSV_ROWS: usize = 10_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -49,6 +52,43 @@ pub struct TransformResult {
     pub output_bytes: usize,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CsvDirection {
+    CsvToJson,
+    JsonToCsv,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CsvDelimiter {
+    Comma,
+    Tab,
+    Semicolon,
+    Pipe,
+}
+
+impl CsvDelimiter {
+    fn byte(self) -> u8 {
+        match self {
+            Self::Comma => b',',
+            Self::Tab => b'\t',
+            Self::Semicolon => b';',
+            Self::Pipe => b'|',
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvTransformResult {
+    pub output: String,
+    pub row_count: usize,
+    pub column_count: usize,
+    pub input_bytes: usize,
+    pub output_bytes: usize,
+}
+
 #[tauri::command]
 pub async fn data_format_transform(
     input: String,
@@ -59,6 +99,140 @@ pub async fn data_format_transform(
     tauri::async_runtime::spawn_blocking(move || transform(&input, source, target, style))
         .await
         .map_err(|error| format!("格式转换任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn data_csv_transform(
+    input: String,
+    direction: CsvDirection,
+    delimiter: CsvDelimiter,
+) -> Result<CsvTransformResult, String> {
+    tauri::async_runtime::spawn_blocking(move || transform_csv(&input, direction, delimiter))
+        .await
+        .map_err(|error| format!("CSV 转换任务异常结束: {error}"))?
+}
+
+fn transform_csv(
+    input: &str,
+    direction: CsvDirection,
+    delimiter: CsvDelimiter,
+) -> Result<CsvTransformResult, String> {
+    if input.trim().is_empty() {
+        return Err("请输入需要转换的 CSV 或 JSON".into());
+    }
+    if input.len() > MAX_CSV_INPUT_BYTES {
+        return Err("单次转换内容不能超过 5 MiB".into());
+    }
+
+    let (output, row_count, column_count) = match direction {
+        CsvDirection::CsvToJson => csv_to_json(input, delimiter.byte())?,
+        CsvDirection::JsonToCsv => json_to_csv(input, delimiter.byte())?,
+    };
+    Ok(CsvTransformResult {
+        input_bytes: input.len(),
+        output_bytes: output.len(),
+        output,
+        row_count,
+        column_count,
+    })
+}
+
+fn csv_to_json(input: &str, delimiter: u8) -> Result<(String, usize, usize), String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(delimiter)
+        .flexible(true)
+        .trim(csv::Trim::All)
+        .from_reader(input.as_bytes());
+    let headers = reader
+        .headers()
+        .map_err(|error| format!("CSV 表头解析失败：{error}"))?
+        .clone();
+    if headers.is_empty() {
+        return Err("CSV 第一行必须包含表头".into());
+    }
+
+    let mut rows = Vec::new();
+    for record in reader.records() {
+        if rows.len() >= MAX_CSV_ROWS {
+            return Err("CSV 单次最多转换 10000 行".into());
+        }
+        let record = record.map_err(|error| format!("CSV 数据解析失败：{error}"))?;
+        let mut object = serde_json::Map::new();
+        for (index, header) in headers.iter().enumerate() {
+            object.insert(
+                header.to_string(),
+                Value::String(record.get(index).unwrap_or_default().to_string()),
+            );
+        }
+        rows.push(Value::Object(object));
+    }
+    let row_count = rows.len();
+    let output =
+        serde_json::to_string_pretty(&rows).map_err(|error| format!("JSON 序列化失败：{error}"))?;
+    Ok((output, row_count, headers.len()))
+}
+
+fn json_to_csv(input: &str, delimiter: u8) -> Result<(String, usize, usize), String> {
+    let value: Value =
+        serde_json::from_str(input).map_err(|error| format!("JSON 解析失败：{error}"))?;
+    let rows = value
+        .as_array()
+        .ok_or_else(|| "转换 CSV 时，JSON 顶层必须是对象数组".to_string())?;
+    if rows.len() > MAX_CSV_ROWS {
+        return Err("JSON 单次最多转换 10000 行".into());
+    }
+    if rows.iter().any(|row| !row.is_object()) {
+        return Err("JSON 数组中的每一项都必须是对象".into());
+    }
+
+    let mut columns = Vec::new();
+    let mut seen = BTreeSet::new();
+    for row in rows {
+        if let Some(object) = row.as_object() {
+            for key in object.keys() {
+                if seen.insert(key.clone()) {
+                    columns.push(key.clone());
+                }
+            }
+        }
+    }
+    if columns.is_empty() {
+        return Err("JSON 对象中没有可转换的字段".into());
+    }
+
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(delimiter)
+        .from_writer(Vec::new());
+    writer
+        .write_record(&columns)
+        .map_err(|error| format!("CSV 表头写入失败：{error}"))?;
+    for row in rows {
+        let object = row.as_object().expect("上方已验证为对象");
+        let record = columns
+            .iter()
+            .map(|column| value_to_csv_cell(object.get(column)))
+            .collect::<Result<Vec<_>, _>>()?;
+        writer
+            .write_record(record)
+            .map_err(|error| format!("CSV 数据写入失败：{error}"))?;
+    }
+    let bytes = writer
+        .into_inner()
+        .map_err(|error| format!("CSV 输出失败：{}", error.error()))?;
+    let output =
+        String::from_utf8(bytes).map_err(|error| format!("CSV UTF-8 输出失败：{error}"))?;
+    Ok((output, rows.len(), columns.len()))
+}
+
+fn value_to_csv_cell(value: Option<&Value>) -> Result<String, String> {
+    match value {
+        None | Some(Value::Null) => Ok(String::new()),
+        Some(Value::String(value)) => Ok(value.clone()),
+        Some(Value::Bool(value)) => Ok(value.to_string()),
+        Some(Value::Number(value)) => Ok(value.to_string()),
+        Some(value @ (Value::Array(_) | Value::Object(_))) => serde_json::to_string(value)
+            .map_err(|error| format!("嵌套 JSON 字段序列化失败：{error}")),
+    }
 }
 
 fn transform(
@@ -364,5 +538,46 @@ mod tests {
         .expect_err("空输入应当报错");
 
         assert!(error.contains("请输入"));
+    }
+
+    #[test]
+    fn converts_csv_to_json_with_selected_delimiter() {
+        let result = transform_csv(
+            "name;age\n张三;28\n李四;31\n",
+            CsvDirection::CsvToJson,
+            CsvDelimiter::Semicolon,
+        )
+        .expect("CSV 应当转换成功");
+
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.column_count, 2);
+        assert!(result.output.contains("\"name\": \"张三\""));
+    }
+
+    #[test]
+    fn converts_json_objects_to_csv_and_keeps_nested_values() {
+        let result = transform_csv(
+            r#"[{"name":"张三","tags":["a","b"]},{"name":"李四","age":31}]"#,
+            CsvDirection::JsonToCsv,
+            CsvDelimiter::Comma,
+        )
+        .expect("JSON 应当转换成功");
+
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.column_count, 3);
+        assert!(result.output.starts_with("name,tags,age"));
+        assert!(result.output.contains("[\"\"a\"\",\"\"b\"\"]"));
+    }
+
+    #[test]
+    fn rejects_non_array_json_for_csv_output() {
+        let error = transform_csv(
+            r#"{"name":"张三"}"#,
+            CsvDirection::JsonToCsv,
+            CsvDelimiter::Comma,
+        )
+        .expect_err("对象不能直接转换为 CSV");
+
+        assert!(error.contains("对象数组"));
     }
 }

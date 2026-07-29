@@ -11,10 +11,12 @@ mod mock_tools;
 mod mongodb_tools;
 mod nats_tools;
 mod port_tools;
+mod qr_tools;
 mod redis_tools;
 mod s3_tools;
 mod settings;
 mod sqlite_tools;
+mod ssh_tools;
 mod storage_tools;
 mod tools;
 mod tray;
@@ -52,6 +54,7 @@ pub fn run() {
         .manage(clipboard::commands::ClipboardState(std::sync::Mutex::new(
             None,
         )))
+        .manage(ssh_tools::SshTerminalState::default())
         .setup(|app| {
             let settings = settings::load_settings();
             let _ = settings::apply_log_retention(&settings);
@@ -88,6 +91,8 @@ pub fn run() {
             commands::open_url,
             settings::app_settings_get,
             settings::app_settings_save,
+            settings::app_background_import,
+            settings::app_background_remove,
             settings::app_update_check,
             commands::service_config_read,
             commands::service_config_save,
@@ -155,6 +160,7 @@ pub fn run() {
             sqlite_tools::sqlite_tables,
             sqlite_tools::sqlite_execute,
             tools::data_format::data_format_transform,
+            tools::data_format::data_csv_transform,
             tools::json_diff::data_json_diff,
             tools::json_path::data_jsonpath_query,
             tools::jwt::jwt_decode,
@@ -189,6 +195,18 @@ pub fn run() {
             mock_tools::mock_api_stop,
             mock_tools::mock_api_clear_requests,
             http_tools::http_request_execute,
+            qr_tools::qr_code_generate,
+            ssh_tools::ssh_profiles_list,
+            ssh_tools::ssh_profile_save,
+            ssh_tools::ssh_profile_delete,
+            ssh_tools::ssh_host_key_preview,
+            ssh_tools::ssh_host_key_trust,
+            ssh_tools::ssh_connection_test,
+            ssh_tools::ssh_command_execute,
+            ssh_tools::ssh_terminal_connect,
+            ssh_tools::ssh_terminal_input,
+            ssh_tools::ssh_terminal_resize,
+            ssh_tools::ssh_terminal_disconnect,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Zhiyu");

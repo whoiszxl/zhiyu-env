@@ -107,6 +107,14 @@ export function saveAppSettings(settings: AppSettings): Promise<AppSettings> {
   return invoke<AppSettings>("app_settings_save", { settings });
 }
 
+export function importAppBackground(sourcePath: string): Promise<string> {
+  return invoke<string>("app_background_import", { sourcePath });
+}
+
+export function removeAppBackground(): Promise<void> {
+  return invoke<void>("app_background_remove");
+}
+
 export function checkAppUpdate(): Promise<UpdateStatus> {
   return invoke<UpdateStatus>("app_update_check");
 }

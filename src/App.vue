@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { computed, onMounted, onUnmounted, provide, ref } from "vue";
 import ServiceDocs from "./components/ServiceDocs.vue";
 import ServiceConnectPanel from "./components/ServiceConnectPanel.vue";
+import SshTool from "./components/tools/SshTool.vue";
 import { findTool, TOOLS } from "./tools/registry";
 import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
 import { formatBytes } from "./utils/format";
@@ -25,6 +26,7 @@ import {
   getEnvironmentDiskUsage,
   getEnvironmentMetrics,
   getAppSettings,
+  importAppBackground,
   getMailpitMessageDetail,
   getMailpitOverview,
   getMeilisearchOverview,
@@ -65,6 +67,7 @@ import {
   runAppDiagnostics,
   runServiceAction,
   saveAppSettings,
+  removeAppBackground,
   restoreServiceBackup,
   saveServiceConfig,
   scanRedisKeys,
@@ -80,6 +83,8 @@ import {
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
   AppSettings,
+  BackgroundPosition,
+  BackgroundStyle,
   ThemeMode,
   UiScale,
   DatabaseInfo,
@@ -224,6 +229,7 @@ type VersionUninstallTarget = {
 const services = ref<ServiceInfo[]>([]);
 const selectedKind = ref<ServiceKind>("redis");
 const activeTool = ref<ToolId | null>(null);
+const sshToolMounted = ref(false);
 const dashboardActive = ref(true);
 const settingsActive = ref(false);
 const activeToolDefinition = computed(() => findTool(activeTool.value));
@@ -253,6 +259,10 @@ const diagnosticReport = ref<DiagnosticReport | null>(null);
 const appSettings = ref<AppSettings>({
   themeMode: "system",
   uiScale: 100,
+  backgroundImagePath: "",
+  backgroundStyle: "off",
+  backgroundPosition: "center",
+  backgroundOverlay: 58,
   launchAtLogin: false,
   keepServicesRunningOnClose: true,
   downloadMirror: "",
@@ -272,6 +282,47 @@ const uiScaleOptions: Array<{ value: UiScale; label: string }> = [
   { value: 110, label: "大" },
   { value: 120, label: "特大" },
 ];
+const backgroundStyleOptions: Array<{
+  value: Exclude<BackgroundStyle, "off">;
+  label: string;
+  description: string;
+}> = [
+  { value: "original", label: "原图", description: "保留图片细节与色彩" },
+  { value: "frosted", label: "磨砂", description: "轻柔玻璃质感，推荐" },
+  { value: "blur", label: "高斯模糊", description: "弱化细节，专注内容" },
+  { value: "mist", label: "雾气", description: "低饱和柔雾氛围" },
+];
+const backgroundPositionOptions: Array<{
+  value: BackgroundPosition;
+  label: string;
+}> = [
+  { value: "top", label: "顶部" },
+  { value: "center", label: "居中" },
+  { value: "bottom", label: "底部" },
+];
+const backgroundImporting = ref(false);
+const visualSettings = computed(() =>
+  settingsActive.value ? settingsDraft.value : appSettings.value,
+);
+const hasCustomBackground = computed(
+  () =>
+    Boolean(visualSettings.value.backgroundImagePath) &&
+    visualSettings.value.backgroundStyle !== "off",
+);
+const backgroundImageUrl = computed(() =>
+  visualSettings.value.backgroundImagePath
+    ? convertFileSrc(visualSettings.value.backgroundImagePath)
+    : "",
+);
+const backgroundShellStyle = computed<Record<string, string>>(() => ({
+  "--app-background-image": backgroundImageUrl.value
+    ? `url("${backgroundImageUrl.value}")`
+    : "none",
+  "--app-background-position": visualSettings.value.backgroundPosition,
+  "--app-background-overlay": String(
+    visualSettings.value.backgroundOverlay / 100,
+  ),
+}));
 const settingsSaving = ref(false);
 let settingsSaveQueued = false;
 const allCacheCleaning = ref(false);
@@ -1347,6 +1398,59 @@ function previewUiScale(scale: UiScale) {
   void saveSettings();
 }
 
+async function chooseAppBackground() {
+  if (backgroundImporting.value) return;
+  const selected = await open({
+    multiple: false,
+    title: "选择智屿背景图",
+    filters: [
+      {
+        name: "图片",
+        extensions: ["png", "jpg", "jpeg", "webp"],
+      },
+    ],
+  });
+  if (typeof selected !== "string") return;
+
+  backgroundImporting.value = true;
+  error.value = "";
+  try {
+    settingsDraft.value.backgroundImagePath =
+      await importAppBackground(selected);
+    if (settingsDraft.value.backgroundStyle === "off") {
+      settingsDraft.value.backgroundStyle = "frosted";
+    }
+    await saveSettings();
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    backgroundImporting.value = false;
+  }
+}
+
+function selectBackgroundStyle(style: BackgroundStyle) {
+  settingsDraft.value.backgroundStyle = style;
+  void saveSettings();
+}
+
+function selectBackgroundPosition(position: BackgroundPosition) {
+  settingsDraft.value.backgroundPosition = position;
+  void saveSettings();
+}
+
+async function clearAppBackground() {
+  if (!settingsDraft.value.backgroundImagePath) return;
+  error.value = "";
+  try {
+    await removeAppBackground();
+    settingsDraft.value.backgroundImagePath = "";
+    settingsDraft.value.backgroundStyle = "off";
+    await saveSettings();
+  } catch (cause) {
+    error.value = String(cause);
+  }
+}
+
 async function openSettings() {
   if (settingsActive.value) return;
   dashboardActive.value = false;
@@ -1659,6 +1763,9 @@ async function restoreBackup(backup: ServiceBackup) {
 function selectTool(id: ToolId) {
   dashboardActive.value = false;
   settingsActive.value = false;
+  if (id === "ssh") {
+    sshToolMounted.value = true;
+  }
   activeTool.value = id;
   notice.value = "";
   error.value = "";
@@ -3172,7 +3279,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app-layout">
+  <div
+    class="app-layout"
+    :class="[
+      `background-${visualSettings.backgroundStyle}`,
+      { 'has-custom-background': hasCustomBackground },
+    ]"
+    :style="backgroundShellStyle"
+  >
+    <div v-if="hasCustomBackground" class="app-background-image"></div>
+    <div v-if="hasCustomBackground" class="app-background-veil"></div>
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark"><span></span><span></span><span></span></div>
@@ -3361,6 +3477,14 @@ onUnmounted(() => {
         </button>
       </section>
 
+      <div
+        v-if="sshToolMounted"
+        v-show="activeTool === 'ssh' && !loading"
+        class="persistent-tool-host"
+      >
+        <SshTool :visible="activeTool === 'ssh' && !loading" />
+      </div>
+
       <div v-if="loading" class="page-loading">正在读取服务状态…</div>
 
       <section v-else-if="settingsActive" class="settings-page">
@@ -3452,6 +3576,136 @@ onUnmounted(() => {
                   </span>
                   <strong>{{ option.label }}</strong>
                   <small>{{ option.value }}%</small>
+                </button>
+              </div>
+            </div>
+            <div class="background-setting">
+              <div class="background-setting-head">
+                <div>
+                  <strong>应用背景</strong>
+                  <small>图片只保存在本机，不会上传或写入项目目录</small>
+                </div>
+                <div class="background-actions">
+                  <button
+                    v-if="settingsDraft.backgroundImagePath"
+                    type="button"
+                    class="background-remove"
+                    @click="clearAppBackground"
+                  >
+                    移除
+                  </button>
+                  <button
+                    type="button"
+                    class="background-upload"
+                    :disabled="backgroundImporting"
+                    @click="chooseAppBackground"
+                  >
+                    <span v-if="backgroundImporting" class="spinner"></span>
+                    {{
+                      settingsDraft.backgroundImagePath
+                        ? "更换图片"
+                        : "选择图片"
+                    }}
+                  </button>
+                </div>
+              </div>
+
+              <div
+                class="background-preview"
+                :class="[
+                  `preview-${settingsDraft.backgroundStyle}`,
+                  { empty: !settingsDraft.backgroundImagePath },
+                ]"
+                :style="{
+                  backgroundImage: settingsDraft.backgroundImagePath
+                    ? `url('${backgroundImageUrl}')`
+                    : undefined,
+                  backgroundPosition: settingsDraft.backgroundPosition,
+                }"
+              >
+                <div v-if="!settingsDraft.backgroundImagePath" class="background-empty">
+                  <span>▧</span>
+                  <strong>选择一张喜欢的图片</strong>
+                  <small>支持 PNG、JPEG、WebP，最大 15 MiB</small>
+                </div>
+                <template v-else>
+                  <div class="background-preview-veil"></div>
+                  <div class="background-preview-window">
+                    <i></i><i></i><i></i>
+                    <span></span>
+                    <b></b>
+                  </div>
+                </template>
+              </div>
+
+              <div class="background-style-options">
+                <button
+                  v-for="option in backgroundStyleOptions"
+                  :key="option.value"
+                  type="button"
+                  :disabled="!settingsDraft.backgroundImagePath"
+                  :class="{
+                    selected: settingsDraft.backgroundStyle === option.value,
+                  }"
+                  @click="selectBackgroundStyle(option.value)"
+                >
+                  <span :class="`style-swatch ${option.value}`"></span>
+                  <strong>{{ option.label }}</strong>
+                  <small>{{ option.description }}</small>
+                </button>
+              </div>
+
+              <div
+                v-if="settingsDraft.backgroundImagePath"
+                class="background-fine-tuning"
+              >
+                <div class="background-position-control">
+                  <span>图片位置</span>
+                  <div role="radiogroup" aria-label="背景图片位置">
+                    <button
+                      v-for="option in backgroundPositionOptions"
+                      :key="option.value"
+                      type="button"
+                      :class="{
+                        selected:
+                          settingsDraft.backgroundPosition === option.value,
+                      }"
+                      @click="selectBackgroundPosition(option.value)"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
+                </div>
+                <label class="background-overlay-control">
+                  <span>
+                    <strong>内容遮罩</strong>
+                    <small>{{ settingsDraft.backgroundOverlay }}%</small>
+                  </span>
+                  <input
+                    v-model.number="settingsDraft.backgroundOverlay"
+                    type="range"
+                    min="20"
+                    max="90"
+                    step="1"
+                    @change="saveSettings"
+                  />
+                </label>
+                <button
+                  type="button"
+                  class="background-disable"
+                  @click="
+                    selectBackgroundStyle(
+                      settingsDraft.backgroundStyle === 'off'
+                        ? 'frosted'
+                        : 'off',
+                    )
+                  "
+                >
+                  {{
+                    settingsDraft.backgroundStyle === "off"
+                      ? "显示背景"
+                      : "暂时关闭背景"
+                  }}
                 </button>
               </div>
             </div>
@@ -3890,6 +4144,8 @@ onUnmounted(() => {
           </div>
         </div>
       </section>
+
+      <template v-else-if="activeTool === 'ssh'"></template>
 
       <component
         :is="activeToolDefinition.component"

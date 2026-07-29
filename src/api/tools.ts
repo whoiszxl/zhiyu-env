@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   DataFormat,
+  CsvDelimiter,
+  CsvDirection,
+  CsvTransformResult,
   HmacAlgorithm,
   JsonDiffResult,
   JsonPathResult,
@@ -23,6 +26,11 @@ import type {
   MockRoute,
   HttpRequestInput,
   HttpResponseOutput,
+  QrCodeResult,
+  SshCommandResult,
+  SshHostKey,
+  SshProfile,
+  SshTerminalConnection,
 } from "../types";
 
 export function transformDataFormat(
@@ -36,6 +44,18 @@ export function transformDataFormat(
     source,
     target,
     style,
+  });
+}
+
+export function transformCsv(
+  input: string,
+  direction: CsvDirection,
+  delimiter: CsvDelimiter,
+): Promise<CsvTransformResult> {
+  return invoke<CsvTransformResult>("data_csv_transform", {
+    input,
+    direction,
+    delimiter,
   });
 }
 
@@ -194,4 +214,103 @@ export function executeHttpRequest(
   request: HttpRequestInput,
 ): Promise<HttpResponseOutput> {
   return invoke<HttpResponseOutput>("http_request_execute", { request });
+}
+
+export function generateQrCode(
+  content: string,
+  errorCorrection: string,
+  size: number,
+): Promise<QrCodeResult> {
+  return invoke<QrCodeResult>("qr_code_generate", {
+    content,
+    errorCorrection,
+    size,
+  });
+}
+
+export function listSshProfiles(): Promise<SshProfile[]> {
+  return invoke<SshProfile[]>("ssh_profiles_list");
+}
+
+export function saveSshProfile(profile: SshProfile): Promise<SshProfile> {
+  return invoke<SshProfile>("ssh_profile_save", { profile });
+}
+
+export function deleteSshProfile(id: string): Promise<void> {
+  return invoke<void>("ssh_profile_delete", { id });
+}
+
+export function previewSshHostKey(profileId: string): Promise<SshHostKey> {
+  return invoke<SshHostKey>("ssh_host_key_preview", { profileId });
+}
+
+export function trustSshHostKey(
+  profileId: string,
+  expectedFingerprint: string,
+): Promise<SshHostKey> {
+  return invoke<SshHostKey>("ssh_host_key_trust", {
+    profileId,
+    expectedFingerprint,
+  });
+}
+
+export function testSshConnection(
+  profileId: string,
+  password?: string,
+): Promise<SshCommandResult> {
+  return invoke<SshCommandResult>("ssh_connection_test", {
+    profileId,
+    password: password || null,
+  });
+}
+
+export function executeSshCommand(
+  profileId: string,
+  command: string,
+  timeoutSeconds: number,
+  password?: string,
+): Promise<SshCommandResult> {
+  return invoke<SshCommandResult>("ssh_command_execute", {
+    profileId,
+    command,
+    timeoutSeconds,
+    password: password || null,
+  });
+}
+
+export function connectSshTerminal(
+  sessionId: string,
+  profileId: string,
+  columns: number,
+  rows: number,
+): Promise<SshTerminalConnection> {
+  return invoke<SshTerminalConnection>("ssh_terminal_connect", {
+    sessionId,
+    profileId,
+    columns,
+    rows,
+  });
+}
+
+export function writeSshTerminal(
+  sessionId: string,
+  data: string,
+): Promise<void> {
+  return invoke<void>("ssh_terminal_input", { sessionId, data });
+}
+
+export function resizeSshTerminal(
+  sessionId: string,
+  columns: number,
+  rows: number,
+): Promise<void> {
+  return invoke<void>("ssh_terminal_resize", {
+    sessionId,
+    columns,
+    rows,
+  });
+}
+
+export function disconnectSshTerminal(sessionId: string): Promise<void> {
+  return invoke<void>("ssh_terminal_disconnect", { sessionId });
 }

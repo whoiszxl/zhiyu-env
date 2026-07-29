@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,6 +11,10 @@ use tauri_plugin_autostart::ManagerExt;
 pub struct AppSettings {
     pub theme_mode: String,
     pub ui_scale: u8,
+    pub background_image_path: String,
+    pub background_style: String,
+    pub background_position: String,
+    pub background_overlay: u8,
     pub launch_at_login: bool,
     pub keep_services_running_on_close: bool,
     pub download_mirror: String,
@@ -29,6 +33,10 @@ impl Default for AppSettings {
         Self {
             theme_mode: "system".into(),
             ui_scale: 100,
+            background_image_path: String::new(),
+            background_style: "off".into(),
+            background_position: "center".into(),
+            background_overlay: 58,
             launch_at_login: false,
             keep_services_running_on_close: true,
             download_mirror: String::new(),
@@ -121,6 +129,21 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
     validate_theme_mode(&settings.theme_mode)?;
     if !matches!(settings.ui_scale, 90 | 100 | 110 | 120) {
         return Err("界面字号只支持 90%、100%、110% 或 120%".into());
+    }
+    if !matches!(
+        settings.background_style.as_str(),
+        "off" | "original" | "frosted" | "blur" | "mist"
+    ) {
+        return Err("背景显示风格不受支持".into());
+    }
+    if !matches!(
+        settings.background_position.as_str(),
+        "center" | "top" | "bottom"
+    ) {
+        return Err("背景位置不受支持".into());
+    }
+    if !(20..=90).contains(&settings.background_overlay) {
+        return Err("背景遮罩强度必须在 20% 到 90% 之间".into());
     }
     settings.download_mirror = settings
         .download_mirror
@@ -228,6 +251,86 @@ pub async fn app_settings_save(
     })
     .await
     .map_err(|error| format!("设置保存任务异常结束: {error}"))?
+}
+
+const MAX_BACKGROUND_BYTES: u64 = 15 * 1024 * 1024;
+
+fn background_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|path| path.join("appearance"))
+        .map_err(|error| format!("无法确定应用配置目录: {error}"))
+}
+
+fn detect_background_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("jpg")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
+fn remove_managed_backgrounds(directory: &Path, except: Option<&Path>) -> Result<(), String> {
+    if !directory.exists() {
+        return Ok(());
+    }
+    for extension in ["png", "jpg", "webp", "tmp"] {
+        let path = directory.join(format!("background.{extension}"));
+        if except.is_some_and(|kept| kept == path) || !path.exists() {
+            continue;
+        }
+        fs::remove_file(&path)
+            .map_err(|error| format!("无法删除旧背景图 {}: {error}", path.display()))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn app_background_import(app: AppHandle, source_path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let source =
+            fs::canonicalize(source_path).map_err(|error| format!("无法读取所选图片: {error}"))?;
+        let metadata =
+            fs::metadata(&source).map_err(|error| format!("无法读取图片信息: {error}"))?;
+        if !metadata.is_file() {
+            return Err("请选择一个图片文件".into());
+        }
+        if metadata.len() > MAX_BACKGROUND_BYTES {
+            return Err("背景图不能超过 15 MiB".into());
+        }
+
+        let bytes = fs::read(&source).map_err(|error| format!("无法读取图片: {error}"))?;
+        let extension = detect_background_extension(&bytes)
+            .ok_or_else(|| "仅支持 PNG、JPEG 和 WebP 图片".to_string())?;
+        let directory = background_directory(&app)?;
+        fs::create_dir_all(&directory).map_err(|error| format!("无法创建背景图目录: {error}"))?;
+
+        let temporary = directory.join("background.tmp");
+        let destination = directory.join(format!("background.{extension}"));
+        fs::write(&temporary, bytes).map_err(|error| format!("无法复制背景图: {error}"))?;
+        if destination.exists() {
+            fs::remove_file(&destination).map_err(|error| format!("无法替换背景图: {error}"))?;
+        }
+        fs::rename(&temporary, &destination).map_err(|error| format!("无法保存背景图: {error}"))?;
+        remove_managed_backgrounds(&directory, Some(&destination))?;
+        Ok(destination.display().to_string())
+    })
+    .await
+    .map_err(|error| format!("背景图导入任务异常结束: {error}"))?
+}
+
+#[tauri::command]
+pub async fn app_background_remove(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let directory = background_directory(&app)?;
+        remove_managed_backgrounds(&directory, None)
+    })
+    .await
+    .map_err(|error| format!("背景图清理任务异常结束: {error}"))?
 }
 
 pub(crate) fn apply_log_retention(settings: &AppSettings) -> Result<u32, String> {
@@ -383,7 +486,42 @@ mod tests {
         .unwrap();
         assert_eq!(settings.theme_mode, "system");
         assert_eq!(settings.ui_scale, 100);
+        assert_eq!(settings.background_style, "off");
+        assert_eq!(settings.background_position, "center");
+        assert_eq!(settings.background_overlay, 58);
         assert!(!settings.onboarding_completed);
+    }
+
+    #[test]
+    fn background_image_formats_are_detected_by_content() {
+        assert_eq!(
+            detect_background_extension(b"\x89PNG\r\n\x1a\nrest"),
+            Some("png")
+        );
+        assert_eq!(
+            detect_background_extension(b"\xff\xd8\xff\xe0rest"),
+            Some("jpg")
+        );
+        assert_eq!(
+            detect_background_extension(b"RIFF1234WEBPrest"),
+            Some("webp")
+        );
+        assert_eq!(detect_background_extension(b"not an image"), None);
+    }
+
+    #[test]
+    fn invalid_background_preferences_are_rejected() {
+        let mut settings = AppSettings {
+            background_style: "neon".into(),
+            ..AppSettings::default()
+        };
+        assert!(validate(&mut settings).is_err());
+
+        let mut settings = AppSettings {
+            background_overlay: 10,
+            ..AppSettings::default()
+        };
+        assert!(validate(&mut settings).is_err());
     }
 
     #[test]

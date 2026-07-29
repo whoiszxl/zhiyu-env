@@ -32,13 +32,16 @@ serde_norway.workspace = true
 sha2.workspace = true
 sha1 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
-tauri = { version = "2", features = ["tray-icon"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+russh = { version = "0.62.4", default-features = false, features = ["ring"] }
+portable-pty = "0.9"
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 time = { version = "0.3", features = ["formatting"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-global-shortcut = "2"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "net", "rt-multi-thread"] }
 toml.workspace = true
 
 [dev-dependencies]
