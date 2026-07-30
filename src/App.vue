@@ -265,6 +265,9 @@ const settingsActive = ref(false);
 const aiChatOpen = ref(false);
 const commandPaletteOpen = ref(false);
 const commandBusyId = ref("");
+const dashboardPendingActions = ref<
+  Partial<Record<ServiceKind, "start" | "stop">>
+>({});
 const commandProjects = ref<RuntimeProject[]>([]);
 type SettingsTab =
   | "appearance"
@@ -678,8 +681,13 @@ const orderedVisibleTools = computed(() => {
 const sidebarDevelopment = computed(() =>
   orderedVisibleTools.value.filter((tool) => tool.group === "development"),
 );
+const sidebarServiceTools = computed(() =>
+  orderedVisibleTools.value.filter((tool) => tool.group === "service"),
+);
 const sidebarTools = computed(() =>
-  orderedVisibleTools.value.filter((tool) => tool.group !== "development"),
+  orderedVisibleTools.value.filter(
+    (tool) => tool.group !== "development" && tool.group !== "service",
+  ),
 );
 const commandPaletteItems = computed<CommandPaletteItem[]>(() => {
   const navigationGroup = t("commandPalette.groups.navigation");
@@ -720,7 +728,7 @@ const commandPaletteItems = computed<CommandPaletteItem[]>(() => {
       id: `tool:${tool.id}`,
       label: t(`tools.${tool.id}.label`),
       hint: t(`tools.${tool.id}.hint`),
-      group: toolGroup,
+      group: tool.group === "service" ? serviceGroup : toolGroup,
       icon: tool.icon,
       keywords: `${tool.navLabel} ${tool.navHint}`,
     });
@@ -782,6 +790,12 @@ const settingsOrderedTools = computed(() =>
     (tool) => tool.id,
     settingsDraft.value.toolOrder,
   ),
+);
+const settingsOrderedServiceTools = computed(() =>
+  settingsOrderedTools.value.filter((tool) => tool.group === "service"),
+);
+const settingsOrderedUtilityTools = computed(() =>
+  settingsOrderedTools.value.filter((tool) => tool.group !== "service"),
 );
 const draggingSidebarItem = ref<{
   group: "services" | "tools";
@@ -1066,7 +1080,7 @@ const aiAssistOptions = ref<AiAssistOption[]>([]);
 const notice = ref("");
 const error = ref("");
 const installTask = ref<InstallTask | null>(null);
-const installLogExpanded = ref(true);
+const installLogExpanded = ref(false);
 const installCancelling = ref(false);
 let serviceTimer: number | undefined;
 let metricTimer: number | undefined;
@@ -1328,7 +1342,7 @@ function startInstallTask(kind: string, title: string) {
     status: "running",
     logs: [],
   };
-  installLogExpanded.value = true;
+  installLogExpanded.value = false;
   return operationId;
 }
 
@@ -1345,6 +1359,7 @@ function recordInstallFailure(operationId: string, cause: unknown) {
   const message = String(cause);
   task.status = "failed";
   task.stage = "安装失败";
+  installLogExpanded.value = false;
   task.logs.push({
     time: new Date().toLocaleTimeString(resolvedLocale.value, { hour12: false }),
     stage: "安装失败",
@@ -1378,6 +1393,7 @@ function recordInstallSuccess(operationId: string) {
   task.status = "completed";
   task.percent = 100;
   task.stage = "安装完成";
+  installLogExpanded.value = false;
   task.logs.push({
     time: new Date().toLocaleTimeString(resolvedLocale.value, { hour12: false }),
     stage: "安装完成",
@@ -1400,6 +1416,9 @@ function handleInstallProgress(payload: InstallProgressPayload) {
   }
   task.stage = payload.stage;
   task.status = payload.status;
+  if (payload.status !== "running") {
+    installLogExpanded.value = false;
+  }
   task.logs.push({
     time: new Date().toLocaleTimeString(resolvedLocale.value, { hour12: false }),
     stage: payload.stage,
@@ -2733,6 +2752,131 @@ async function stopAllServices() {
     error.value = `${targets.length - failed} 个服务已停止，${failed} 个服务停止失败`;
   } else {
     notice.value = `已停止 ${targets.length} 个服务`;
+  }
+}
+
+function dashboardServiceBusy(service: ServiceInfo) {
+  return Boolean(
+    dashboardPendingActions.value[service.kind] ||
+      (selectedKind.value === service.kind && pendingAction.value),
+  );
+}
+
+function dashboardServiceSwitchTitle(service: ServiceInfo) {
+  const action = dashboardPendingActions.value[service.kind];
+  if (action === "start") return `正在启动 ${service.name}`;
+  if (action === "stop") return `正在停止 ${service.name}`;
+  if (service.status === "not_installed") return `${service.name} 尚未安装`;
+  return service.status === "running"
+    ? `停止 ${service.name}`
+    : `启动 ${service.name}`;
+}
+
+async function toggleDashboardService(service: ServiceInfo) {
+  if (
+    service.status === "not_installed" ||
+    dashboardServiceBusy(service)
+  ) {
+    return;
+  }
+  const action: "start" | "stop" =
+    service.status === "running" ? "stop" : "start";
+  const toastKey = `service:${service.kind}:lifecycle`;
+  dashboardPendingActions.value = {
+    ...dashboardPendingActions.value,
+    [service.kind]: action,
+  };
+  showToast({
+    key: toastKey,
+    intent: "progress",
+    title: t(`serviceToast.${action}Progress`, { service: service.name }),
+    duration: 0,
+  });
+  try {
+    const updated = await runServiceAction(action, service.kind);
+    const index = services.value.findIndex(
+      (item) => item.kind === updated.kind,
+    );
+    if (index >= 0) services.value[index] = updated;
+    const successMessage = t(`serviceToast.${action}Success`, {
+      service: service.name,
+    });
+    showToast({
+      key: toastKey,
+      intent: "success",
+      title: successMessage,
+    });
+    recordActivity(
+      updated,
+      action === "start" ? "启动" : "停止",
+      true,
+      successMessage,
+    );
+    await Promise.all([
+      refreshEnvironmentMetrics(),
+      refreshPortListeners(),
+    ]);
+  } catch (cause) {
+    const message = String(cause);
+    if (
+      action === "stop" &&
+      message.includes("did not stop within") &&
+      window.confirm(
+        `${service.name} 未能在正常停止时限内退出，是否强制停止？\n\n强制停止可能导致尚未落盘的数据丢失。`,
+      )
+    ) {
+      try {
+        const updated = await forceStopService(service.kind);
+        const index = services.value.findIndex(
+          (item) => item.kind === updated.kind,
+        );
+        if (index >= 0) services.value[index] = updated;
+        const successMessage = t("serviceToast.forceStopSuccess", {
+          service: service.name,
+        });
+        showToast({
+          key: toastKey,
+          intent: "success",
+          title: successMessage,
+        });
+        recordActivity(updated, "强制停止", true, successMessage);
+        await Promise.all([
+          refreshEnvironmentMetrics(),
+          refreshPortListeners(),
+        ]);
+        return;
+      } catch (forceCause) {
+        const forceMessage = String(forceCause);
+        showToast({
+          key: toastKey,
+          intent: "error",
+          title: t("serviceToast.forceStopFailed", {
+            service: service.name,
+          }),
+          message: forceMessage,
+          duration: 0,
+        });
+        recordActivity(service, "强制停止", false, forceMessage);
+        return;
+      }
+    }
+    showToast({
+      key: toastKey,
+      intent: "error",
+      title: t(`serviceToast.${action}Failed`, { service: service.name }),
+      message,
+      duration: 0,
+    });
+    recordActivity(
+      service,
+      action === "start" ? "启动" : "停止",
+      false,
+      message,
+    );
+  } finally {
+    const next = { ...dashboardPendingActions.value };
+    delete next[service.kind];
+    dashboardPendingActions.value = next;
   }
 }
 
@@ -4817,6 +4961,26 @@ onUnmounted(() => {
           </span>
           <i class="nav-state" :class="service.status"></i>
         </button>
+        <button
+          v-for="tool in sidebarServiceTools"
+          :key="tool.id"
+          type="button"
+          class="service-nav-item"
+          :class="{
+            active:
+              !dashboardActive &&
+              !settingsActive &&
+              activeTool === tool.id,
+          }"
+          @click="selectTool(tool.id)"
+        >
+          <span class="nav-icon" :class="tool.id">{{ tool.icon }}</span>
+          <span class="nav-copy">
+            <strong>{{ t(`tools.${tool.id}.label`) }}</strong>
+            <small>{{ t(`tools.${tool.id}.hint`) }}</small>
+          </span>
+          <span class="nav-connection-badge">{{ tool.badge ?? "SVC" }}</span>
+        </button>
 
         <p
           v-if="sidebarDevelopment.length"
@@ -4934,7 +5098,12 @@ onUnmounted(() => {
         >
           <span class="install-progress-state"></span>
           <strong>{{ installTask.title }}</strong>
-          <span class="install-progress-stage">{{ installTask.stage }}</span>
+          <span
+            class="install-progress-stage"
+            :title="latestInstallLog?.message ?? installTask.stage"
+          >
+            {{ latestInstallLog?.message ?? installTask.stage }}
+          </span>
           <span class="install-progress-value">
             {{
               installTask.status === "completed"
@@ -4953,11 +5122,6 @@ onUnmounted(() => {
         <div class="install-progress-track">
           <span :style="{ width: `${installTask.percent}%` }"></span>
         </div>
-        <p v-if="latestInstallLog" class="install-log-preview">
-          <time>{{ latestInstallLog.time }}</time>
-          <strong>{{ latestInstallLog.stage }}</strong>
-          <span>{{ latestInstallLog.message }}</span>
-        </p>
         <div v-if="installLogExpanded" class="install-log-full">
           <p v-if="installTask.logs.length === 0">等待安装器输出…</p>
           <template v-else>
@@ -5363,8 +5527,14 @@ onUnmounted(() => {
                   <span>
                     {{
                       services.length -
-                      settingsDraft.hiddenServices.length
-                    }}/{{ services.length }} {{ t("common.show") }}
+                      settingsDraft.hiddenServices.length +
+                      settingsOrderedServiceTools.filter(
+                        (tool) =>
+                          !settingsDraft.hiddenTools.includes(tool.id),
+                      ).length
+                    }}/{{
+                      services.length + settingsOrderedServiceTools.length
+                    }} {{ t("common.show") }}
                   </span>
                 </div>
                 <div class="sidebar-manager-list">
@@ -5434,6 +5604,64 @@ onUnmounted(() => {
                       <i></i>
                     </label>
                   </div>
+                  <div
+                    v-for="tool in settingsOrderedServiceTools"
+                    :key="tool.id"
+                    class="sidebar-manager-item"
+                    data-sidebar-group="tools"
+                    :data-sidebar-id="tool.id"
+                    :class="{
+                      dragging:
+                        draggingSidebarItem?.group === 'tools' &&
+                        draggingSidebarItem.id === tool.id,
+                      'drop-before':
+                        sidebarDropTarget === `tools:${tool.id}:before`,
+                      'drop-after':
+                        sidebarDropTarget === `tools:${tool.id}:after`,
+                    }"
+                  >
+                    <span
+                      class="sidebar-drag-handle"
+                      :title="t('settings.sidebar.drag')"
+                      @pointerdown="
+                        beginSidebarPointerDrag($event, 'tools', tool.id)
+                      "
+                    >
+                      <svg viewBox="0 0 12 18" aria-hidden="true">
+                        <circle cx="3" cy="3" r="1.2"></circle>
+                        <circle cx="9" cy="3" r="1.2"></circle>
+                        <circle cx="3" cy="9" r="1.2"></circle>
+                        <circle cx="9" cy="9" r="1.2"></circle>
+                        <circle cx="3" cy="15" r="1.2"></circle>
+                        <circle cx="9" cy="15" r="1.2"></circle>
+                      </svg>
+                    </span>
+                    <span class="nav-icon" :class="tool.id">
+                      {{ tool.icon }}
+                    </span>
+                    <span class="sidebar-manager-copy">
+                      <strong>{{ t(`tools.${tool.id}.label`) }}</strong>
+                      <small>{{ t(`tools.${tool.id}.hint`) }}</small>
+                    </span>
+                    <label
+                      class="sidebar-visibility-switch"
+                      :title="
+                        settingsDraft.hiddenTools.includes(tool.id)
+                          ? t('settings.sidebar.showInSidebar')
+                          : t('settings.sidebar.hideFromSidebar')
+                      "
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="
+                          !settingsDraft.hiddenTools.includes(tool.id)
+                        "
+                        :aria-label="`${t('settings.sidebar.showInSidebar')} ${t(`tools.${tool.id}.label`)}`"
+                        @change="toggleToolVisibility(tool.id, $event)"
+                      />
+                      <i></i>
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -5445,13 +5673,17 @@ onUnmounted(() => {
                   </div>
                   <span>
                     {{
-                      TOOLS.length - settingsDraft.hiddenTools.length
-                    }}/{{ TOOLS.length }} {{ t("common.show") }}
+                      settingsOrderedUtilityTools.filter(
+                        (tool) =>
+                          !settingsDraft.hiddenTools.includes(tool.id),
+                      ).length
+                    }}/{{ settingsOrderedUtilityTools.length }}
+                    {{ t("common.show") }}
                   </span>
                 </div>
                 <div class="sidebar-manager-list">
                   <div
-                    v-for="tool in settingsOrderedTools"
+                    v-for="tool in settingsOrderedUtilityTools"
                     :key="tool.id"
                     class="sidebar-manager-item"
                     data-sidebar-group="tools"
@@ -6501,7 +6733,7 @@ onUnmounted(() => {
               <div class="dashboard-panel-title">
                 <div>
                   <h2>{{ t("dashboard.serviceStatus") }}</h2>
-                  <p>点击服务进入详情</p>
+                  <p>点击卡片进入详情，使用开关快捷启停</p>
                 </div>
                 <div
                   class="dashboard-service-summary"
@@ -6516,24 +6748,44 @@ onUnmounted(() => {
                 </div>
               </div>
               <div class="dashboard-service-grid">
-                <button
+                <article
                   v-for="service in services"
                   :key="service.kind"
-                  type="button"
                   class="dashboard-service-row"
                   :aria-label="`${service.name}，${statusLabel[service.status]}，端口 ${service.port}`"
+                  role="button"
+                  tabindex="0"
                   @click="selectService(service.kind)"
+                  @keydown.enter.self.prevent="selectService(service.kind)"
+                  @keydown.space.self.prevent="selectService(service.kind)"
                 >
                   <span class="nav-icon" :class="service.kind">
                     {{ iconLetter[service.kind] }}
                   </span>
-                  <em
-                    :class="service.status"
-                    :title="statusLabel[service.status]"
-                  ></em>
+                  <button
+                    type="button"
+                    class="dashboard-service-switch"
+                    :class="[
+                      service.status,
+                      {
+                        on: service.status === 'running',
+                        busy: dashboardServiceBusy(service),
+                      },
+                    ]"
+                    :disabled="
+                      service.status === 'not_installed' ||
+                      dashboardServiceBusy(service)
+                    "
+                    :title="dashboardServiceSwitchTitle(service)"
+                    :aria-label="dashboardServiceSwitchTitle(service)"
+                    :aria-pressed="service.status === 'running'"
+                    @click.stop="toggleDashboardService(service)"
+                  >
+                    <i></i>
+                  </button>
                   <strong>{{ service.name }}</strong>
                   <small>v{{ service.version }} · :{{ service.port }}</small>
-                </button>
+                </article>
               </div>
             </section>
 

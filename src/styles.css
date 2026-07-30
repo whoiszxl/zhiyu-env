@@ -569,6 +569,16 @@ html[data-theme="dark"] .background-mist .app-background-veil {
   box-shadow: 0 0 0 4px rgba(55, 146, 96, 0.1);
 }
 
+.nav-connection-badge {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font: 600 7px/1.2 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+}
+
 .nav-state.stale_pid,
 .status-dot.stale_pid,
 .nav-state.crashed,
@@ -4468,28 +4478,72 @@ html[data-theme="dark"] .background-preview-window {
   white-space: nowrap;
 }
 
-.dashboard-service-row > em {
-  width: 6px;
-  height: 6px;
+.dashboard-service-switch {
+  position: relative;
+  box-sizing: border-box;
+  width: 29px;
+  height: 17px;
+  min-height: 17px;
   grid-row: 1;
   grid-column: 2;
   justify-self: end;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 9px;
+  background: var(--color-bg-muted);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.dashboard-service-switch > i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: var(--color-border-strong);
-  box-shadow: 0 0 0 3px
-    color-mix(in srgb, var(--color-border) 48%, transparent);
-  font-style: normal;
+  background: var(--color-text-muted);
+  transition:
+    transform 160ms ease,
+    background-color 140ms ease;
 }
 
-.dashboard-service-row > em.running {
+.dashboard-service-switch.on {
+  border-color: color-mix(in srgb, var(--color-success) 72%, var(--color-border));
+  background: color-mix(in srgb, var(--color-success) 20%, var(--color-bg-muted));
+}
+
+.dashboard-service-switch.on > i {
+  transform: translateX(12px);
   background: var(--color-success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 14%, transparent);
 }
 
-.dashboard-service-row > em.stale_pid,
-.dashboard-service-row > em.crashed {
+.dashboard-service-switch.busy > i {
+  background: var(--color-accent);
+  animation: dashboard-switch-pulse 700ms ease-in-out infinite alternate;
+}
+
+.dashboard-service-switch.stale_pid,
+.dashboard-service-switch.crashed {
+  border-color: var(--color-danger);
+}
+
+.dashboard-service-switch.stale_pid > i,
+.dashboard-service-switch.crashed > i {
   background: var(--color-danger);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger) 14%, transparent);
+}
+
+.dashboard-service-switch:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+@keyframes dashboard-switch-pulse {
+  to {
+    opacity: 0.35;
+  }
 }
 
 .dashboard-port-list > div,
@@ -7529,11 +7583,15 @@ html[data-theme="dark"] .background-preview-window {
   }
 }
 .install-progress-panel {
-  position: relative;
-  margin: 14px 18px 0;
+  position: fixed;
+  z-index: 80;
+  right: 18px;
+  bottom: 18px;
+  width: min(540px, calc(100vw - 54px));
   border: 1px solid var(--color-border);
   background: var(--color-bg-panel);
-  box-shadow: 0 8px 22px rgba(47, 48, 42, 0.08);
+  box-shadow: 0 14px 38px rgba(28, 30, 26, 0.2);
+  animation: install-panel-enter 180ms ease-out;
 }
 
 .install-progress-summary {
@@ -7579,7 +7637,10 @@ html[data-theme="dark"] .background-preview-window {
 }
 
 .install-progress-summary strong {
+  overflow: hidden;
+  max-width: 150px;
   font-size: 10px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -7635,7 +7696,6 @@ html[data-theme="dark"] .background-preview-window {
   background: #85877f;
 }
 
-.install-log-preview,
 .install-log-full p {
   display: grid;
   grid-template-columns: 58px 82px minmax(0, 1fr);
@@ -7646,21 +7706,10 @@ html[data-theme="dark"] .background-preview-window {
   line-height: 1.55;
 }
 
-.install-log-preview {
-  padding: 8px 12px;
-  border-top: 1px solid var(--color-border);
-}
-
-.install-progress-panel.expanded .install-log-preview {
-  display: none;
-}
-
-.install-log-preview time,
 .install-log-full time {
   color: var(--color-text-muted);
 }
 
-.install-log-preview strong,
 .install-log-full strong {
   overflow: hidden;
   color: var(--color-text-secondary);
@@ -7669,15 +7718,8 @@ html[data-theme="dark"] .background-preview-window {
   white-space: nowrap;
 }
 
-.install-log-preview span {
-  overflow: hidden;
-  color: var(--color-text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .install-log-full {
-  max-height: 230px;
+  max-height: min(46vh, 320px);
   overflow: auto;
   padding: 8px 12px 11px;
   border-top: 1px solid var(--color-border);
@@ -7729,6 +7771,17 @@ html[data-theme="dark"] .background-preview-window {
   padding-right: 88px;
 }
 
+@keyframes install-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes install-pulse {
   0%,
   100% {
@@ -7738,6 +7791,27 @@ html[data-theme="dark"] .background-preview-window {
   50% {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@media (max-width: 700px) {
+  .install-progress-panel {
+    right: 10px;
+    bottom: 10px;
+    width: calc(100vw - 20px);
+  }
+
+  .install-progress-summary {
+    grid-template-columns: 9px minmax(80px, auto) minmax(0, 1fr) auto;
+  }
+
+  .install-progress-toggle {
+    display: none;
+  }
+
+  .install-log-full p {
+    grid-template-columns: 48px minmax(64px, 74px) minmax(0, 1fr);
+    gap: 6px;
   }
 }
 

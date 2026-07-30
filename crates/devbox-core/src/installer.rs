@@ -3849,12 +3849,17 @@ impl PostgresInstaller {
     }
 
     pub fn initialize(&self, data_dir: &Path) -> Result<()> {
+        fs::create_dir_all(data_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(data_dir, fs::Permissions::from_mode(0o700))?;
+        }
         if data_dir.join("PG_VERSION").is_file() {
             report_install_log("初始化数据", "PostgreSQL 数据目录已经初始化");
             return Ok(());
         }
         report_install_progress(94, "初始化数据", "正在执行 initdb 创建数据库集群");
-        fs::create_dir_all(data_dir)?;
         run(
             Command::new(self.installation_dir().join("bin/initdb"))
                 .arg("-D")

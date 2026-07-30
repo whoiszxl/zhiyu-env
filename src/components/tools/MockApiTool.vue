@@ -30,6 +30,8 @@ const error = ref("");
 const aiOpen = ref(false);
 const aiPreviewOpen = ref(false);
 const aiCandidates = ref<AiRouteCandidate[]>([]);
+const aiRejected = ref<string[]>([]);
+const aiImporting = ref(false);
 const aiOptions: AiAssistOption[] = [{
   id: "mock_api",
   label: "批量生成",
@@ -168,72 +170,217 @@ function formatTime(value: number) {
   return new Date(value).toLocaleTimeString("zh-CN", { hour12: false });
 }
 
-function cleanJsonOutput(content: string) {
-  return content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+function extractBalancedJson(content: string) {
+  const start = content.search(/[\[{]/);
+  if (start < 0) return "";
+  const stack: string[] = [];
+  let quoted = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const character = content[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+      continue;
+    }
+    if (character === "{" || character === "[") stack.push(character);
+    if (character === "}" || character === "]") {
+      const expected = character === "}" ? "{" : "[";
+      if (stack.pop() !== expected) return "";
+      if (!stack.length) return content.slice(start, index + 1);
+    }
+  }
+  return "";
+}
+
+function parseAiJson(content: string): unknown {
+  const trimmed = content.trim().replace(/^\uFEFF/, "");
+  const codeBlocks = Array.from(
+    trimmed.matchAll(/```(?:json|javascript|js)?\s*([\s\S]*?)```/gi),
+    (match) => match[1].trim(),
+  );
+  const candidates = [
+    trimmed,
+    ...codeBlocks,
+    extractBalancedJson(trimmed),
+    ...codeBlocks.map(extractBalancedJson),
+  ].filter((value, index, values) => value && values.indexOf(value) === index);
+  let lastError = "";
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (cause) {
+      lastError = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+  throw new Error(
+    `AI 返回的 JSON 语法不完整，无法导入${lastError ? `：${lastError}` : ""}`,
+  );
+}
+
+function routeValues(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== "object") return [];
+  const root = parsed as Record<string, unknown>;
+  for (const key of ["routes", "endpoints", "apis", "data"]) {
+    if (Array.isArray(root[key])) return root[key] as unknown[];
+  }
+  return [];
+}
+
+function routeField(
+  value: Record<string, unknown>,
+  ...keys: string[]
+): unknown {
+  for (const key of keys) {
+    if (value[key] !== undefined && value[key] !== null) return value[key];
+  }
+  return undefined;
+}
+
+function normalizeRoutePath(value: unknown) {
+  let path = String(value ?? "").trim();
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      path = new URL(path).pathname;
+    } catch {
+      return "";
+    }
+  }
+  path = path.split(/[?#]/, 1)[0].trim();
+  if (path && !path.startsWith("/")) path = `/${path}`;
+  return path.replace(/\/{2,}/g, "/");
+}
+
+function parseInteger(value: unknown, fallback: number) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const matched = String(value).trim().match(/^-?\d+/);
+  return matched ? Number(matched[0]) : Number.NaN;
+}
+
+function parseEnabled(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    return !["false", "0", "off", "disabled", "no"].includes(
+      value.trim().toLowerCase(),
+    );
+  }
+  return true;
 }
 
 function previewAiRoutes(content: string) {
   try {
-    const parsed = JSON.parse(cleanJsonOutput(content));
-    if (!Array.isArray(parsed.routes) || parsed.routes.length === 0) {
+    const values = routeValues(parseAiJson(content));
+    if (values.length === 0) {
       throw new Error("AI 没有返回可导入的接口");
     }
-    if (parsed.routes.length > 30) {
+    if (values.length > 30) {
       throw new Error("单次最多导入 30 个接口");
     }
     const identities = new Set(
       state.value.routes.map((route) => `${route.method.toUpperCase()} ${route.path}`),
     );
     const generated = new Set<string>();
-    aiCandidates.value = parsed.routes.map((value: Record<string, unknown>, index: number) => {
-      const method = String(value.method ?? "GET").trim().toUpperCase();
-      const path = String(value.path ?? "").trim();
-      const statusCode = Number(value.statusCode ?? 200);
-      const delayMs = Number(value.delayMs ?? 0);
-      if (!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(method)) {
-        throw new Error(`第 ${index + 1} 个接口的方法不受支持`);
+    const rejected: string[] = [];
+    const candidates: AiRouteCandidate[] = [];
+    values.forEach((raw, index) => {
+      try {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          throw new Error("接口定义不是对象");
+        }
+        const value = raw as Record<string, unknown>;
+        const method = String(
+          routeField(value, "method", "httpMethod", "http_method") ?? "GET",
+        ).trim().toUpperCase();
+        const path = normalizeRoutePath(
+          routeField(value, "path", "url", "route", "endpoint"),
+        );
+        const statusCode = parseInteger(
+          routeField(value, "statusCode", "status_code", "status", "code"),
+          200,
+        );
+        const delayMs = parseInteger(
+          routeField(value, "delayMs", "delay_ms", "delay", "latency"),
+          0,
+        );
+        if (!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(method)) {
+          throw new Error(`不支持请求方法 ${method || "（空）"}`);
+        }
+        if (!path.startsWith("/")) throw new Error("路径必须以 / 开头");
+        if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599) {
+          throw new Error(`状态码 ${statusCode} 无效`);
+        }
+        if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 10_000) {
+          throw new Error(`延迟 ${delayMs} ms 无效`);
+        }
+        const identity = `${method} ${path}`;
+        const conflict = identities.has(identity) || generated.has(identity);
+        generated.add(identity);
+        const response = routeField(
+          value,
+          "responseBody",
+          "response_body",
+          "body",
+          "response",
+          "data",
+        );
+        const body = typeof response === "string"
+          ? response
+          : JSON.stringify(response ?? {}, null, 2);
+        if (body.length > 1024 * 1024) throw new Error("响应内容超过 1 MiB");
+        if (/<script\b|on\w+\s*=|javascript:/i.test(body)) {
+          throw new Error("响应包含脚本或事件处理器");
+        }
+        const headers = value.headers && typeof value.headers === "object"
+          ? value.headers as Record<string, unknown>
+          : {};
+        const contentType = routeField(
+          value,
+          "contentType",
+          "content_type",
+          "mimeType",
+          "mime_type",
+        ) ?? headers["Content-Type"] ?? headers["content-type"];
+        candidates.push({
+          id: `ai-route-${Date.now()}-${index}`,
+          method,
+          path,
+          statusCode,
+          contentType: String(contentType || "application/json; charset=utf-8"),
+          responseBody: body,
+          delayMs,
+          enabled: parseEnabled(routeField(value, "enabled", "active")),
+          selected: !conflict,
+          conflict,
+        });
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        rejected.push(`第 ${index + 1} 条：${message}`);
       }
-      if (!path.startsWith("/") || path.includes("?")) {
-        throw new Error(`第 ${index + 1} 个接口路径无效`);
-      }
-      if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599) {
-        throw new Error(`第 ${index + 1} 个接口状态码无效`);
-      }
-      if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 10_000) {
-        throw new Error(`第 ${index + 1} 个接口延迟无效`);
-      }
-      const identity = `${method} ${path}`;
-      const conflict = identities.has(identity) || generated.has(identity);
-      generated.add(identity);
-      const body = typeof value.responseBody === "string"
-        ? value.responseBody
-        : JSON.stringify(value.responseBody ?? {}, null, 2);
-      if (body.length > 1024 * 1024) throw new Error(`第 ${index + 1} 个响应过大`);
-      if (/<script\b|on\w+\s*=|javascript:/i.test(body)) {
-        throw new Error(`第 ${index + 1} 个响应包含脚本或事件处理器，已拒绝导入`);
-      }
-      return {
-        id: `ai-route-${Date.now()}-${index}`,
-        method,
-        path,
-        statusCode,
-        contentType: String(value.contentType || "application/json; charset=utf-8"),
-        responseBody: body,
-        delayMs,
-        enabled: value.enabled !== false,
-        selected: !conflict,
-        conflict,
-      };
     });
+    if (!candidates.length) {
+      throw new Error(`没有可导入的接口。${rejected.join("；")}`);
+    }
+    aiCandidates.value = candidates;
+    aiRejected.value = rejected;
     aiOpen.value = false;
     aiPreviewOpen.value = true;
     error.value = "";
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    aiOpen.value = false;
+    aiPreviewOpen.value = false;
   }
 }
 
-function importAiRoutes() {
+async function importAiRoutes() {
+  if (aiImporting.value) return;
   const routes = aiCandidates.value
     .filter((route) => route.selected && !route.conflict)
     .map(({ selected: _selected, conflict: _conflict, ...route }) => route);
@@ -241,11 +388,20 @@ function importAiRoutes() {
     error.value = "没有选择可导入的接口";
     return;
   }
-  state.value.routes.push(...routes);
-  selectedId.value = routes[0].id;
-  aiPreviewOpen.value = false;
-  aiCandidates.value = [];
-  scheduleSave(0);
+  aiImporting.value = true;
+  error.value = "";
+  try {
+    const next = await mockApiSaveRoutes([...state.value.routes, ...routes]);
+    applyState(next);
+    selectedId.value = routes[0].id;
+    aiPreviewOpen.value = false;
+    aiCandidates.value = [];
+    aiRejected.value = [];
+  } catch (cause) {
+    error.value = `导入失败：${cause instanceof Error ? cause.message : String(cause)}`;
+  } finally {
+    aiImporting.value = false;
+  }
 }
 
 function openAiSettings() {
@@ -401,8 +557,16 @@ onUnmounted(() => {
         <div class="ai-route-summary">
           <span>{{ aiCandidates.length }} 个候选接口</span>
           <span>{{ aiCandidates.filter((item) => item.conflict).length }} 个冲突</span>
+          <span v-if="aiRejected.length" class="rejected">
+            {{ aiRejected.length }} 条已跳过
+          </span>
           <small>冲突接口不会覆盖现有配置</small>
         </div>
+        <details v-if="aiRejected.length" class="ai-route-rejected">
+          <summary>查看未导入条目</summary>
+          <p v-for="item in aiRejected" :key="item">{{ item }}</p>
+        </details>
+        <p v-if="error" class="ai-route-error">{{ error }}</p>
         <div class="ai-route-list">
           <label
             v-for="route in aiCandidates"
@@ -422,9 +586,12 @@ onUnmounted(() => {
           <button
             class="primary"
             type="button"
-            :disabled="!aiCandidates.some((item) => item.selected && !item.conflict)"
+            :disabled="
+              aiImporting ||
+              !aiCandidates.some((item) => item.selected && !item.conflict)
+            "
             @click="importAiRoutes"
-          >导入所选接口</button>
+          >{{ aiImporting ? "正在导入…" : "导入所选接口" }}</button>
         </footer>
       </section>
     </div>
@@ -443,6 +610,8 @@ onUnmounted(() => {
 .ai-route-preview>header{display:flex;min-height:62px;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--color-border);background:var(--color-header)}
 .ai-route-preview p{margin:0 0 3px;color:var(--color-text-muted);font:8px "SFMono-Regular",Consolas,monospace;letter-spacing:.12em}.ai-route-preview h2{margin:0;font-size:14px}.ai-route-preview>header button{width:30px;height:30px;border:0;background:transparent;color:var(--color-text-muted);font-size:18px}
 .ai-route-summary{display:flex;align-items:center;gap:16px;padding:10px 14px;border-bottom:1px solid var(--color-border);background:var(--color-bg-muted);font-size:9px}.ai-route-summary small{margin-left:auto;color:var(--color-text-muted)}
+.ai-route-summary .rejected{color:var(--color-warning-text)}.ai-route-rejected{padding:8px 14px;border-bottom:1px solid var(--color-border);background:var(--color-bg-muted);color:var(--color-warning-text);font-size:8px}.ai-route-rejected summary{cursor:pointer}.ai-route-rejected p{margin:5px 0 0;color:var(--color-text-muted)}
+.ai-route-error{margin:0;padding:9px 14px;border-bottom:1px solid var(--color-danger-text);background:var(--color-danger-surface);color:var(--color-danger-text);font-size:8px}
 .ai-route-list{min-height:180px;overflow:auto}.ai-route-list label{display:grid;grid-template-columns:18px 62px minmax(0,1fr) 90px 100px;min-height:48px;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--color-border);font-size:9px}.ai-route-list label.conflict{opacity:.58}.ai-route-list b{font:700 8px "SFMono-Regular",Consolas,monospace;color:var(--color-accent)}.ai-route-list code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-route-list span,.ai-route-list em{color:var(--color-text-muted);font-style:normal}.ai-route-list label.conflict em{color:var(--color-danger-text)}
 .ai-route-preview>footer{display:flex;align-items:center;gap:8px;padding:11px 14px;border-top:1px solid var(--color-border);background:var(--color-header)}.ai-route-preview>footer small{margin-right:auto;color:var(--color-text-muted);font-size:8px}.ai-route-preview>footer button{min-height:32px;padding:0 13px;font-size:9px}
 

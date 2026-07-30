@@ -67,7 +67,6 @@ const english = new Map<string, string>([
   ["固定文本（可选）", "Fixed text (optional)"],
   ["配置字段后生成测试数据", "Configure fields to generate test data"],
   ["结果只存在当前页面，刷新后不会保留。", "Results only remain on this page and are not persisted."],
-  ["数据库开发辅助", "Database Dev Tools"],
   ["格式化 SQL、生成数据模型并收藏常用开发查询", "Format SQL, generate models, and use common development queries"],
   ["SQL 格式化", "SQL Formatter"],
   ["模型生成", "Model Generator"],

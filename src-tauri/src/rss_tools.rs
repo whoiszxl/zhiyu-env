@@ -42,6 +42,7 @@ pub struct RssEntry {
     pub author: Option<String>,
     pub summary: String,
     pub content: String,
+    pub content_html: String,
     pub published_at_millis: Option<u64>,
     pub fetched_at_millis: u64,
     pub is_read: bool,
@@ -131,6 +132,7 @@ fn open_repo_at(path: &Path) -> Result<Connection, String> {
            author TEXT,
            summary TEXT NOT NULL DEFAULT '',
            content TEXT NOT NULL DEFAULT '',
+           content_html TEXT NOT NULL DEFAULT '',
            published_at_millis INTEGER,
            fetched_at_millis INTEGER NOT NULL,
            is_read INTEGER NOT NULL DEFAULT 0,
@@ -182,6 +184,25 @@ fn migrate_columns(conn: &Connection) -> Result<(), String> {
     if !columns.iter().any(|column| column == "custom_title") {
         conn.execute("ALTER TABLE rss_feeds ADD COLUMN custom_title TEXT", [])
             .map_err(|e| format!("RSS 数据库升级失败: {e}"))?;
+    }
+    drop(stmt);
+
+    let mut entry_stmt = conn
+        .prepare("PRAGMA table_info(rss_entries)")
+        .map_err(|e| format!("无法检查 RSS 文章数据表: {e}"))?;
+    let entry_columns = entry_stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| format!("无法读取 RSS 文章数据表结构: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("无法读取 RSS 文章数据表字段: {e}"))?;
+    if !entry_columns.iter().any(|column| column == "content_html") {
+        conn.execute(
+            "ALTER TABLE rss_entries ADD COLUMN content_html TEXT NOT NULL DEFAULT ''",
+            [],
+        )
+        .map_err(|e| format!("RSS 正文数据库升级失败: {e}"))?;
+        conn.execute("UPDATE rss_feeds SET etag = NULL, last_modified = NULL", [])
+            .map_err(|e| format!("无法安排 RSS 正文重新获取: {e}"))?;
     }
     Ok(())
 }
@@ -475,8 +496,8 @@ fn persist_feed(
             .execute(
                 "INSERT INTO rss_entries (
                    feed_id, external_id, title, link, author, summary, content,
-                   published_at_millis, fetched_at_millis
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                   content_html, published_at_millis, fetched_at_millis
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(feed_id, external_id) DO NOTHING",
                 params![
                     id,
@@ -486,6 +507,7 @@ fn persist_feed(
                     item.author,
                     item.summary,
                     item.content,
+                    item.content_html,
                     item.published_at_millis,
                     now
                 ],
@@ -496,14 +518,16 @@ fn persist_feed(
         } else {
             tx.execute(
                 "UPDATE rss_entries SET title = ?1, link = ?2, author = ?3,
-                 summary = ?4, content = ?5, published_at_millis = ?6,
-                 fetched_at_millis = ?7 WHERE feed_id = ?8 AND external_id = ?9",
+                 summary = ?4, content = ?5, content_html = ?6,
+                 published_at_millis = ?7, fetched_at_millis = ?8
+                 WHERE feed_id = ?9 AND external_id = ?10",
                 params![
                     item.title,
                     item.link,
                     item.author,
                     item.summary,
                     item.content,
+                    item.content_html,
                     item.published_at_millis,
                     now,
                     id,
@@ -538,6 +562,7 @@ struct EntryFields {
     author: Option<String>,
     summary: String,
     content: String,
+    content_html: String,
     published_at_millis: Option<u64>,
 }
 
@@ -577,6 +602,7 @@ fn entry_fields(entry: &Entry, now: u64) -> EntryFields {
         author: entry.authors.first().map(|author| author.name.clone()),
         summary: truncate(clean_text(&raw_summary), 16 * 1024),
         content: truncate(clean_content(&raw_content), MAX_ENTRY_TEXT_BYTES),
+        content_html: truncate(raw_content, MAX_ENTRY_TEXT_BYTES),
         published_at_millis: published
             .and_then(|value| u64::try_from(value.timestamp_millis()).ok())
             .or(Some(now)),
@@ -848,8 +874,8 @@ pub fn rss_entries_list(
     let mut stmt = conn
         .prepare(
             "SELECT e.id, e.feed_id, f.title, e.title, e.link, e.author, e.summary,
-                    e.content, e.published_at_millis, e.fetched_at_millis,
-                    e.is_read, e.is_starred
+                    e.content, e.content_html, e.published_at_millis,
+                    e.fetched_at_millis, e.is_read, e.is_starred
              FROM rss_entries e JOIN rss_feeds f ON f.id = e.feed_id
              WHERE (?1 IS NULL OR e.feed_id = ?1)
                AND (?2 = 'all' OR (?2 = 'unread' AND e.is_read = 0)
@@ -872,10 +898,11 @@ pub fn rss_entries_list(
                     author: row.get(5)?,
                     summary: row.get(6)?,
                     content: row.get(7)?,
-                    published_at_millis: row.get(8)?,
-                    fetched_at_millis: row.get(9)?,
-                    is_read: row.get(10)?,
-                    is_starred: row.get(11)?,
+                    content_html: row.get(8)?,
+                    published_at_millis: row.get(9)?,
+                    fetched_at_millis: row.get(10)?,
+                    is_read: row.get(11)?,
+                    is_starred: row.get(12)?,
                 })
             },
         )
@@ -1155,6 +1182,21 @@ mod tests {
                    last_error TEXT,
                    created_at_millis INTEGER NOT NULL,
                    updated_at_millis INTEGER NOT NULL
+                 );
+                 CREATE TABLE rss_entries (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   feed_id INTEGER NOT NULL REFERENCES rss_feeds(id) ON DELETE CASCADE,
+                   external_id TEXT NOT NULL,
+                   title TEXT NOT NULL,
+                   link TEXT,
+                   author TEXT,
+                   summary TEXT NOT NULL DEFAULT '',
+                   content TEXT NOT NULL DEFAULT '',
+                   published_at_millis INTEGER,
+                   fetched_at_millis INTEGER NOT NULL,
+                   is_read INTEGER NOT NULL DEFAULT 0,
+                   is_starred INTEGER NOT NULL DEFAULT 0,
+                   UNIQUE(feed_id, external_id)
                  );",
             )
             .unwrap();
@@ -1170,7 +1212,17 @@ mod tests {
             .unwrap()
             .iter()
             .any(|column| column == "custom_title");
+        let content_html_exists = upgraded
+            .prepare("PRAGMA table_info(rss_entries)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+            .iter()
+            .any(|column| column == "content_html");
         assert!(custom_title_exists);
+        assert!(content_html_exists);
         assert!(list_feeds(&upgraded).unwrap().is_empty());
     }
 

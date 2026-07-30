@@ -26,7 +26,6 @@ import NodeRuntimeTool from "../components/runtimes/NodeRuntimeTool.vue";
 import ProjectWorkspaceTool from "../components/tools/ProjectWorkspaceTool.vue";
 import EnvironmentTemplatesTool from "../components/tools/EnvironmentTemplatesTool.vue";
 import LocalDomainsTool from "../components/tools/LocalDomainsTool.vue";
-import DatabaseDevTool from "../components/tools/DatabaseDevTool.vue";
 import TestDataTool from "../components/tools/TestDataTool.vue";
 import ZeroMqTool from "../components/tools/ZeroMqTool.vue";
 import type { ToolDefinition, ToolId } from "./types";
@@ -115,23 +114,29 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     id: "zeromq",
-    navLabel: "ZeroMQ 调试器",
-    navHint: "PUB/SUB · PUSH/PULL",
+    group: "service",
+    navLabel: "ZeroMQ",
+    navHint: "MESSAGING SERVICE",
     icon: "Ø",
+    badge: "MQ",
     component: ZeroMqTool,
   },
   {
     id: "clickhouse",
+    group: "service",
     navLabel: "ClickHouse 数据库",
-    navHint: "LOCAL · REMOTE OLAP",
+    navHint: "OLAP DATABASE SERVICE",
     icon: "C",
+    badge: "DB",
     component: ClickHouseTool,
   },
   {
     id: "doris",
+    group: "service",
     navLabel: "Apache Doris",
-    navHint: "REMOTE OLAP",
+    navHint: "OLAP DATABASE SERVICE",
     icon: "D",
+    badge: "DB",
     component: DorisTool,
   },
   {
@@ -147,13 +152,6 @@ export const TOOLS: ToolDefinition[] = [
     navHint: "REST CLIENT",
     icon: "H",
     component: HttpRequestTool,
-  },
-  {
-    id: "dbdev",
-    navLabel: "数据库开发辅助",
-    navHint: "DATABASE LAB",
-    icon: "DB",
-    component: DatabaseDevTool,
   },
   {
     id: "testdata",

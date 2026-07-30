@@ -21,7 +21,6 @@ export type ToolId =
   | "doris"
   | "mockapi"
   | "http"
-  | "dbdev"
   | "testdata"
   | "realtime"
   | "time"
@@ -40,14 +39,16 @@ export type ToolId =
 
 export interface ToolDefinition {
   id: ToolId;
-  /** 侧栏分组；开发环境与常规工具分开呈现。 */
-  group?: "development" | "tools";
+  /** 侧栏产品分组；service 用于服务连接面板，不代表本地进程已启动。 */
+  group?: "development" | "service" | "tools";
   /** 侧栏主标题 */
   navLabel: string;
   /** 侧栏副标题 */
   navHint: string;
   /** 侧栏图标字符，配色取 .nav-icon.<id> */
   icon: string;
+  /** service 分组在侧栏右侧显示的紧凑类型标记。 */
+  badge?: string;
   /** 工具面板组件，自行渲染 detail-header 及全部内容 */
   component: Component;
 }

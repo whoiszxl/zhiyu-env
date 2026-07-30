@@ -59,7 +59,7 @@ fn capability_prompt(capability: &str) -> Result<(&'static str, bool), String> {
             "Generate local mock HTTP endpoints as strict JSON with this shape: \
              {\"routes\":[{\"method\":\"GET\",\"path\":\"/api/items\",\"statusCode\":200,\
              \"contentType\":\"application/json; charset=utf-8\",\"delayMs\":0,\
-             \"enabled\":true,\"responseBody\":\"{\\\"data\\\":[]}\"}]}. \
+             \"enabled\":true,\"responseBody\":{\"data\":[]}}]}. \
              Return JSON only without Markdown fences. Generate no more than 30 routes. \
              Paths must start with / and must not contain query strings. Use realistic but fictional data. \
              Never include secrets, external callbacks, scripts, or remote resources.",

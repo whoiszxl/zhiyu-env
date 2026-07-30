@@ -4,6 +4,8 @@ use crate::error::{DevBoxError, Result};
 use crate::service::ServiceManager;
 use crate::status::ServiceStatus;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 pub struct PostgresService {
@@ -28,12 +30,13 @@ impl PostgresService {
 
     pub fn prepare_version_data(&self) -> Result<()> {
         let Some(target) = version_data_dir(&self.inner.config) else {
-            return Ok(());
+            return secure_data_directory(&self.inner.config.data_dir());
         };
         let data_root = self.inner.config.data_dir();
         fs::create_dir_all(&target)?;
 
         if !data_root.is_dir() {
+            secure_data_directory(&target)?;
             return Ok(());
         }
 
@@ -53,6 +56,7 @@ impl PostgresService {
             }
             fs::rename(source, destination)?;
         }
+        secure_data_directory(&target)?;
         Ok(())
     }
 }
@@ -100,8 +104,16 @@ impl ServiceManager for PostgresService {
     }
 
     fn repair(&self) -> Result<()> {
+        self.prepare_version_data()?;
         self.inner.repair()
     }
+}
+
+fn secure_data_directory(path: &Path) -> Result<()> {
+    fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
 }
 
 fn version_data_dir(config: &ServiceConfig) -> Option<PathBuf> {

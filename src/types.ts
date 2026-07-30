@@ -1146,6 +1146,7 @@ export interface RssEntry {
   author: string | null;
   summary: string;
   content: string;
+  contentHtml: string;
   publishedAtMillis: number | null;
   fetchedAtMillis: number;
   isRead: boolean;

@@ -73,6 +73,17 @@ fn postgres_service_lifecycle() {
     let service = PostgresService::new(config(temp.path(), ServiceKind::Postgres)).unwrap();
     assert_lifecycle(&service);
     assert!(temp.path().join("postgres/conf/postgresql.conf").is_file());
+    let data_dir = temp.path().join("postgres/data");
+    assert_eq!(
+        std::fs::metadata(&data_dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    service.repair().unwrap();
+    assert_eq!(
+        std::fs::metadata(data_dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
 }
 
 #[test]
