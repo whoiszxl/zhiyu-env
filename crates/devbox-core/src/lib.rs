@@ -9,17 +9,19 @@ pub mod status;
 pub use config::{ConfigManager, ServiceConfig, ServiceKind};
 pub use error::{DevBoxError, Result};
 pub use installer::{
-    report_install_progress, with_install_context, with_install_reporter, CaddyInstaller,
-    ConsulInstaller, DuckdbInstaller, EtcdInstaller, InstallCancellationToken, InstallOutcome,
-    InstallReporter, InstallUpdate, KafkaInstaller, MailpitInstaller, MeilisearchInstaller,
-    MinioInstaller, MongodbInstaller, MysqlInstaller, NatsInstaller, NginxInstaller,
-    PostgresInstaller, RabbitmqInstaller, RedisInstaller, RnacosInstaller, RustfsInstaller,
+    check_install_cancelled, report_install_progress, with_install_context, with_install_reporter,
+    ActivemqInstaller, CaddyInstaller, ConsulInstaller, DuckdbInstaller, EtcdInstaller,
+    FtpInstaller, InfluxdbInstaller, InstallCancellationToken, InstallOutcome, InstallReporter,
+    InstallUpdate, KafkaInstaller, MailpitInstaller, MeilisearchInstaller, MinioInstaller,
+    MongodbInstaller, MysqlInstaller, NatsInstaller, NginxInstaller, PostgresInstaller,
+    RabbitmqInstaller, RedisInstaller, RnacosInstaller, RustfsInstaller,
 };
 pub use process::ProcessManager;
 pub use service::ServiceManager;
 pub use services::{
-    CaddyService, ConsulService, EtcdService, KafkaService, MailpitService, MeilisearchService,
-    MinioService, MongodbService, MysqlService, NatsService, NginxService, PostgresService,
-    RabbitmqService, RedisService, RnacosService, RustfsService,
+    ActivemqService, CaddyService, ConsulService, EtcdService, FtpService, InfluxdbService,
+    KafkaService, MailpitService, MeilisearchService, MinioService, MongodbService, MysqlService,
+    NatsService, NginxService, PostgresService, RabbitmqService, RedisService, RnacosService,
+    RustfsService,
 };
 pub use status::ServiceStatus;

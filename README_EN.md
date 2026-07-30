@@ -5,8 +5,8 @@
 <h1 align="center">Zhiyu Env</h1>
 
 <p align="center">
-  <strong>A lightweight local development environment manager</strong><br>
-  No Docker, no virtual machine, and no system-wide database installation.
+  <strong>A lightweight, local-first development environment and toolbox</strong><br>
+  No Docker, no virtual machine, and no system-wide runtime installation.
 </p>
 
 <p align="center">
@@ -25,143 +25,167 @@
 
 ## What is Zhiyu?
 
-Zhiyu is a desktop application that manages local development services for individual developers.
+Zhiyu is a desktop application for individual developers who need local services and everyday development tools.
 
-Instead of creating containers or virtual machines, Zhiyu installs Redis, MySQL, PostgreSQL, and other services inside the current user's home directory and manages their processes directly with Rust. Installation, lifecycle controls, configuration, logs, resource monitoring, and local data inspection are available from one lightweight desktop UI.
+It installs official Redis, MySQL, PostgreSQL, Nginx, and other programs inside the user's home directory, then manages their processes, versions, configuration, logs, and data directly with Rust. Zhiyu also includes language runtimes, database browsers, a Mock API server, HTTP/SSH/S3 tools, an RSS reader, and an optional AI assistant.
 
-Zhiyu focuses on making a usable local service available quickly. It is not designed for production deployment, cluster orchestration, or high availability.
+The goal is to make a usable local development environment available quickly. Zhiyu is not a production deployment platform, container isolation layer, cluster orchestrator, or high-availability system.
 
-## Why Zhiyu?
+## Highlights
 
-- **No Docker runtime** — Docker Desktop does not need to stay running.
-- **No virtual machine** — services run as native user processes.
-- **No system pollution** — nothing is installed into `/usr/local`.
-- **Versioned layout** — service programs live in isolated version directories.
-- **Automatic setup** — official distributions or source archives are downloaded and verified with SHA-256.
-- **Visible and lightweight** — monitor CPU, memory, uptime, and disk usage.
-- **Built-in developer tools** — inspect data, run guarded commands, and check local ports.
+- **Native and lightweight** — no Docker runtime and no virtual machine.
+- **No system pollution** — programs, config, data, logs, and caches stay under `~/.devbox/`.
+- **Multiple versions** — versions use isolated program and data directories.
+- **Complete lifecycle** — install, cancel, start, stop, restart, recover state, and safely uninstall.
+- **Reliable installation** — mirror fallback, resume, SHA-256 verification, cache reuse, and partial-install cleanup.
+- **Observable state** — global CPU, memory, disk, ports, failures, and recent activity.
+- **Built-in tools** — common development workflows no longer require several separate desktop apps.
+- **Optional AI** — use your own model API; generated commands never bypass Zhiyu's controls.
+- **Customizable UI** — Chinese and English, light/dark mode, 15 palettes, 10 patterns, background images, and UI scaling.
 
-## Supported services
+## Services and middleware
 
-| Service | Current version | Default port | Built-in developer tools |
-| --- | ---: | ---: | --- |
-| Redis | 5.0 / 6.0 / 6.2 / 7.0 / 7.2 / 7.4 | 6379 | Version switching, key browser, type and TTL inspection, command console |
-| MySQL | 8.0 / 8.4 / 9.7 | 3306 | Version switching, database and table browser, column help, SQL console |
-| PostgreSQL | 14 / 15 / 16 / 17 / 18 | 5432 | Version switching, schema and table browser, column help, SQL console |
-| MongoDB | 8.0.26 | 27017 | Database and collection browser, field inference, JSON console |
-| Mailpit | 1.30.5 | 1025 / 8025 | Local email capture, message list, and body viewer |
-| NATS | 2.14.2 | 4222 / 8222 | JetStream, live metrics, publish, and one-message subscriptions |
-| Meilisearch | 1.50.0 | 7700 | Index metrics, JSON document import, and full-text search |
-| MinIO | RELEASE.2025-09-07 | 9000 / 9001 | S3 API, Web Console, and legacy-project compatibility |
+| Category | Services | Built-in capabilities |
+| --- | --- | --- |
+| Databases | Redis, MySQL, PostgreSQL, MongoDB | Version management, data browser, column help, guarded consoles, backup and restore |
+| Object storage | MinIO, RustFS | S3 API, Web Console, and connection configuration |
+| Messaging | NATS, RabbitMQ, ActiveMQ Classic, Kafka Sandbox, ZeroMQ | Publish/subscribe, topic and queue debugging, runtime metrics |
+| Service coordination | etcd, Consul, rnacos | Local single-node mode, KV/service discovery, official or compatible clients |
+| Search | Meilisearch | Index overview, JSON import, and full-text search |
+| Web | Nginx, Caddy | Site files, configuration, logs, and local endpoints |
+| Email | Mailpit | Local SMTP capture, message list, and safe body preview |
 
-Every service supports:
+Every managed service shares these capabilities:
 
-- Automatic installation
-- Installation progress, collapsible log preview, and failure details
-- Start, stop, and restart
-- PID and runtime status detection
-- Configuration editing
-- Runtime log viewing
-- CPU, memory, and uptime monitoring
-- Disk usage for programs, data, logs, configuration, and download caches
-- Per-service cleanup for downloads and temporary installation files
-- Local backup and guarded restore for data and configuration
+- Automatic installation with progress and collapsible logs
+- Download cancellation, retry, and cache reuse
+- Start, stop, restart, and stop-all
+- Duplicate-start prevention, PID reuse validation, and port readiness checks
+- Crash detection, stale PID cleanup, diagnostics, and state repair
+- CPU, memory, uptime, and categorized disk usage
+- Configuration, runtime logs, backup/restore, and safe uninstall
+- Verified version lists, compatibility notices, and version isolation
 
-Redis, MySQL, and PostgreSQL include a dedicated Version Manager page. Binaries and data for different versions can coexist, and the active version can be changed while the service is stopped. PostgreSQL major versions use separate `initdb` data directories.
+Redis supports 5.0, 6.0, 6.2, 7.0, 7.2, and 7.4. MySQL supports 8.0, 8.4, and 9.7. PostgreSQL supports major versions 14 through 18. Other services also expose multiple releases registered and verified by the project; the in-app Version Manager is the source of truth.
 
-The unified Settings Center controls macOS login launch, service behavior on app exit, download mirrors and concurrency, the installation root, log and backup retention, update checks, and full installation-cache cleanup.
+## Language runtimes
 
-The native macOS menu bar and Windows system tray menu shows running services and total memory, opens the global overview, starts, stops, or restarts services, stops all services, and opens Settings. Closing the main window keeps Zhiyu accessible from the tray.
+Zhiyu currently manages:
 
-Zhiyu also includes lightweight tools with no resident process:
+- Go
+- Java, including Java 8 and modern LTS releases
+- Rust
+- Python
+- Node.js
 
-- **TCP port checker** — identifies listening ports and their owning processes.
-- **DuckDB local file query tool** — runs read-only SQL against CSV, TSV, JSON, JSONL, Parquet, and `.duckdb` files.
-- **SQLite local database tool** — creates, opens, and queries `.sqlite`, `.sqlite3`, and `.db` files with an embedded engine.
+Each runtime provides version selection, download/install, switching, environment previews, and uninstall. Runtimes stay under Zhiyu's data directory and do not change the global system `PATH`.
 
-## Desktop features
+## Built-in developer tools
 
-### Service overview
+| Tool | Purpose |
+| --- | --- |
+| Port Inspector | Inspect local TCP addresses, owning processes, and PIDs |
+| Local Mock API | Create HTTP mock routes with status codes, delays, and responses |
+| HTTP Client | Debug headers, bodies, redirects, responses, and cURL |
+| WebSocket / SSE | Test real-time connections and messages |
+| SSH Manager | Local connection profiles, host-key validation, and interactive terminal |
+| S3 Browser | AWS S3, Cloudflare R2, Alibaba OSS, Tencent COS, Qiniu, MinIO, and RustFS |
+| RSS Reader | RSS / Atom / JSON Feed, local reading, OPML, and optional recommendations |
+| DuckDB Query | Query CSV, TSV, JSON, JSONL, Parquet, and DuckDB files |
+| SQLite Database | Create, open, and query local SQLite files |
+| Clipboard History | Local SQLite history, search, pinning, and quick copy |
+| Data Format Toolbox | JSON, YAML, TOML, CSV, encodings, and text transforms |
+| JWT Debugger | Decode, verify, and locally sign JWTs |
+| Time & Timestamp | Unix timestamps, date/time, and time-zone conversion |
+| Regex Tester | Live matching, capture groups, and replacement preview |
+| Cron Tool | Validate and explain five-field Cron expressions and preview runs |
+| QR Code Tool | Generate, scan, and export QR codes locally |
 
-Each service has its own detail page with runtime status, PID, local endpoint, live resource charts, disk usage, and file locations.
+Services and tools can be shown, hidden, and reordered from Settings.
 
-### Data inspection
+## AI features
 
-- Redis: scan keys and inspect values, types, TTLs, and memory size.
-- MySQL / PostgreSQL: browse databases, tables, column definitions, and the first 100 rows.
-- MongoDB: browse databases and collections, infer field types, and preview documents.
-- DuckDB: map a selected local file to `selected_file` for filtering, aggregation, and schema inspection.
-- Database types include compact Chinese help tooltips in the current UI.
+AI is optional. Zhiyu does not bundle a paid model; users configure their own API:
 
-### Guarded consoles
+- OpenAI Compatible
+- Anthropic Compatible
+- Presets for DeepSeek, OpenAI, Anthropic, and Qwen
+- Custom Base URL and model ID
+- Streaming responses and local chat history
 
-Zhiyu provides Redis, SQL, and MongoDB consoles. Blocking or unsafe administrative commands are rejected, while destructive data operations require explicit confirmation.
+Current AI workflows include:
 
-### Local email sandbox
+- RSS summaries, translation, key points, and article Q&A
+- MySQL/PostgreSQL SQL generation, error explanation, and `EXPLAIN` analysis
+- Redis command generation and Key/TTL/memory/slow-query analysis
+- Service log diagnosis
+- Nginx/Caddy configuration suggestions
+- HTTP request, Cron, and regular-expression generation
+- SSH command suggestions
 
-Mailpit is restricted to `127.0.0.1` and never relays messages to an external mail server:
+The model only generates suggestions. SQL, Redis, HTTP, configuration, Cron, and regex output can at most be placed into the corresponding editor and still requires user action. SSH and log advice is never executed automatically. High-risk Redis commands are additionally blocked.
 
-```text
-SMTP_HOST=127.0.0.1
-SMTP_PORT=1025
-SMTP_AUTH=false
-SMTP_TLS=false
-```
+> AI requests send the current question and required context to the model provider configured by the user. API configuration and chat history are stored locally.
 
-The Web/API endpoint is `http://127.0.0.1:8025`. Email HTML is displayed as escaped source text inside Zhiyu, so scripts and remote styles are not executed.
+## Global management and desktop experience
+
+- Global overview for running services, CPU, memory, disk, ports, state, and disk ranking
+- Failure alerts shown only when an abnormal service is detected
+- One-click diagnostics and repair
+- Installation cache cleanup plus backup and log retention
+- Native macOS menu bar and Windows system tray integration
+- Configurable behavior when the main window closes
+- Onboarding, grouped settings, and automatic saving
+- Chinese and English UI
+- Visibility switches and drag ordering for services and tools
+- Themes, patterns, custom background images, blur effects, and UI scaling
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    UI["Vue 3 desktop UI"] -->|"Tauri Commands"| APP["Rust / Tauri backend"]
+    UI["Vue 3 + TypeScript"] -->|"Tauri Commands"| APP["Rust / Tauri"]
     APP --> CORE["DevBox Core"]
-    CORE --> INSTALLER["Download, verify, and install"]
-    CORE --> PROCESS["Process and PID management"]
-    CORE --> CONFIG["Configuration, data, and logs"]
-    PROCESS --> SERVICES["Redis · MySQL · PostgreSQL · MongoDB · Mailpit"]
-    CONFIG --> HOME["~/.devbox/"]
+    CORE --> INSTALL["Download · Verify · Install"]
+    CORE --> PROCESS["Process · PID · Port"]
+    CORE --> STORAGE["Config · Data · Logs · Backups"]
+    PROCESS --> SERVICES["Native user processes"]
+    STORAGE --> HOME["~/.devbox/"]
+    APP --> TOOLS["Local developer tools"]
+    APP --> AI["Optional model API"]
 ```
 
-Zhiyu does not modify the system `PATH`. Runtime arguments, PID files, configuration, data, and logs stay under the user's home directory.
+Zhiyu creates no containers and does not modify the system `PATH`. Managed services run directly on the host with the current user's permissions.
 
 ## Data layout
 
 ```text
 ~/.devbox/
-├── downloads/                 # Verified archive cache
-├── installations/             # Programs isolated by service and version
-│   ├── redis/
-│   │   ├── 5.0/
-│   │   ├── 6.0/
-│   │   ├── 6.2/
-│   │   ├── 7.0/
-│   │   ├── 7.2/
-│   │   └── 7.4/
-│   ├── mysql/8.4/
-│   ├── postgres/17/
-│   ├── mongodb/8.0/
-│   ├── mailpit/1.30/
-│   └── duckdb/1.5/
-├── instances/                 # Current service instances
+├── downloads/                 # Verified archives and partial downloads
+├── installations/             # Programs isolated by component and version
+│   └── <component>/<version>/
+├── instances/                 # Active service instances
 │   └── <service>/default/
 │       ├── conf/
 │       ├── data/
 │       ├── logs/
 │       ├── run/
 │       └── service.json
-├── backups/                   # Data and configuration backups by service
-└── tmp/                       # Temporary installation files
+├── runtimes/                  # Language runtimes
+├── backups/                   # Data and configuration backups
+└── tmp/                       # Temporary installation directories
 ```
+
+Some desktop-tool data, including RSS, AI chats, and clipboard history, lives in the operating system's application data directory.
 
 ## Platform support
 
-The current release targets:
+Currently prioritized and validated:
 
 - macOS
 - Apple Silicon (ARM64)
 
-Zhiyu is currently alpha software. Installer archives, checksums, and build flows have been validated for Apple Silicon only. Do not use it for production workloads or as the only copy of important data.
+Zhiyu is alpha software. Some code accounts for Intel Mac and Windows platform differences, but service packages and full workflows are currently validated primarily on macOS Apple Silicon.
 
 ## Local development
 
@@ -169,11 +193,11 @@ Zhiyu is currently alpha software. Installer archives, checksums, and build flow
 
 - macOS on Apple Silicon
 - Stable Rust
-- Node.js 20.19+ or another version supported by Vite 7
+- Node.js 20.19+ or another release compatible with Vite 7
 - npm
 - Xcode Command Line Tools
 
-### Run the desktop app
+### Run
 
 ```bash
 npm install
@@ -189,75 +213,75 @@ npm run tauri build
 ### Test
 
 ```bash
+cargo fmt --all -- --check
 cargo test --workspace
 npm run build
 ```
 
-Some live service integration tests are marked as `ignored` by default so regular test runs do not modify or start local services.
+Some live service integration tests are marked as `ignored` so normal test runs do not modify or start local services.
 
 ## Repository structure
 
 ```text
 zhiyu-env/
 ├── crates/devbox-core/        # Service abstraction, installers, process and config management
-├── src-tauri/                 # Tauri commands and database tool adapters
+├── src-tauri/                 # Tauri commands and local tool backends
 ├── src/                       # Vue 3 + TypeScript desktop UI
-├── assets/                    # Project assets
+├── assets/                    # Icons and project assets
 ├── Cargo.toml                 # Rust workspace
 └── package.json               # Frontend and Tauri scripts
 ```
 
-Every core service implements the same `ServiceManager` lifecycle:
+Core services implement the same lifecycle:
 
 ```text
 install · start · stop · restart · status
 ```
 
-## Download mirrors
+## Downloads and installation
 
-Zhiyu tries downloads in this order: custom mirror, public GitHub accelerator, then the official source. A connection failure, sustained low speed, or SHA-256 mismatch automatically falls through to the next source.
+Zhiyu tries a custom mirror, a public GitHub accelerator, and then the official source. The installer supports:
 
-To use your own object storage or CDN, upload packages under their original archive names to one directory, then put that directory's HTTPS URL in `~/.devbox/download-mirror.txt`:
+- Resumable downloads
+- Timeout and low-speed fallback
+- SHA-256 verification
+- Verified-cache reuse
+- Installation cancellation
+- Cleanup of incomplete version directories
+- Apple Silicon, Intel Mac, and Windows architecture detection
 
-```text
-https://your-cdn.example.com/zhiyu-packages
-```
-
-The `ZHIYU_DOWNLOAD_MIRROR` environment variable can override this setting temporarily. The public accelerator is a third-party service; set `ZHIYU_DISABLE_PUBLIC_MIRROR=1` to disable it. Zhiyu will still fall back from a custom mirror to the official source. Packages from every source must match the SHA-256 checksum bundled with the application.
+A custom mirror can be configured directly in Settings. Packages from every source must match a SHA-256 checksum registered by the project.
 
 ## Security boundaries
 
-- Downloads must match a predefined SHA-256 checksum.
-- Services are intended for local development and are not production-hardened.
-- Mailpit is restricted to loopback interfaces, with SMTP relay and forwarding disabled.
-- A `.bak` file is created before configuration changes are saved.
-- The current state is backed up automatically before a data restore.
-- Backup paths, links, and special files are validated before extraction.
-- Email HTML is never rendered directly.
-- Data consoles restrict blocking and destructive commands.
-- DuckDB only accepts query statements; database files open in `safe + readonly` mode, with a 15-second timeout and a 500-row display cap.
-- Redis must be stopped before switching versions. Versions share the base configuration but keep data in separate version directories; creating a backup before switching is still recommended.
-- MySQL 8.0, 8.4, and 9.7 can be installed and switched independently. Each version has its own data directory, and a new empty database is initialized on first use.
-- PostgreSQL supports the current releases of major versions 14 through 18. Each major version uses a separate data directory instead of reusing incompatible database files.
-
-> Zhiyu is not a container isolation mechanism. Managed services run directly on macOS with the current user's permissions.
+- Zhiyu targets local development and is not a container isolation or production hardening solution.
+- Services use local development ports by default; never expose development credentials or management ports publicly.
+- Downloads must match predefined SHA-256 checksums.
+- Configuration saves and data restores create safety backups.
+- Restore archives are checked for path traversal, links, and special files.
+- SQL, Redis, MongoDB, and DuckDB consoles restrict dangerous or blocking operations.
+- SSH uses a private `known_hosts` file for host-key verification; passwords are session-only.
+- Email HTML, RSS content, and AI Markdown do not execute untrusted HTML.
+- AI never executes generated commands directly; data sent to a third-party model is governed by that provider's policy.
+- Locally stored connection profiles and API keys are sensitive. Protect the current OS user account and application data directory.
 
 ## Roadmap
 
-- Redis multi-instance management
-- Backup retention policies and scheduled backups
-- Linux and Intel Mac support
-- More lightweight developer tools
+- Complete Intel Mac and Windows installer validation
+- Multiple service instances and port templates
+- Scheduled backups and more granular retention
+- More structured AI generation and operation previews
+- Additional lightweight runtimes and developer tools
 
 ## Contributing
 
-Issues and pull requests are welcome. Please keep each change focused on one clear module and include:
+Issues and pull requests are welcome. Keep each change focused and explain:
 
 - What changed
 - Why it was designed this way
 - How it was tested
 
-Before submitting code, run:
+Before submitting:
 
 ```bash
 cargo fmt --all

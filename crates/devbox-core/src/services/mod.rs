@@ -1,7 +1,10 @@
+mod activemq;
 mod caddy;
 mod common;
 mod consul;
 mod etcd;
+mod ftp;
+mod influxdb;
 mod kafka;
 mod mailpit;
 mod meilisearch;
@@ -16,9 +19,12 @@ mod redis;
 mod rnacos;
 mod rustfs;
 
+pub use activemq::ActivemqService;
 pub use caddy::CaddyService;
 pub use consul::ConsulService;
 pub use etcd::EtcdService;
+pub use ftp::FtpService;
+pub use influxdb::InfluxdbService;
 pub use kafka::KafkaService;
 pub use mailpit::MailpitService;
 pub use meilisearch::MeilisearchService;

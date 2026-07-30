@@ -433,6 +433,36 @@ client = meilisearch.Client("http://127.0.0.1:7700")`,
           },
         ],
       );
+    case "influxdb":
+      return r(
+        "InfluxDB",
+        "本地时序数据库",
+        8181,
+        false, "", "",
+        [{ label: "HTTP API", value: "http://127.0.0.1:8181" }],
+        [],
+        [
+          { key: "INFLUXDB_HOST", value: "http://127.0.0.1:8181" },
+          { key: "INFLUXDB_DATABASE", value: "metrics" },
+        ],
+        [
+          {
+            label: "curl",
+            lang: "bash",
+            caption: "Line Protocol",
+            code: `curl -X POST "http://127.0.0.1:8181/api/v3/write_lp?db=metrics" \\
+  -H "Content-Type: text/plain" \\
+  --data-binary 'cpu,host=local usage=12.5'`,
+          },
+          {
+            label: "Python",
+            lang: "python",
+            caption: "influxdb3-python",
+            code: `from influxdb_client_3 import InfluxDBClient3
+client = InfluxDBClient3(host="http://127.0.0.1:8181", database="metrics")`,
+          },
+        ],
+      );
     case "minio":
       return r(
         "MinIO",
@@ -711,6 +741,55 @@ conn = pika.BlockingConnection(pika.URLParameters(
           },
         ],
       );
+    case "activemq":
+      return r(
+        "ActiveMQ Classic",
+        "JMS 与 OpenWire 消息代理",
+        61616,
+        true,
+        "admin",
+        "admin",
+        [
+          { label: "OpenWire", value: "tcp://127.0.0.1:61616" },
+        ],
+        [
+          { label: "Web Console", value: "http://127.0.0.1:8161/admin/" },
+        ],
+        [
+          { key: "ACTIVEMQ_BROKER_URL", value: "tcp://127.0.0.1:61616" },
+          { key: "ACTIVEMQ_USER", value: "admin" },
+          { key: "ACTIVEMQ_PASSWORD", value: "admin" },
+        ],
+        [
+          {
+            label: "Java Spring",
+            lang: "yaml",
+            caption: "application.yml",
+            code: `spring:
+  activemq:
+    broker-url: tcp://127.0.0.1:61616
+    user: admin
+    password: admin`,
+          },
+          {
+            label: "Java JMS",
+            lang: "java",
+            caption: "activemq-client",
+            code: `var factory = new ActiveMQConnectionFactory(
+    "admin", "admin", "tcp://127.0.0.1:61616");
+var connection = factory.createConnection();
+connection.start();`,
+          },
+          {
+            label: "Python",
+            lang: "python",
+            caption: "stomp.py",
+            code: `import stomp
+conn = stomp.Connection([("127.0.0.1", 61613)])
+conn.connect("admin", "admin", wait=True)`,
+          },
+        ],
+      );
     case "nginx":
       return r(
         "Nginx",
@@ -736,6 +815,58 @@ conn = pika.BlockingConnection(pika.URLParameters(
         [],
         [],
         [],
+      );
+    case "ftp":
+      return r(
+        "FTP Server",
+        "仅监听本机的轻量文件传输服务",
+        2121,
+        true,
+        "zhiyu",
+        "zhiyu-local-ftp-2026",
+        [
+          {
+            label: "连接串",
+            value: "ftp://zhiyu:zhiyu-local-ftp-2026@127.0.0.1:2121/",
+          },
+        ],
+        [
+          { label: "共享目录", value: "~/.devbox/instances/ftp/default/data" },
+          { label: "被动端口", value: "50000–50009" },
+        ],
+        [
+          { key: "FTP_HOST", value: "127.0.0.1" },
+          { key: "FTP_PORT", value: "2121" },
+          { key: "FTP_USER", value: "zhiyu" },
+          { key: "FTP_PASSWORD", value: "zhiyu-local-ftp-2026" },
+        ],
+        [
+          {
+            label: "curl",
+            lang: "bash",
+            caption: "上传与下载",
+            code: `# 上传
+curl --ftp-pasv -T ./demo.txt \\
+  "ftp://zhiyu:zhiyu-local-ftp-2026@127.0.0.1:2121/"
+
+# 下载
+curl --ftp-pasv \\
+  "ftp://zhiyu:zhiyu-local-ftp-2026@127.0.0.1:2121/demo.txt" \\
+  -o demo.txt`,
+          },
+          {
+            label: "Python",
+            lang: "python",
+            caption: "标准库 ftplib",
+            code: `from ftplib import FTP
+
+ftp = FTP()
+ftp.connect("127.0.0.1", 2121)
+ftp.login("zhiyu", "zhiyu-local-ftp-2026")
+print(ftp.nlst())
+ftp.quit()`,
+          },
+        ],
       );
     default:
       return r(

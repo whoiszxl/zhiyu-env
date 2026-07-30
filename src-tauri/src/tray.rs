@@ -589,14 +589,17 @@ fn service_kind(id: &str) -> Option<ServiceKindInput> {
         "nats" => ServiceKindInput::Nats,
         "kafka" => ServiceKindInput::Kafka,
         "meilisearch" => ServiceKindInput::Meilisearch,
+        "influxdb" => ServiceKindInput::Influxdb,
         "minio" => ServiceKindInput::Minio,
         "rustfs" => ServiceKindInput::Rustfs,
         "etcd" => ServiceKindInput::Etcd,
         "consul" => ServiceKindInput::Consul,
         "rnacos" => ServiceKindInput::Rnacos,
         "rabbitmq" => ServiceKindInput::Rabbitmq,
+        "activemq" => ServiceKindInput::Activemq,
         "nginx" => ServiceKindInput::Nginx,
         "caddy" => ServiceKindInput::Caddy,
+        "ftp" => ServiceKindInput::Ftp,
         _ => return None,
     })
 }
@@ -611,14 +614,17 @@ fn service_id(kind: ServiceKindInput) -> &'static str {
         ServiceKindInput::Nats => "nats",
         ServiceKindInput::Kafka => "kafka",
         ServiceKindInput::Meilisearch => "meilisearch",
+        ServiceKindInput::Influxdb => "influxdb",
         ServiceKindInput::Minio => "minio",
         ServiceKindInput::Rustfs => "rustfs",
         ServiceKindInput::Etcd => "etcd",
         ServiceKindInput::Consul => "consul",
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "rabbitmq",
+        ServiceKindInput::Activemq => "activemq",
         ServiceKindInput::Nginx => "nginx",
         ServiceKindInput::Caddy => "caddy",
+        ServiceKindInput::Ftp => "ftp",
     }
 }
 

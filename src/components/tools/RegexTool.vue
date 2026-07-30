@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { toolUiText } from "../../i18n/toolUi";
+import AiAssistDialog from "../AiAssistDialog.vue";
+import type { AiAssistOption } from "../../types";
 
 interface RegexMatch {
   index: number;
@@ -31,6 +33,10 @@ const flagIgnoreCase = ref(false);
 const flagMultiline = ref(false);
 const flagDotAll = ref(false);
 const selectedPreset = ref("");
+const aiOpen = ref(false);
+const aiOptions: AiAssistOption[] = [{
+  id: "regex", label: "生成正则", hint: "描述需要匹配的文本规则，并提供正例和反例", canApply: true,
+}];
 
 const flags = computed(
   () =>
@@ -95,6 +101,15 @@ function applyPreset() {
 async function copy(value: string) {
   await navigator.clipboard.writeText(value);
 }
+
+function applyAiRegex(content: string) {
+  pattern.value = content.trim().replace(/^\/|\/[gimsuy]*$/g, "");
+  aiOpen.value = false;
+}
+
+function openAiSettings() {
+  window.dispatchEvent(new CustomEvent("zhiyu:open-ai-settings"));
+}
 </script>
 
 <template>
@@ -106,6 +121,7 @@ async function copy(value: string) {
         <p>实时匹配、捕获组查看与替换结果预览</p>
       </div>
     </div>
+    <div class="header-actions"><button type="button" @click="aiOpen = true">✦ AI 生成</button></div>
   </header>
 
   <section class="regex-page">
@@ -163,6 +179,15 @@ async function copy(value: string) {
       <pre>{{ replacementOutput }}</pre>
     </article>
   </section>
+  <AiAssistDialog
+    :open="aiOpen"
+    title="AI 正则助手"
+    :context="`当前表达式：${pattern}\nFlags：${flags}\n测试文本：\n${testText.slice(0, 8000)}`"
+    :options="aiOptions"
+    @close="aiOpen = false"
+    @settings="openAiSettings"
+    @apply="applyAiRegex"
+  />
 </template>
 
 <style scoped>

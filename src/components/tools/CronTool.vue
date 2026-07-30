@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import AiAssistDialog from "../AiAssistDialog.vue";
+import type { AiAssistOption } from "../../types";
 
 const PRESETS = [
   ["*/5 * * * *", "每 5 分钟"],
@@ -22,6 +24,10 @@ const expression = ref("*/5 * * * *");
 const selectedPreset = ref("*/5 * * * *");
 const error = ref("");
 const nextRuns = ref<Date[]>([]);
+const aiOpen = ref(false);
+const aiOptions: AiAssistOption[] = [{
+  id: "cron", label: "生成 Cron", hint: "例如：工作日每天下午 6 点执行", canApply: true,
+}];
 
 interface ParsedCron {
   minutes: Set<number>;
@@ -154,6 +160,16 @@ async function copy() {
   await navigator.clipboard.writeText(expression.value);
 }
 
+function applyAiCron(content: string) {
+  expression.value = content.trim().split(/\r?\n/)[0];
+  calculate();
+  aiOpen.value = false;
+}
+
+function openAiSettings() {
+  window.dispatchEvent(new CustomEvent("zhiyu:open-ai-settings"));
+}
+
 calculate();
 </script>
 
@@ -166,7 +182,7 @@ calculate();
         <p>校验 Cron 表达式并计算未来运行时间</p>
       </div>
     </div>
-    <div class="header-actions"><button type="button" @click="copy">复制表达式</button></div>
+    <div class="header-actions"><button type="button" @click="aiOpen = true">✦ AI 生成</button><button type="button" @click="copy">复制表达式</button></div>
   </header>
 
   <div v-if="error" class="notice danger"><span>{{ error }}</span><button type="button" @click="error = ''">×</button></div>
@@ -207,6 +223,15 @@ calculate();
 
     <p class="cron-note">当前支持 Linux 常用 5 段语法以及列表、范围、步长和英文月份/星期缩写；不支持 Quartz 的秒、年份、<code>?</code>、<code>L</code>、<code>W</code>。</p>
   </section>
+  <AiAssistDialog
+    :open="aiOpen"
+    title="AI Cron 助手"
+    :context="`当前表达式：${expression}\n当前解释：${explanation}`"
+    :options="aiOptions"
+    @close="aiOpen = false"
+    @settings="openAiSettings"
+    @apply="applyAiCron"
+  />
 </template>
 
 <style scoped>

@@ -7,15 +7,63 @@ export type ServiceKind =
   | "nats"
   | "kafka"
   | "meilisearch"
+  | "influxdb"
   | "minio"
   | "rustfs"
   | "etcd"
   | "consul"
   | "rnacos"
   | "rabbitmq"
+  | "activemq"
   | "nginx"
-  | "caddy";
+  | "caddy"
+  | "ftp";
 export type SqlServiceKind = "mysql" | "postgres";
+export type OlapEngine = "clickhouse" | "doris";
+
+export interface OlapProfile {
+  id: string;
+  name: string;
+  engine: OlapEngine;
+  endpoint: string;
+  username: string;
+  database: string;
+  hasPassword: boolean;
+}
+
+export interface OlapProfileInput {
+  id?: string | null;
+  name: string;
+  engine: OlapEngine;
+  endpoint: string;
+  username: string;
+  password?: string | null;
+  database: string;
+}
+
+export interface OlapConnectionTest {
+  version: string;
+  elapsedMs: number;
+}
+
+export interface OlapDatabaseInfo {
+  name: string;
+  system: boolean;
+}
+
+export interface OlapTableInfo {
+  name: string;
+  engine: string;
+  rows: number | null;
+}
+
+export interface OlapQueryResult {
+  columns: string[];
+  rows: Array<Array<string | null>>;
+  summary: string;
+  elapsedMs: number;
+  truncated: boolean;
+}
 
 export type ServiceState =
   | "not_installed"
@@ -59,6 +107,23 @@ export interface ServiceDiskUsage {
   cacheBytes: number;
   backupBytes: number;
   otherBytes: number;
+}
+
+export interface InfluxdbOverview {
+  ready: boolean;
+  databaseCount: number;
+  endpoint: string;
+}
+
+export interface InfluxdbDatabase {
+  name: string;
+}
+
+export interface InfluxdbQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated: boolean;
 }
 
 export interface EnvironmentMetrics {
@@ -128,6 +193,7 @@ export type BackgroundPattern =
 export type UiScale = 90 | 100 | 110 | 120;
 export type BackgroundStyle = "off" | "original" | "frosted" | "blur" | "mist";
 export type BackgroundPosition = "center" | "top" | "bottom";
+export type ProxyMode = "system" | "manual" | "disabled";
 
 export interface AppSettings {
   locale: AppLocale;
@@ -145,6 +211,14 @@ export interface AppSettings {
   toolOrder: string[];
   launchAtLogin: boolean;
   keepServicesRunningOnClose: boolean;
+  resourceSaverEnabled: boolean;
+  resourceSaverMode: "remind" | "stop";
+  resourceSaverMinutes: number;
+  resourceSaverServices: ServiceKind[];
+  proxyMode: ProxyMode;
+  proxyUrl: string;
+  downloadProxyEnabled: boolean;
+  networkProxyEnabled: boolean;
   downloadMirror: string;
   publicGithubMirror: boolean;
   downloadConcurrency: number;
@@ -154,6 +228,95 @@ export interface AppSettings {
   backupRetentionCount: number;
   autoCheckUpdates: boolean;
   onboardingCompleted: boolean;
+}
+
+export type AiApiProtocol = "openai" | "anthropic";
+
+export interface AiSettings {
+  enabled: boolean;
+  protocol: AiApiProtocol;
+  baseUrl: string;
+  model: string;
+  timeoutSeconds: number;
+  maxOutputTokens: number;
+  apiKeyConfigured: boolean;
+  userAvatarPath: string;
+  assistantAvatarPath: string;
+}
+
+export interface AiSettingsInput {
+  enabled: boolean;
+  protocol: AiApiProtocol;
+  baseUrl: string;
+  model: string;
+  timeoutSeconds: number;
+  maxOutputTokens: number;
+  userAvatarPath: string;
+  assistantAvatarPath: string;
+  apiKey: string;
+  clearApiKey: boolean;
+}
+
+export interface AiConnectionTestResult {
+  success: boolean;
+  protocol: AiApiProtocol;
+  model: string;
+  latencyMillis: number;
+  message: string;
+}
+
+export interface AiChatSession {
+  id: string;
+  title: string;
+  preview: string;
+  messageCount: number;
+  createdAtMillis: number;
+  updatedAtMillis: number;
+}
+
+export interface AiChatMessage {
+  id: number;
+  sessionId: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAtMillis: number;
+}
+
+export interface AiChatStreamEvent {
+  sessionId: string;
+  requestId: string;
+  event: "delta" | "done" | "cancelled" | "error";
+  content: string;
+}
+
+export type AiToolCapability =
+  | "database_sql"
+  | "database_explain"
+  | "database_error"
+  | "redis_command"
+  | "redis_analysis"
+  | "mock_api"
+  | "mongodb_command"
+  | "mongodb_analysis"
+  | "message_design"
+  | "service_logs"
+  | "web_config"
+  | "http_request"
+  | "cron"
+  | "regex"
+  | "ssh";
+
+export interface AiToolStreamEvent {
+  requestId: string;
+  event: "delta" | "done" | "cancelled" | "error";
+  content: string;
+}
+
+export interface AiAssistOption {
+  id: AiToolCapability;
+  label: string;
+  hint: string;
+  canApply?: boolean;
 }
 
 export interface UpdateStatus {
@@ -488,6 +651,84 @@ export interface PortListener {
   commonService: string | null;
 }
 
+export interface NetworkDiagnosticInput {
+  target: string;
+  mode: "auto" | "tcp" | "http" | "https";
+  port: number | null;
+  timeoutSeconds: number;
+}
+
+export interface NetworkResolvedAddress {
+  address: string;
+  family: "IPv4" | "IPv6";
+  local: boolean;
+}
+
+export interface NetworkTcpAttempt {
+  address: string;
+  connected: boolean;
+  elapsedMillis: number;
+  error: string;
+}
+
+export interface NetworkHttpProbe {
+  url: string;
+  statusCode: number;
+  statusText: string;
+  elapsedMillis: number;
+  effectiveUrl: string;
+  server: string;
+  contentType: string;
+  contentLength: number | null;
+}
+
+export interface NetworkTlsProbe {
+  success: boolean;
+  elapsedMillis: number;
+  protocol: string;
+  cipherSuite: string;
+  alpn: string;
+  certificateCount: number;
+  sha256Fingerprint: string;
+  error: string;
+}
+
+export interface NetworkProxySetting {
+  source: string;
+  name: string;
+  value: string;
+}
+
+export interface NetworkFinding {
+  level: "success" | "warning" | "error";
+  code: "dns_slow" | "tcp_failed" | "tcp_partial" | "local_no_listener" | "http_error" | "http_slow" | "tls_failed" | "healthy";
+  detail: string;
+}
+
+export interface NetworkDiagnosticResult {
+  target: string;
+  host: string;
+  port: number;
+  mode: "tcp" | "http" | "https";
+  dnsMillis: number;
+  addresses: NetworkResolvedAddress[];
+  tcpAttempts: NetworkTcpAttempt[];
+  http: NetworkHttpProbe | null;
+  tls: NetworkTlsProbe | null;
+  portOwner: PortListener | null;
+  proxies: NetworkProxySetting[];
+  findings: NetworkFinding[];
+}
+
+export interface ZeroMqResult {
+  endpoint: string;
+  pattern: "PUB/SUB" | "PUSH/PULL";
+  direction: "sent" | "received";
+  frames: string[];
+  bytes: number;
+  timestampMillis: number;
+}
+
 export interface DuckdbStatus {
   installed: boolean;
   version: string;
@@ -731,10 +972,113 @@ export interface HttpResponseOutput {
   effectiveUrl: string;
 }
 
+export interface HttpWorkspaceVariable {
+  key: string;
+  value: string;
+  secret: boolean;
+  enabled: boolean;
+}
+
+export interface HttpWorkspaceEnvironment {
+  id: string;
+  name: string;
+  variables: HttpWorkspaceVariable[];
+}
+
+export interface HttpWorkspaceAuth {
+  kind: "none" | "basic" | "bearer" | "apiKey";
+  username: string;
+  password: string;
+  token: string;
+  key: string;
+  value: string;
+  placement: "header" | "query";
+}
+
+export interface HttpWorkspaceRequest {
+  id: string;
+  name: string;
+  folder: string;
+  method: string;
+  url: string;
+  queryParams: HttpHeader[];
+  headers: HttpHeader[];
+  body: string;
+  auth: HttpWorkspaceAuth;
+  updatedAt: number;
+}
+
+export interface HttpWorkspaceState {
+  version: number;
+  activeEnvironmentId: string;
+  environments: HttpWorkspaceEnvironment[];
+  requests: HttpWorkspaceRequest[];
+}
+
+export interface LocalDomainRoute {
+  id: string;
+  name: string;
+  hostname: string;
+  target: string;
+  path: string;
+  https: boolean;
+  enabled: boolean;
+}
+
+export interface LocalDomainsState {
+  version: number;
+  httpPort: number;
+  httpsPort: number;
+  routes: LocalDomainRoute[];
+  lastBackupPath: string;
+  lastAppliedAtMillis: number;
+}
+
+export interface LocalDomainCheck {
+  reachable: boolean;
+  latencyMillis: number;
+  message: string;
+}
+
+export interface TestDataExportField {
+  name: string;
+  kind: string;
+  options: string;
+  nullablePercent: number;
+  unique: boolean;
+  prefix: string;
+  suffix: string;
+}
+
+export interface TestDataExportInput {
+  seed: string;
+  count: number;
+  format: "json" | "csv" | "sql";
+  tableName: string;
+  fields: TestDataExportField[];
+  path: string;
+}
+
+export interface TestDataExportResult {
+  path: string;
+  rows: number;
+  bytes: number;
+}
+
 export interface QrCodeResult {
   svg: string;
   modules: number;
   contentBytes: number;
+  version: number;
+}
+
+export interface QrCodeOptions {
+  content: string;
+  errorCorrection: "L" | "M" | "Q" | "H";
+  size: number;
+  foreground: string;
+  background: string;
+  quietZone: boolean;
 }
 
 // ── SSH 远程连接 ──────────────────────────────────────────
@@ -775,4 +1119,192 @@ export interface SshTerminalEvent {
   sessionId: string;
   event: "data" | "closed" | "error";
   data: string;
+}
+
+// ── RSS 订阅 ──────────────────────────────────────────────
+
+export interface RssFeed {
+  id: number;
+  title: string;
+  feedUrl: string;
+  siteUrl: string | null;
+  description: string | null;
+  refreshIntervalMinutes: number;
+  enabled: boolean;
+  unreadCount: number;
+  entryCount: number;
+  lastRefreshedAtMillis: number | null;
+  lastError: string | null;
+}
+
+export interface RssEntry {
+  id: number;
+  feedId: number;
+  feedTitle: string;
+  title: string;
+  link: string | null;
+  author: string | null;
+  summary: string;
+  content: string;
+  publishedAtMillis: number | null;
+  fetchedAtMillis: number;
+  isRead: boolean;
+  isStarred: boolean;
+}
+
+export interface RssRefreshResult {
+  feedId: number;
+  title: string;
+  added: number;
+  updated: number;
+  notModified: boolean;
+}
+
+export interface RssImportResult {
+  imported: number;
+  skipped: number;
+}
+
+export interface RssFeedUpdate {
+  title: string;
+  refreshIntervalMinutes: number;
+  enabled: boolean;
+}
+
+export type RssAiAction =
+  | "summary"
+  | "translate"
+  | "key_points"
+  | "question";
+
+export interface RssAiResult {
+  id: number;
+  entryId: number;
+  action: RssAiAction;
+  question: string;
+  outputLanguage: string;
+  model: string;
+  content: string;
+  status: "complete" | "partial";
+  createdAtMillis: number;
+  updatedAtMillis: number;
+}
+
+export interface RssAiStreamEvent {
+  entryId: number;
+  requestId: string;
+  action: RssAiAction;
+  event: "delta" | "done" | "cancelled" | "error";
+  content: string;
+}
+
+// ── 开发运行时 ────────────────────────────────────────────
+
+export type RuntimeKind = "go" | "java" | "rust" | "python" | "node";
+
+export interface RuntimeEnvironmentVariable {
+  key: string;
+  value: string;
+}
+
+export interface RuntimeVersionInfo {
+  kind: RuntimeKind;
+  series: string;
+  version: string;
+  supportLabel: string;
+  legacy: boolean;
+  recommended: boolean;
+  installed: boolean;
+  selected: boolean;
+  compatible: boolean;
+  platformLabel: string;
+  installationPath: string;
+  executablePath: string;
+  diskBytes: number;
+}
+
+export interface RuntimeOverview {
+  kind: RuntimeKind;
+  name: string;
+  selectedVersion: string | null;
+  installedCount: number;
+  totalDiskBytes: number;
+  platformLabel: string;
+  compatible: boolean;
+  versions: RuntimeVersionInfo[];
+  environment: RuntimeEnvironmentVariable[];
+  goProxy: string;
+}
+
+export interface RuntimeDiagnostic {
+  success: boolean;
+  version: string;
+  executable: string;
+  output: string;
+  environment: RuntimeEnvironmentVariable[];
+}
+
+export interface RuntimeProject {
+  id: string;
+  name: string;
+  path: string;
+  description: string;
+  services: ServiceKind[];
+  goVersion: string | null;
+  javaVersion: string | null;
+  rustVersion: string | null;
+  pythonVersion: string | null;
+  nodeVersion: string | null;
+  createdAtMillis: number;
+  updatedAtMillis: number;
+}
+
+export type ScheduledTaskKind = "cron" | "interval";
+export type ScheduledTaskRunStatus =
+  | "success"
+  | "failed"
+  | "timed_out"
+  | "cancelled";
+
+export interface ScheduledTask {
+  id: number;
+  name: string;
+  scheduleKind: ScheduledTaskKind;
+  cronExpression: string;
+  intervalMinutes: number;
+  command: string;
+  workingDirectory: string;
+  timeoutSeconds: number;
+  enabled: boolean;
+  running: boolean;
+  nextRunAtMillis: number | null;
+  lastRunAtMillis: number | null;
+  lastStatus: ScheduledTaskRunStatus | null;
+  runCount: number;
+  createdAtMillis: number;
+  updatedAtMillis: number;
+}
+
+export interface ScheduledTaskInput {
+  id?: number | null;
+  name: string;
+  scheduleKind: ScheduledTaskKind;
+  cronExpression: string;
+  intervalMinutes: number;
+  command: string;
+  workingDirectory: string;
+  timeoutSeconds: number;
+  enabled: boolean;
+}
+
+export interface ScheduledTaskRun {
+  id: number;
+  taskId: number;
+  startedAtMillis: number;
+  finishedAtMillis: number;
+  durationMillis: number;
+  status: ScheduledTaskRunStatus;
+  exitCode: number | null;
+  output: string;
+  trigger: "manual" | "scheduled";
 }

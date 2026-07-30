@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const STALE_INSTALL_ARTIFACT_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
-const SERVICE_KINDS: [ServiceKindInput; 16] = [
+const SERVICE_KINDS: [ServiceKindInput; 19] = [
     ServiceKindInput::Redis,
     ServiceKindInput::Mysql,
     ServiceKindInput::Postgres,
@@ -19,14 +19,17 @@ const SERVICE_KINDS: [ServiceKindInput; 16] = [
     ServiceKindInput::Nats,
     ServiceKindInput::Kafka,
     ServiceKindInput::Meilisearch,
+    ServiceKindInput::Influxdb,
     ServiceKindInput::Minio,
     ServiceKindInput::Rustfs,
     ServiceKindInput::Etcd,
     ServiceKindInput::Consul,
     ServiceKindInput::Rnacos,
     ServiceKindInput::Rabbitmq,
+    ServiceKindInput::Activemq,
     ServiceKindInput::Nginx,
     ServiceKindInput::Caddy,
+    ServiceKindInput::Ftp,
 ];
 
 #[derive(Debug, Serialize)]

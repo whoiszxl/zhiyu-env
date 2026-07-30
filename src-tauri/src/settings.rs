@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
@@ -25,6 +24,14 @@ pub struct AppSettings {
     pub tool_order: Vec<String>,
     pub launch_at_login: bool,
     pub keep_services_running_on_close: bool,
+    pub resource_saver_enabled: bool,
+    pub resource_saver_mode: String,
+    pub resource_saver_minutes: u32,
+    pub resource_saver_services: Vec<String>,
+    pub proxy_mode: String,
+    pub proxy_url: String,
+    pub download_proxy_enabled: bool,
+    pub network_proxy_enabled: bool,
     pub download_mirror: String,
     pub public_github_mirror: bool,
     pub download_concurrency: u8,
@@ -54,6 +61,14 @@ impl Default for AppSettings {
             tool_order: Vec::new(),
             launch_at_login: false,
             keep_services_running_on_close: true,
+            resource_saver_enabled: false,
+            resource_saver_mode: "remind".into(),
+            resource_saver_minutes: 60,
+            resource_saver_services: Vec::new(),
+            proxy_mode: "system".into(),
+            proxy_url: String::new(),
+            download_proxy_enabled: true,
+            network_proxy_enabled: true,
             download_mirror: String::new(),
             public_github_mirror: true,
             download_concurrency: 2,
@@ -84,6 +99,15 @@ struct InstallerSettings<'a> {
     public_github_mirror: bool,
     download_concurrency: u8,
     download_timeout_seconds: u64,
+    proxy_mode: &'a str,
+    proxy_url: Option<&'a str>,
+    download_proxy_enabled: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ProxyScope {
+    Download,
+    Network,
 }
 
 #[derive(Deserialize)]
@@ -190,14 +214,17 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
             "nats",
             "kafka",
             "meilisearch",
+            "influxdb",
             "minio",
             "rustfs",
             "etcd",
             "consul",
             "rnacos",
             "rabbitmq",
+            "activemq",
             "nginx",
             "caddy",
+            "ftp",
         ],
     );
     normalize_ids(
@@ -211,26 +238,74 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
             "nats",
             "kafka",
             "meilisearch",
+            "influxdb",
             "minio",
             "rustfs",
             "etcd",
             "consul",
             "rnacos",
             "rabbitmq",
+            "activemq",
             "nginx",
             "caddy",
+            "ftp",
         ],
     );
     normalize_ids(
+        &mut settings.resource_saver_services,
+        &[
+            "redis",
+            "mysql",
+            "postgres",
+            "mongodb",
+            "mailpit",
+            "nats",
+            "kafka",
+            "meilisearch",
+            "influxdb",
+            "minio",
+            "rustfs",
+            "etcd",
+            "consul",
+            "rnacos",
+            "rabbitmq",
+            "activemq",
+            "nginx",
+            "caddy",
+            "ftp",
+        ],
+    );
+    if !matches!(settings.resource_saver_mode.as_str(), "remind" | "stop") {
+        return Err("资源休眠模式只支持 remind 或 stop".into());
+    }
+    if !(15..=1440).contains(&settings.resource_saver_minutes) {
+        return Err("资源休眠时间必须在 15 到 1440 分钟之间".into());
+    }
+    normalize_ids(
         &mut settings.hidden_tools,
         &[
+            "go",
+            "java",
+            "rust",
+            "python",
+            "node",
+            "workspace",
+            "templates",
+            "domains",
             "ports",
+            "network",
+            "zeromq",
+            "clickhouse",
+            "doris",
             "mockapi",
             "http",
+            "dbdev",
+            "testdata",
             "realtime",
             "time",
             "regex",
             "cron",
+            "tasks",
             "qrcode",
             "ssh",
             "duckdb",
@@ -238,19 +313,35 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
             "dataformat",
             "jwt",
             "clipboard",
+            "rss",
             "s3",
         ],
     );
     normalize_ids(
         &mut settings.tool_order,
         &[
+            "go",
+            "java",
+            "rust",
+            "python",
+            "node",
+            "workspace",
+            "templates",
+            "domains",
             "ports",
+            "network",
+            "zeromq",
+            "clickhouse",
+            "doris",
             "mockapi",
             "http",
+            "dbdev",
+            "testdata",
             "realtime",
             "time",
             "regex",
             "cron",
+            "tasks",
             "qrcode",
             "ssh",
             "duckdb",
@@ -258,6 +349,7 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
             "dataformat",
             "jwt",
             "clipboard",
+            "rss",
             "s3",
         ],
     );
@@ -274,6 +366,24 @@ fn validate(settings: &mut AppSettings) -> Result<(), String> {
     }
     if !(15..=600).contains(&settings.download_timeout_seconds) {
         return Err("下载超时时间必须在 15 到 600 秒之间".into());
+    }
+    if !matches!(
+        settings.proxy_mode.as_str(),
+        "system" | "manual" | "disabled"
+    ) {
+        return Err("代理模式不受支持".into());
+    }
+    settings.proxy_url = settings.proxy_url.trim().trim_end_matches('/').to_string();
+    if settings.proxy_mode == "manual"
+        && (settings.download_proxy_enabled || settings.network_proxy_enabled)
+    {
+        let url = reqwest::Url::parse(&settings.proxy_url)
+            .map_err(|_| "请输入有效的代理地址".to_string())?;
+        if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h")
+            || url.host_str().is_none()
+        {
+            return Err("手动代理仅支持有效的 HTTP、HTTPS 或 SOCKS5 地址".into());
+        }
     }
     if !(1..=365).contains(&settings.log_retention_days) {
         return Err("日志保留天数必须在 1 到 365 天之间".into());
@@ -341,12 +451,191 @@ fn persist(settings: &AppSettings) -> Result<(), String> {
         public_github_mirror: settings.public_github_mirror,
         download_concurrency: settings.download_concurrency,
         download_timeout_seconds: settings.download_timeout_seconds,
+        proxy_mode: settings.proxy_mode.as_str(),
+        proxy_url: (!settings.proxy_url.is_empty()).then_some(settings.proxy_url.as_str()),
+        download_proxy_enabled: settings.download_proxy_enabled,
     };
     fs::write(
         root.join("installer-settings.json"),
         serde_json::to_vec_pretty(&installer).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())
+}
+
+pub(crate) fn reqwest_client_builder(
+    scope: ProxyScope,
+) -> Result<reqwest::blocking::ClientBuilder, String> {
+    let settings = load_settings();
+    let enabled = match scope {
+        ProxyScope::Download => settings.download_proxy_enabled,
+        ProxyScope::Network => settings.network_proxy_enabled,
+    };
+    let mut builder = reqwest::blocking::Client::builder();
+    if !enabled || settings.proxy_mode == "disabled" {
+        return Ok(builder.no_proxy());
+    }
+    if settings.proxy_mode == "manual" {
+        let no_proxy = reqwest::NoProxy::from_string("localhost,127.0.0.1,::1,0.0.0.0,*.local");
+        let proxy = reqwest::Proxy::all(&settings.proxy_url)
+            .map_err(|error| format!("代理地址无效: {error}"))?
+            .no_proxy(no_proxy);
+        builder = builder.no_proxy().proxy(proxy);
+    } else if !has_proxy_environment() {
+        #[cfg(target_os = "macos")]
+        {
+            let proxies = macos_system_proxies();
+            if !proxies.is_empty() {
+                builder = builder.no_proxy();
+                for (scheme, url) in proxies {
+                    let no_proxy =
+                        reqwest::NoProxy::from_string("localhost,127.0.0.1,::1,0.0.0.0,*.local");
+                    let proxy = match scheme.as_str() {
+                        "http" => reqwest::Proxy::http(&url),
+                        "https" => reqwest::Proxy::https(&url),
+                        _ => reqwest::Proxy::all(&url),
+                    }
+                    .map_err(|error| format!("系统代理地址无效: {error}"))?
+                    .no_proxy(no_proxy);
+                    builder = builder.proxy(proxy);
+                }
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let proxies = windows_system_proxies();
+            if !proxies.is_empty() {
+                builder = builder.no_proxy();
+                for (scheme, url) in proxies {
+                    let no_proxy =
+                        reqwest::NoProxy::from_string("localhost,127.0.0.1,::1,0.0.0.0,*.local");
+                    let proxy = match scheme.as_str() {
+                        "http" => reqwest::Proxy::http(&url),
+                        "https" => reqwest::Proxy::https(&url),
+                        _ => reqwest::Proxy::all(&url),
+                    }
+                    .map_err(|error| format!("系统代理地址无效: {error}"))?
+                    .no_proxy(no_proxy);
+                    builder = builder.proxy(proxy);
+                }
+            }
+        }
+    }
+    Ok(builder)
+}
+
+fn has_proxy_environment() -> bool {
+    [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ]
+    .iter()
+    .any(|key| std::env::var(key).is_ok_and(|value| !value.trim().is_empty()))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_system_proxies() -> Vec<(String, String)> {
+    let Ok(output) = std::process::Command::new("/usr/sbin/scutil")
+        .arg("--proxy")
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_macos_system_proxies(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(target_os = "macos")]
+fn parse_macos_system_proxies(output: &str) -> Vec<(String, String)> {
+    fn value<'a>(output: &'a str, key: &str) -> Option<&'a str> {
+        output.lines().find_map(|line| {
+            let (name, value) = line.trim().split_once(':')?;
+            (name.trim() == key).then_some(value.trim())
+        })
+    }
+    let mut proxies = Vec::new();
+    for (scheme, prefix, url_scheme) in [
+        ("http", "HTTP", "http"),
+        ("https", "HTTPS", "http"),
+        ("all", "SOCKS", "socks5h"),
+    ] {
+        if value(output, &format!("{prefix}Enable")) != Some("1") {
+            continue;
+        }
+        let Some(host) = value(output, &format!("{prefix}Proxy")) else {
+            continue;
+        };
+        let Some(port) = value(output, &format!("{prefix}Port")) else {
+            continue;
+        };
+        if !host.is_empty() && port.parse::<u16>().is_ok() {
+            proxies.push((
+                scheme.into(),
+                format!("{url_scheme}://{}:{port}", host.trim_matches(['[', ']'])),
+            ));
+        }
+    }
+    proxies
+}
+
+#[cfg(target_os = "windows")]
+fn windows_system_proxies() -> Vec<(String, String)> {
+    fn registry_value(name: &str) -> Option<String> {
+        let output = std::process::Command::new("reg.exe")
+            .args([
+                "query",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+                "/v",
+                name,
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find(|line| line.contains(name))
+            .and_then(|line| line.split_whitespace().last())
+            .map(str::to_string)
+    }
+    if registry_value("ProxyEnable").as_deref() != Some("0x1") {
+        return Vec::new();
+    }
+    let Some(server) = registry_value("ProxyServer") else {
+        return Vec::new();
+    };
+    parse_windows_proxy_server(&server)
+}
+
+#[cfg(target_os = "windows")]
+fn parse_windows_proxy_server(server: &str) -> Vec<(String, String)> {
+    if !server.contains('=') {
+        return vec![("all".into(), format!("http://{server}"))];
+    }
+    server
+        .split(';')
+        .filter_map(|entry| {
+            let (scheme, endpoint) = entry.split_once('=')?;
+            let (scope, proxy_scheme) = match scheme.trim().to_ascii_lowercase().as_str() {
+                "http" => ("http", "http"),
+                "https" => ("https", "http"),
+                "socks" | "socks5" => ("all", "socks5h"),
+                _ => return None,
+            };
+            (!endpoint.trim().is_empty()).then(|| {
+                (
+                    scope.into(),
+                    format!("{proxy_scheme}://{}", endpoint.trim()),
+                )
+            })
+        })
+        .collect()
 }
 
 fn persist_settings_document(settings: &AppSettings) -> Result<(), String> {
@@ -545,27 +834,21 @@ fn check_update() -> Result<UpdateStatus, String> {
             message: "自动检查更新已关闭".into(),
         });
     }
-    let output = Command::new("/usr/bin/curl")
-        .args([
-            "--fail",
-            "--location",
-            "--silent",
-            "--show-error",
-            "--connect-timeout",
-            "3",
-            "--max-time",
-            "8",
-            "--header",
-            "User-Agent: zhiyu-env",
-            "https://api.github.com/repos/whoiszxl/zhiyu-env/releases/latest",
-        ])
-        .output()
-        .map_err(|error| format!("无法启动更新检查: {error}"))?;
-    if !output.status.success() {
-        return Err("暂时无法访问 GitHub Release".into());
+    let response = reqwest_client_builder(ProxyScope::Network)?
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(8))
+        .user_agent("zhiyu-env")
+        .build()
+        .map_err(|error| format!("无法创建更新检查客户端: {error}"))?
+        .get("https://api.github.com/repos/whoiszxl/zhiyu-env/releases/latest")
+        .send()
+        .map_err(|error| format!("暂时无法访问 GitHub Release: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("GitHub Release 返回 HTTP {}", response.status()));
     }
+    let payload = response.bytes().map_err(|error| error.to_string())?;
     let release: GithubRelease =
-        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+        serde_json::from_slice(&payload).map_err(|error| error.to_string())?;
     let latest = release.tag_name.trim_start_matches('v').to_string();
     let available = version_parts(&latest) > version_parts(&current);
     Ok(UpdateStatus {
@@ -602,6 +885,67 @@ mod tests {
     fn default_settings_are_bounded() {
         let mut settings = AppSettings::default();
         assert!(validate(&mut settings).is_ok());
+        assert_eq!(settings.proxy_mode, "system");
+        assert!(settings.download_proxy_enabled);
+        assert!(settings.network_proxy_enabled);
+    }
+
+    #[test]
+    fn manual_proxy_requires_a_valid_http_endpoint() {
+        let mut settings = AppSettings {
+            proxy_mode: "manual".into(),
+            proxy_url: "ftp://127.0.0.1:7890".into(),
+            ..AppSettings::default()
+        };
+        assert!(validate(&mut settings).is_err());
+
+        settings.proxy_url = "socks5h://127.0.0.1:7890/".into();
+        assert!(validate(&mut settings).is_ok());
+        assert_eq!(settings.proxy_url, "socks5h://127.0.0.1:7890");
+
+        settings.proxy_mode = "disabled".into();
+        settings.proxy_url.clear();
+        assert!(validate(&mut settings).is_ok());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_system_proxy_output_is_parsed() {
+        let output = r#"<dictionary> {
+          HTTPEnable : 1
+          HTTPPort : 7890
+          HTTPProxy : 127.0.0.1
+          HTTPSEnable : 1
+          HTTPSPort : 7890
+          HTTPSProxy : 127.0.0.1
+          SOCKSEnable : 0
+        }"#;
+        assert_eq!(
+            parse_macos_system_proxies(output),
+            vec![
+                ("http".into(), "http://127.0.0.1:7890".into()),
+                ("https".into(), "http://127.0.0.1:7890".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn resource_saver_requires_an_explicit_bounded_policy() {
+        let mut settings = AppSettings {
+            resource_saver_enabled: true,
+            resource_saver_mode: "stop".into(),
+            resource_saver_minutes: 15,
+            resource_saver_services: vec!["redis".into(), "redis".into(), "unknown".into()],
+            ..AppSettings::default()
+        };
+        assert!(validate(&mut settings).is_ok());
+        assert_eq!(settings.resource_saver_services, ["redis"]);
+
+        settings.resource_saver_minutes = 5;
+        assert!(validate(&mut settings).is_err());
+        settings.resource_saver_minutes = 60;
+        settings.resource_saver_mode = "delete".into();
+        assert!(validate(&mut settings).is_err());
     }
 
     #[test]
@@ -666,6 +1010,9 @@ mod tests {
         assert!(settings.service_order.is_empty());
         assert!(settings.hidden_tools.is_empty());
         assert!(settings.tool_order.is_empty());
+        assert_eq!(settings.proxy_mode, "system");
+        assert!(settings.download_proxy_enabled);
+        assert!(settings.network_proxy_enabled);
         assert!(!settings.onboarding_completed);
     }
 

@@ -1,6 +1,6 @@
 use base64::Engine;
 use hmac::{Hmac, Mac};
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::Response;
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
@@ -432,7 +432,7 @@ fn s3_request(
     };
     let payload = body.unwrap_or_default();
     let payload_hash = sha256_hex_bytes(payload);
-    let client = Client::builder()
+    let client = crate::settings::reqwest_client_builder(crate::settings::ProxyScope::Network)?
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| format!("创建 HTTP 客户端失败: {error}"))?;

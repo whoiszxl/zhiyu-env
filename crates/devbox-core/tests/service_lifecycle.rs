@@ -1,11 +1,13 @@
 #![cfg(unix)]
 
 use devbox_core::{
-    ConsulService, EtcdService, KafkaService, MailpitService, MeilisearchService, MinioService,
-    MongodbService, MysqlService, NatsService, PostgresService, RabbitmqService, RedisService,
-    RnacosService, RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    ActivemqService, ConsulService, EtcdService, FtpService, InfluxdbService, KafkaService,
+    MailpitService, MeilisearchService, MinioService, MongodbService, MysqlService, NatsService,
+    PostgresService, RabbitmqService, RedisService, RnacosService, RustfsService, ServiceConfig,
+    ServiceKind, ServiceManager, ServiceStatus,
 };
 use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -117,6 +119,14 @@ fn meilisearch_service_lifecycle() {
 }
 
 #[test]
+fn influxdb_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = InfluxdbService::new(config(temp.path(), ServiceKind::Influxdb)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("influxdb/conf/influxdb.env").is_file());
+}
+
+#[test]
 fn minio_service_lifecycle() {
     let temp = TempDir::new().unwrap();
     let service = MinioService::new(config(temp.path(), ServiceKind::Minio)).unwrap();
@@ -163,6 +173,52 @@ fn rabbitmq_service_lifecycle() {
     assert_lifecycle(&service);
     assert!(temp.path().join("rabbitmq/conf/rabbitmq.conf").is_file());
     assert!(temp.path().join("rabbitmq/conf/enabled_plugins").is_file());
+}
+
+#[test]
+fn activemq_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("activemq-home");
+    let java_home = temp.path().join("java-home");
+    std::fs::create_dir_all(home.join("conf")).unwrap();
+    std::fs::create_dir_all(java_home.join("bin")).unwrap();
+    std::fs::write(
+        home.join("conf/activemq.xml"),
+        r#"<transportConnector uri="tcp://0.0.0.0:61616"/><storeUsage limit="100 gb"/><tempUsage limit="50 gb"/>"#,
+    )
+    .unwrap();
+    std::fs::write(java_home.join("bin/java"), b"test").unwrap();
+
+    let mut service_config = config(temp.path(), ServiceKind::Activemq);
+    service_config
+        .environment
+        .insert("ACTIVEMQ_HOME".into(), home.display().to_string());
+    service_config
+        .environment
+        .insert("JAVA_HOME".into(), java_home.display().to_string());
+    let service = ActivemqService::new(service_config).unwrap();
+
+    assert_lifecycle(&service);
+    let broker = std::fs::read_to_string(temp.path().join("activemq/conf/activemq.xml")).unwrap();
+    assert!(broker.contains("tcp://127.0.0.1:61616"));
+    assert!(broker.contains("storeUsage limit=\"2 gb\""));
+}
+
+#[test]
+fn ftp_service_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let service = FtpService::new(config(temp.path(), ServiceKind::Ftp)).unwrap();
+    assert_lifecycle(&service);
+    assert!(temp.path().join("ftp/conf/ftp.env").is_file());
+    let password = temp.path().join("ftp/conf/ftp.password");
+    assert_eq!(
+        std::fs::read_to_string(&password).unwrap(),
+        "zhiyu-local-ftp-2026"
+    );
+    assert_eq!(
+        std::fs::metadata(password).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
 }
 
 #[test]

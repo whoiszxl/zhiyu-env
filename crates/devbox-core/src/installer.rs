@@ -92,7 +92,7 @@ pub fn with_install_context<T>(
     })
 }
 
-fn check_install_cancelled() -> Result<()> {
+pub fn check_install_cancelled() -> Result<()> {
     let cancelled = ACTIVE_INSTALL_CANCELLATION.with(|active| {
         active
             .borrow()
@@ -373,6 +373,12 @@ const MEILISEARCH_BINARY: &str = "meilisearch-macos-apple-silicon-1.50.0";
 const MEILISEARCH_URL: &str =
     "https://github.com/meilisearch/meilisearch/releases/download/v1.50.0/meilisearch-macos-apple-silicon";
 const MEILISEARCH_SHA256: &str = "deccb8a992e8d24c3e67118fd1166a37ef11e5b092cb1e269f2ae8a7ac8d65c8";
+pub const INFLUXDB_SERIES: &str = "3.10";
+pub const INFLUXDB_VERSION: &str = "3.10.5";
+const INFLUXDB_ARCHIVE: &str = "influxdb3-core-3.10.5_darwin_arm64.tar.gz";
+const INFLUXDB_URL: &str =
+    "https://dl.influxdata.com/influxdb/releases/influxdb3-core-3.10.5_darwin_arm64.tar.gz";
+const INFLUXDB_SHA256: &str = "4723dc749587f3afe9153fcff50ad27e46552115741fd45ff85a16b5187d10ac";
 pub const MINIO_SERIES: &str = "2025";
 pub const MINIO_VERSION: &str = "2025-09-07";
 const MINIO_BINARY: &str = "minio.RELEASE.2025-09-07T16-13-09Z";
@@ -415,12 +421,24 @@ const RABBITMQ_OTP_URL: &str =
     "https://github.com/erlef/otp_builds/releases/download/OTP-27.3.4.6/otp-aarch64-apple-darwin.tar.gz";
 const RABBITMQ_OTP_SHA256: &str =
     "82b1aa23f4a40f391e6b42cb4e9607e1e360bc2fdcb88d032b040795bb6d349f";
+pub const ACTIVEMQ_SERIES: &str = "6.2";
+pub const ACTIVEMQ_VERSION: &str = "6.2.8";
+const ACTIVEMQ_ARCHIVE: &str = "apache-activemq-6.2.8-bin.tar.gz";
+const ACTIVEMQ_URL: &str =
+    "https://downloads.apache.org/activemq/6.2.8/apache-activemq-6.2.8-bin.tar.gz";
+const ACTIVEMQ_SHA256: &str = "9d8751ba826983b1b7a4fe0e48a89fccaf499ed341cbefb9c1d7edb4ab239305";
 pub const CADDY_SERIES: &str = "2.11";
 pub const CADDY_VERSION: &str = "2.11.4";
 const CADDY_ARCHIVE: &str = "caddy_2.11.4_mac_arm64.tar.gz";
 const CADDY_URL: &str =
     "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_mac_arm64.tar.gz";
 const CADDY_SHA256: &str = "9efb0af2d6cf09cfb5053c0e51721b9b3d4956d346234f39368d943d25a3c9a7";
+pub const FTP_SERIES: &str = "2.7";
+pub const FTP_VERSION: &str = "2.7.5";
+const FTP_ARCHIVE: &str = "sftpgo_v2.7.5_macOS_arm64.tar.xz";
+const FTP_URL: &str =
+    "https://github.com/drakkan/sftpgo/releases/download/v2.7.5/sftpgo_v2.7.5_macOS_arm64.tar.xz";
+const FTP_SHA256: &str = "3041e313048612fdef50d85277e7ebe04d0ce7b1187a31a241751c2f142185bf";
 
 #[derive(Debug, Clone, Copy)]
 pub struct VerifiedBinaryRelease {
@@ -599,6 +617,41 @@ pub const MEILISEARCH_RELEASES: &[VerifiedBinaryRelease] = &[
     },
 ];
 
+pub const INFLUXDB_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "3.8",
+        version: "3.8.3",
+        archive: "influxdb3-core-3.8.3_darwin_arm64.tar.gz",
+        source_url:
+            "https://dl.influxdata.com/influxdb/releases/influxdb3-core-3.8.3_darwin_arm64.tar.gz",
+        sha256: "b72c0d387bbdf8e15ccf61fca4445a0e06dd7faf2e83213e843032fba3384a1a",
+        support_label: "兼容稳定版",
+        legacy: true,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: "3.9",
+        version: "3.9.0",
+        archive: "influxdb3-core-3.9.0_darwin_arm64.tar.gz",
+        source_url:
+            "https://dl.influxdata.com/influxdb/releases/influxdb3-core-3.9.0_darwin_arm64.tar.gz",
+        sha256: "b28d7856fb30cf72cbc19f50d55a41632498b669419fce5cc55deafd4f4953a9",
+        support_label: "稳定版本",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: INFLUXDB_SERIES,
+        version: INFLUXDB_VERSION,
+        archive: INFLUXDB_ARCHIVE,
+        source_url: INFLUXDB_URL,
+        sha256: INFLUXDB_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
 pub const MINIO_RELEASES: &[VerifiedBinaryRelease] = &[
     VerifiedBinaryRelease {
         series: "2024",
@@ -718,6 +771,53 @@ pub const RABBITMQ_RELEASES: &[VerifiedBinaryRelease] = &[
     },
 ];
 
+pub const ACTIVEMQ_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: ACTIVEMQ_SERIES,
+        version: ACTIVEMQ_VERSION,
+        archive: ACTIVEMQ_ARCHIVE,
+        source_url: ACTIVEMQ_URL,
+        sha256: ACTIVEMQ_SHA256,
+        support_label: "稳定支持版 · 需要 Java 17 或 21",
+        legacy: false,
+        recommended: true,
+    },
+    VerifiedBinaryRelease {
+        series: "6.3",
+        version: "6.3.0",
+        archive: "apache-activemq-6.3.0-bin.tar.gz",
+        source_url: "https://downloads.apache.org/activemq/6.3.0/apache-activemq-6.3.0-bin.tar.gz",
+        sha256: "a6ca29177d648b8961f66c323d33cfe2ca3774f943bf589f97371a3d868bb9e7",
+        support_label: "最新特性版 · 需要 Java 25",
+        legacy: false,
+        recommended: false,
+    },
+];
+
+pub const FTP_RELEASES: &[VerifiedBinaryRelease] = &[
+    VerifiedBinaryRelease {
+        series: "2.7.4",
+        version: "2.7.4",
+        archive: "sftpgo_v2.7.4_macOS_arm64.tar.xz",
+        source_url:
+            "https://github.com/drakkan/sftpgo/releases/download/v2.7.4/sftpgo_v2.7.4_macOS_arm64.tar.xz",
+        sha256: "b2881d57bf77f77bcff7fc82cef72bc629b52efa082b4fcd7b0da0ba76e55166",
+        support_label: "兼容稳定版",
+        legacy: false,
+        recommended: false,
+    },
+    VerifiedBinaryRelease {
+        series: FTP_SERIES,
+        version: FTP_VERSION,
+        archive: FTP_ARCHIVE,
+        source_url: FTP_URL,
+        sha256: FTP_SHA256,
+        support_label: "当前稳定版",
+        legacy: false,
+        recommended: true,
+    },
+];
+
 macro_rules! verified_release_lookup {
     ($name:ident, $catalog:ident) => {
         pub fn $name(version_or_series: &str) -> Option<&'static VerifiedBinaryRelease> {
@@ -730,11 +830,14 @@ macro_rules! verified_release_lookup {
 
 verified_release_lookup!(mongodb_release, MONGODB_RELEASES);
 verified_release_lookup!(meilisearch_release, MEILISEARCH_RELEASES);
+verified_release_lookup!(influxdb_release, INFLUXDB_RELEASES);
 verified_release_lookup!(minio_release, MINIO_RELEASES);
 verified_release_lookup!(rustfs_release, RUSTFS_RELEASES);
 verified_release_lookup!(consul_release, CONSUL_RELEASES);
 verified_release_lookup!(rnacos_release, RNACOS_RELEASES);
 verified_release_lookup!(rabbitmq_release, RABBITMQ_RELEASES);
+verified_release_lookup!(activemq_release, ACTIVEMQ_RELEASES);
+verified_release_lookup!(ftp_release, FTP_RELEASES);
 
 pub fn mailpit_release(version_or_series: &str) -> Option<&'static VerifiedBinaryRelease> {
     MAILPIT_RELEASES
@@ -1349,6 +1452,18 @@ pub struct MeilisearchInstaller {
 }
 
 #[derive(Debug, Clone)]
+pub struct InfluxdbInstaller {
+    devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
+}
+
+#[derive(Debug, Clone)]
+pub struct FtpInstaller {
+    devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
+}
+
+#[derive(Debug, Clone)]
 pub struct MinioInstaller {
     devbox_root: PathBuf,
     release: &'static VerifiedBinaryRelease,
@@ -1382,6 +1497,131 @@ pub struct RnacosInstaller {
 pub struct RabbitmqInstaller {
     devbox_root: PathBuf,
     release: &'static VerifiedBinaryRelease,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActivemqInstaller {
+    devbox_root: PathBuf,
+    release: &'static VerifiedBinaryRelease,
+}
+
+impl ActivemqInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+            release: activemq_release(ACTIVEMQ_VERSION)
+                .expect("default ActiveMQ release is registered"),
+        }
+    }
+
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = activemq_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported ActiveMQ version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 ActiveMQ Classic {}", self.release.version),
+        );
+        ensure_macos_arm64("ActiveMQ")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("home/bin/activemq");
+        if executable.is_file()
+            && installation_manifest_matches(
+                &installation_dir,
+                "activemq",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
+            report_install_progress(90, "已安装", "ActiveMQ 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads = self.devbox_root.join("downloads");
+        let work = self.devbox_root.join("tmp").join(format!(
+            "activemq-{}-{}-{}",
+            self.release.version,
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&downloads)?;
+        fs::create_dir_all(&work)?;
+        let _cleanup = WorkDirCleanup::new(&work);
+        let archive = downloads.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
+        report_install_progress(55, "解压程序", "正在解压 ActiveMQ 官方分发包");
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xzf"])
+                .arg(&archive)
+                .arg("-C")
+                .arg(&work),
+            "tar",
+        )?;
+        let source = work.join(format!("apache-activemq-{}", self.release.version));
+        let stage = work.join("installation");
+        fs::create_dir_all(&stage)?;
+        fs::rename(source, stage.join("home"))?;
+        let staged_executable = stage.join("home/bin/activemq");
+        if !staged_executable.is_file() {
+            return Err(DevBoxError::CommandFailed {
+                command: "verify ActiveMQ bundle".into(),
+                message: "ActiveMQ 压缩包结构不符合预期".into(),
+            });
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&staged_executable, fs::Permissions::from_mode(0o755))?;
+        }
+        write_manifest(
+            &stage,
+            "activemq",
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
+            "official-java-distribution",
+        )?;
+        replace_installation(&stage, &installation_dir)?;
+        report_install_progress(90, "完成安装", "ActiveMQ 安装完成");
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations/activemq")
+            .join(self.release.series)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        installation.join("home/bin/activemq").is_file()
+            && installation_manifest_matches(
+                &installation,
+                "activemq",
+                self.release.version,
+                self.release.sha256,
+            )
+    }
 }
 
 pub struct NginxInstaller {
@@ -3184,6 +3424,330 @@ impl MongodbInstaller {
     }
 }
 
+impl InfluxdbInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+            release: influxdb_release(INFLUXDB_VERSION)
+                .expect("default InfluxDB release is registered"),
+        }
+    }
+
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = influxdb_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported InfluxDB version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 InfluxDB {}", self.release.version),
+        );
+        ensure_macos_arm64("InfluxDB")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
+
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/influxdb3");
+        if binary_contains(&executable, &["--version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "influxdb",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
+            report_install_progress(90, "已安装", "InfluxDB 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let temp_root = self.devbox_root.join("tmp");
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&temp_root)?;
+        fs::create_dir_all(
+            installation_dir
+                .parent()
+                .expect("InfluxDB installation has a parent"),
+        )?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
+        let work_dir = temp_root.join(format!(
+            "influxdb-{}-{}-{}",
+            self.release.version,
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
+        let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
+        let _ = fs::remove_dir_all(&work_dir);
+        result?;
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations")
+            .join("influxdb")
+            .join(self.release.series)
+    }
+
+    fn extract_and_commit(
+        &self,
+        archive: &Path,
+        work_dir: &Path,
+        installation_dir: &Path,
+    ) -> Result<()> {
+        report_install_progress(45, "解压程序", "正在解压 InfluxDB");
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xzf"])
+                .arg(archive)
+                .arg("-C")
+                .arg(work_dir),
+            "tar",
+        )?;
+        let source = find_named_file(work_dir, "influxdb3", 3).ok_or_else(|| {
+            DevBoxError::CommandFailed {
+                command: "tar".into(),
+                message: "InfluxDB archive does not contain influxdb3".into(),
+            }
+        })?;
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        report_install_progress(75, "整理文件", "正在写入 InfluxDB 版本目录");
+        fs::create_dir_all(&bin_dir)?;
+        fs::copy(source, bin_dir.join("influxdb3"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(bin_dir.join("influxdb3"), fs::Permissions::from_mode(0o755))?;
+        }
+        if !binary_contains(
+            &bin_dir.join("influxdb3"),
+            &["--version"],
+            self.release.version,
+        ) {
+            return Err(DevBoxError::CommandFailed {
+                command: "influxdb3 --version".into(),
+                message: format!("downloaded binary is not InfluxDB {}", self.release.version),
+            });
+        }
+        write_manifest(
+            &stage,
+            "influxdb",
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
+            "official-binary",
+        )?;
+        report_install_progress(90, "完成安装", "InfluxDB 安装完成");
+        replace_installation(&stage, installation_dir)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        binary_contains(
+            &installation.join("bin/influxdb3"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation,
+            "influxdb",
+            self.release.version,
+            self.release.sha256,
+        )
+    }
+}
+
+impl FtpInstaller {
+    pub fn new(devbox_root: impl Into<PathBuf>) -> Self {
+        Self {
+            devbox_root: devbox_root.into(),
+            release: ftp_release(FTP_VERSION).expect("default FTP release is registered"),
+        }
+    }
+
+    pub fn for_version(devbox_root: impl Into<PathBuf>, version_or_series: &str) -> Result<Self> {
+        let release = ftp_release(version_or_series).ok_or_else(|| {
+            DevBoxError::InvalidConfig(format!("unsupported FTP version: {version_or_series}"))
+        })?;
+        Ok(Self {
+            devbox_root: devbox_root.into(),
+            release,
+        })
+    }
+
+    pub fn release(&self) -> &'static VerifiedBinaryRelease {
+        self.release
+    }
+
+    pub fn install(&self) -> Result<InstallOutcome> {
+        report_install_progress(
+            3,
+            "准备安装",
+            format!("准备安装 FTP Server {}", self.release.version),
+        );
+        ensure_macos_arm64("FTP Server")?;
+        ensure_tools(&["/usr/bin/curl", "/usr/bin/tar"])?;
+
+        let installation_dir = self.installation_dir();
+        let executable = installation_dir.join("bin/sftpgo");
+        if binary_contains(&executable, &["--version"], self.release.version)
+            && installation_manifest_matches(
+                &installation_dir,
+                "ftp",
+                self.release.version,
+                self.release.sha256,
+            )
+        {
+            report_install_progress(90, "已安装", "FTP Server 已经安装");
+            return Ok(InstallOutcome::AlreadyInstalled {
+                path: installation_dir,
+            });
+        }
+
+        let downloads_dir = self.devbox_root.join("downloads");
+        let temp_root = self.devbox_root.join("tmp");
+        fs::create_dir_all(&downloads_dir)?;
+        fs::create_dir_all(&temp_root)?;
+        fs::create_dir_all(
+            installation_dir
+                .parent()
+                .expect("FTP installation has a parent"),
+        )?;
+        let archive = downloads_dir.join(self.release.archive);
+        prepare_archive(
+            &archive,
+            self.release.archive,
+            self.release.source_url,
+            self.release.sha256,
+        )?;
+        let work_dir = temp_root.join(format!(
+            "ftp-{}-{}-{}",
+            self.release.version,
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&work_dir)?;
+        let _work_dir_cleanup = WorkDirCleanup::new(&work_dir);
+        let result = self.extract_and_commit(&archive, &work_dir, &installation_dir);
+        let _ = fs::remove_dir_all(&work_dir);
+        result?;
+        Ok(InstallOutcome::Installed {
+            path: installation_dir,
+        })
+    }
+
+    pub fn installation_dir(&self) -> PathBuf {
+        self.devbox_root
+            .join("installations")
+            .join("ftp")
+            .join(self.release.series)
+    }
+
+    fn extract_and_commit(
+        &self,
+        archive: &Path,
+        work_dir: &Path,
+        installation_dir: &Path,
+    ) -> Result<()> {
+        report_install_progress(45, "解压程序", "正在解压 FTP Server");
+        run(
+            Command::new("/usr/bin/tar")
+                .args(["-xJf"])
+                .arg(archive)
+                .arg("-C")
+                .arg(work_dir),
+            "tar",
+        )?;
+        let source =
+            find_named_file(work_dir, "sftpgo", 2).ok_or_else(|| DevBoxError::CommandFailed {
+                command: "tar".into(),
+                message: "FTP Server archive does not contain sftpgo".into(),
+            })?;
+        let stage = work_dir.join("installation");
+        let bin_dir = stage.join("bin");
+        fs::create_dir_all(&bin_dir)?;
+        report_install_progress(75, "整理文件", "正在写入 FTP Server 版本目录");
+        fs::copy(source, bin_dir.join("sftpgo"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(bin_dir.join("sftpgo"), fs::Permissions::from_mode(0o755))?;
+        }
+        if !binary_contains(
+            &bin_dir.join("sftpgo"),
+            &["--version"],
+            self.release.version,
+        ) {
+            return Err(DevBoxError::CommandFailed {
+                command: "sftpgo --version".into(),
+                message: format!(
+                    "downloaded binary is not FTP Server {}",
+                    self.release.version
+                ),
+            });
+        }
+        write_manifest(
+            &stage,
+            "ftp",
+            self.release.series,
+            self.release.version,
+            self.release.source_url,
+            self.release.sha256,
+            "sftpgo-official-binary",
+        )?;
+        report_install_progress(90, "完成安装", "FTP Server 安装完成");
+        replace_installation(&stage, installation_dir)
+    }
+
+    pub fn is_installed(&self) -> bool {
+        let installation = self.installation_dir();
+        binary_contains(
+            &installation.join("bin/sftpgo"),
+            &["--version"],
+            self.release.version,
+        ) && installation_manifest_matches(
+            &installation,
+            "ftp",
+            self.release.version,
+            self.release.sha256,
+        )
+    }
+}
+
+fn find_named_file(root: &Path, name: &str, remaining_depth: usize) -> Option<PathBuf> {
+    for entry in fs::read_dir(root).ok()?.filter_map(|entry| entry.ok()) {
+        let path = entry.path();
+        if path.is_file() && path.file_name().and_then(|value| value.to_str()) == Some(name) {
+            return Some(path);
+        }
+        if remaining_depth > 0 && path.is_dir() {
+            if let Some(found) = find_named_file(&path, name, remaining_depth - 1) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone)]
 pub struct PostgresInstaller {
     devbox_root: PathBuf,
@@ -3560,6 +4124,28 @@ fn download_command(
     if !candidate.official {
         command.args(["--speed-time", "15", "--speed-limit", "16384"]);
     }
+    if !settings.download_proxy_enabled || settings.proxy_mode == "disabled" {
+        command.args(["--noproxy", "*"]);
+    } else if settings.proxy_mode == "manual" {
+        if let Some(proxy_url) = settings.proxy_url.as_deref() {
+            command
+                .args(["--proxy", proxy_url])
+                .args(["--noproxy", "localhost,127.0.0.1,::1,0.0.0.0,*.local"]);
+        }
+    } else if !has_proxy_environment() {
+        #[cfg(target_os = "macos")]
+        if let Some(proxy_url) = macos_system_proxy_url() {
+            command
+                .args(["--proxy", &proxy_url])
+                .args(["--noproxy", "localhost,127.0.0.1,::1,0.0.0.0,*.local"]);
+        }
+        #[cfg(target_os = "windows")]
+        if let Some(proxy_url) = windows_system_proxy_url() {
+            command
+                .args(["--proxy", &proxy_url])
+                .args(["--noproxy", "localhost,127.0.0.1,::1,0.0.0.0,*.local"]);
+        }
+    }
     command.arg("--output").arg(partial).arg(&candidate.url);
     command
 }
@@ -3578,6 +4164,9 @@ struct InstallerDownloadSettings {
     public_github_mirror: bool,
     download_concurrency: usize,
     download_timeout_seconds: u64,
+    proxy_mode: String,
+    proxy_url: Option<String>,
+    download_proxy_enabled: bool,
 }
 
 impl Default for InstallerDownloadSettings {
@@ -3587,6 +4176,9 @@ impl Default for InstallerDownloadSettings {
             public_github_mirror: true,
             download_concurrency: 2,
             download_timeout_seconds: 180,
+            proxy_mode: "system".into(),
+            proxy_url: None,
+            download_proxy_enabled: true,
         }
     }
 }
@@ -3599,7 +4191,109 @@ fn installer_download_settings(devbox_root: &Path) -> InstallerDownloadSettings 
             .unwrap_or_default();
     settings.download_concurrency = settings.download_concurrency.clamp(1, 4);
     settings.download_timeout_seconds = settings.download_timeout_seconds.clamp(15, 600);
+    if !matches!(
+        settings.proxy_mode.as_str(),
+        "system" | "manual" | "disabled"
+    ) {
+        settings.proxy_mode = "system".into();
+    }
     settings
+}
+
+fn has_proxy_environment() -> bool {
+    [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ]
+    .iter()
+    .any(|key| std::env::var(key).is_ok_and(|value| !value.trim().is_empty()))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_system_proxy_url() -> Option<String> {
+    let output = Command::new("/usr/sbin/scutil")
+        .arg("--proxy")
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| parse_macos_system_proxy_url(&String::from_utf8_lossy(&output.stdout)))
+        .flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn parse_macos_system_proxy_url(output: &str) -> Option<String> {
+    fn value<'a>(output: &'a str, key: &str) -> Option<&'a str> {
+        output.lines().find_map(|line| {
+            let (name, value) = line.trim().split_once(':')?;
+            (name.trim() == key).then_some(value.trim())
+        })
+    }
+    for (prefix, scheme) in [("HTTPS", "http"), ("HTTP", "http"), ("SOCKS", "socks5h")] {
+        if value(output, &format!("{prefix}Enable")) != Some("1") {
+            continue;
+        }
+        let host = value(output, &format!("{prefix}Proxy"))?;
+        let port = value(output, &format!("{prefix}Port"))?;
+        if !host.is_empty() && port.parse::<u16>().is_ok() {
+            return Some(format!(
+                "{scheme}://{}:{port}",
+                host.trim_matches(['[', ']'])
+            ));
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn windows_system_proxy_url() -> Option<String> {
+    fn registry_value(name: &str) -> Option<String> {
+        let output = Command::new("reg.exe")
+            .args([
+                "query",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+                "/v",
+                name,
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find(|line| line.contains(name))
+            .and_then(|line| line.split_whitespace().last())
+            .map(str::to_string)
+    }
+    if registry_value("ProxyEnable").as_deref() != Some("0x1") {
+        return None;
+    }
+    let server = registry_value("ProxyServer")?;
+    if !server.contains('=') {
+        return Some(format!("http://{server}"));
+    }
+    for preferred in ["https", "http", "socks", "socks5"] {
+        for entry in server.split(';') {
+            let Some((scheme, endpoint)) = entry.split_once('=') else {
+                continue;
+            };
+            if scheme.trim().eq_ignore_ascii_case(preferred) && !endpoint.trim().is_empty() {
+                let proxy_scheme = if preferred.starts_with("socks") {
+                    "socks5h"
+                } else {
+                    "http"
+                };
+                return Some(format!("{proxy_scheme}://{}", endpoint.trim()));
+            }
+        }
+    }
+    None
 }
 
 fn configured_download_mirror(
@@ -4097,6 +4791,54 @@ mod tests {
             .any(|pair| pair == ["--continue-at", "-"]));
     }
 
+    #[test]
+    fn download_proxy_policy_is_forwarded_to_curl() {
+        let candidate = DownloadCandidate {
+            label: "测试源".into(),
+            url: "https://example.com/archive.tar.gz".into(),
+            official: true,
+        };
+        let manual = InstallerDownloadSettings {
+            proxy_mode: "manual".into(),
+            proxy_url: Some("http://127.0.0.1:7890".into()),
+            ..InstallerDownloadSettings::default()
+        };
+        let manual_command = download_command(
+            Path::new("/tmp/archive.tar.gz.partial"),
+            &candidate,
+            &manual,
+            false,
+        );
+        let manual_arguments = manual_command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(manual_arguments
+            .windows(2)
+            .any(|pair| pair == ["--proxy", "http://127.0.0.1:7890"]));
+        assert!(manual_arguments
+            .windows(2)
+            .any(|pair| pair[0] == "--noproxy" && pair[1].contains("localhost")));
+
+        let direct = InstallerDownloadSettings {
+            download_proxy_enabled: false,
+            ..InstallerDownloadSettings::default()
+        };
+        let direct_command = download_command(
+            Path::new("/tmp/archive.tar.gz.partial"),
+            &candidate,
+            &direct,
+            false,
+        );
+        let direct_arguments = direct_command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(direct_arguments
+            .windows(2)
+            .any(|pair| pair == ["--noproxy", "*"]));
+    }
+
     #[cfg(unix)]
     #[test]
     fn cancellation_interrupts_a_running_command() {
@@ -4323,11 +5065,13 @@ mod tests {
             CADDY_RELEASES,
             MONGODB_RELEASES,
             MEILISEARCH_RELEASES,
+            INFLUXDB_RELEASES,
             MINIO_RELEASES,
             RUSTFS_RELEASES,
             CONSUL_RELEASES,
             RNACOS_RELEASES,
             RABBITMQ_RELEASES,
+            FTP_RELEASES,
         ] {
             assert!(releases.len() >= 2);
             assert_eq!(
@@ -4352,11 +5096,14 @@ mod tests {
         assert!(caddy_release("1.0").is_none());
         assert!(mongodb_release("6.0").is_none());
         assert!(meilisearch_release("1.0").is_none());
+        assert!(influxdb_release("2.0").is_none());
         assert!(minio_release("2023").is_none());
         assert!(rustfs_release("0.9").is_none());
         assert!(consul_release("1.20").is_none());
         assert!(rnacos_release("0.7").is_none());
         assert!(rabbitmq_release("3.13").is_none());
+        assert!(activemq_release("5.18").is_none());
+        assert!(ftp_release("2.6").is_none());
     }
 
     #[test]
@@ -4391,10 +5138,24 @@ mod tests {
         assert!(CaddyInstaller::new(root)
             .installation_dir()
             .ends_with(format!("caddy/{CADDY_SERIES}")));
+        assert!(FtpInstaller::for_version(root, "2.7.4")
+            .unwrap()
+            .installation_dir()
+            .ends_with("ftp/2.7.4"));
+        assert!(FtpInstaller::new(root)
+            .installation_dir()
+            .ends_with(format!("ftp/{FTP_SERIES}")));
         assert!(MongodbInstaller::for_version(root, "7.0")
             .unwrap()
             .installation_dir()
             .ends_with("mongodb/7.0"));
+        assert!(InfluxdbInstaller::for_version(root, "3.8")
+            .unwrap()
+            .installation_dir()
+            .ends_with("influxdb/3.8"));
+        assert!(InfluxdbInstaller::new(root)
+            .installation_dir()
+            .ends_with(format!("influxdb/{INFLUXDB_SERIES}")));
         assert!(MeilisearchInstaller::for_version(root, "1.45")
             .unwrap()
             .installation_dir()
@@ -4419,5 +5180,12 @@ mod tests {
             .unwrap()
             .installation_dir()
             .ends_with("rabbitmq/4.2"));
+        assert!(ActivemqInstaller::for_version(root, "6.3")
+            .unwrap()
+            .installation_dir()
+            .ends_with("activemq/6.3"));
+        assert!(ActivemqInstaller::new(root)
+            .installation_dir()
+            .ends_with(format!("activemq/{ACTIVEMQ_SERIES}")));
     }
 }

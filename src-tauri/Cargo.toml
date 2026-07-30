@@ -23,7 +23,9 @@ bson.workspace = true
 csv.workspace = true
 devbox-core = { path = "../crates/devbox-core" }
 dirs = "6"
+feed-rs = "2.4"
 hmac.workspace = true
+libc.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -31,18 +33,21 @@ serde_json_path.workspace = true
 serde_norway.workspace = true
 sha2.workspace = true
 sha1 = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "gzip", "brotli", "deflate", "socks"] }
+rustls = "0.23"
+webpki-roots = "1"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 russh = { version = "0.62.4", default-features = false, features = ["ring"] }
 portable-pty = "0.9"
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
-time = { version = "0.3", features = ["formatting"] }
+time = { version = "0.3", features = ["formatting", "local-offset"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-global-shortcut = "2"
 tokio = { version = "1", features = ["time", "net", "rt-multi-thread"] }
 toml.workspace = true
+zeromq = { version = "0.6", default-features = false, features = ["tokio-runtime", "tcp-transport"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -15,14 +15,17 @@ pub enum ServiceKind {
     Nats,
     Kafka,
     Meilisearch,
+    Influxdb,
     Minio,
     Rustfs,
     Etcd,
     Consul,
     Rnacos,
     Rabbitmq,
+    Activemq,
     Nginx,
     Caddy,
+    Ftp,
 }
 
 impl ServiceKind {
@@ -36,14 +39,17 @@ impl ServiceKind {
             Self::Nats => "nats",
             Self::Kafka => "kafka",
             Self::Meilisearch => "meilisearch",
+            Self::Influxdb => "influxdb",
             Self::Minio => "minio",
             Self::Rustfs => "rustfs",
             Self::Etcd => "etcd",
             Self::Consul => "consul",
             Self::Rnacos => "rnacos",
             Self::Rabbitmq => "rabbitmq",
+            Self::Activemq => "activemq",
             Self::Nginx => "nginx",
             Self::Caddy => "caddy",
+            Self::Ftp => "ftp",
         }
     }
 }

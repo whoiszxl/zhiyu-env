@@ -99,14 +99,17 @@ impl TryFrom<ServiceKindInput> for DatabaseEngine {
             ServiceKindInput::Nats => Err("NATS 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Kafka => Err("Kafka 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Meilisearch => Err("Meilisearch 不使用 SQL 数据库接口".into()),
+            ServiceKindInput::Influxdb => Err("InfluxDB 使用时序数据库查询接口".into()),
             ServiceKindInput::Minio => Err("MinIO 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Rustfs => Err("RustFS 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Etcd => Err("etcd 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Consul => Err("Consul 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Rnacos => Err("rnacos 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Rabbitmq => Err("RabbitMQ 不使用 SQL 数据库接口".into()),
+            ServiceKindInput::Activemq => Err("ActiveMQ 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Nginx => Err("Nginx 不使用 SQL 数据库接口".into()),
             ServiceKindInput::Caddy => Err("Caddy 不使用 SQL 数据库接口".into()),
+            ServiceKindInput::Ftp => Err("FTP Server 不使用 SQL 数据库接口".into()),
         }
     }
 }

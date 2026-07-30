@@ -1,12 +1,14 @@
-use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{redirect::Policy, Method};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::fs;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const MAX_REQUEST_BODY: usize = 2 * 1024 * 1024;
 const MAX_RESPONSE_BODY: u64 = 2 * 1024 * 1024;
+const WORKSPACE_VERSION: u8 = 2;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +42,137 @@ pub struct HttpResponseOutput {
     effective_url: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpWorkspaceVariable {
+    key: String,
+    value: String,
+    #[serde(default)]
+    secret: bool,
+    #[serde(default = "enabled_by_default")]
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpWorkspaceEnvironment {
+    id: String,
+    name: String,
+    #[serde(default)]
+    variables: Vec<HttpWorkspaceVariable>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpWorkspaceAuth {
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    password: String,
+    #[serde(default)]
+    token: String,
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    value: String,
+    #[serde(default)]
+    placement: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpWorkspaceRequest {
+    id: String,
+    name: String,
+    #[serde(default)]
+    folder: String,
+    method: String,
+    url: String,
+    #[serde(default)]
+    query_params: Vec<HttpHeader>,
+    #[serde(default)]
+    headers: Vec<HttpHeader>,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    auth: HttpWorkspaceAuth,
+    #[serde(default)]
+    updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpWorkspaceState {
+    #[serde(default = "workspace_version")]
+    version: u8,
+    #[serde(default)]
+    active_environment_id: String,
+    #[serde(default)]
+    environments: Vec<HttpWorkspaceEnvironment>,
+    #[serde(default)]
+    requests: Vec<HttpWorkspaceRequest>,
+}
+
+impl Default for HttpWorkspaceState {
+    fn default() -> Self {
+        Self {
+            version: WORKSPACE_VERSION,
+            active_environment_id: "default".into(),
+            environments: vec![HttpWorkspaceEnvironment {
+                id: "default".into(),
+                name: "本地开发".into(),
+                variables: Vec::new(),
+            }],
+            requests: Vec::new(),
+        }
+    }
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+fn workspace_version() -> u8 {
+    WORKSPACE_VERSION
+}
+
+#[tauri::command]
+pub fn http_workspace_get() -> Result<HttpWorkspaceState, String> {
+    let root = crate::settings::devbox_root()?;
+    let path = workspace_path(&root);
+    if !path.is_file() {
+        return Ok(HttpWorkspaceState::default());
+    }
+    let bytes = fs::read(path).map_err(|error| format!("读取 HTTP 工作区失败：{error}"))?;
+    serde_json::from_slice(&bytes).map_err(|error| format!("解析 HTTP 工作区失败：{error}"))
+}
+
+#[tauri::command]
+pub fn http_workspace_save(
+    mut workspace: HttpWorkspaceState,
+) -> Result<HttpWorkspaceState, String> {
+    validate_workspace(&workspace)?;
+    workspace.version = WORKSPACE_VERSION;
+    if workspace.environments.is_empty() {
+        workspace.environments = HttpWorkspaceState::default().environments;
+        workspace.active_environment_id = "default".into();
+    }
+    if !workspace
+        .environments
+        .iter()
+        .any(|environment| environment.id == workspace.active_environment_id)
+    {
+        workspace.active_environment_id = workspace.environments[0].id.clone();
+    }
+    let root = crate::settings::devbox_root()?;
+    let bytes = serde_json::to_vec_pretty(&workspace)
+        .map_err(|error| format!("序列化 HTTP 工作区失败：{error}"))?;
+    atomic_write(&workspace_path(&root), &bytes)?;
+    Ok(workspace)
+}
+
 #[tauri::command]
 pub async fn http_request_execute(request: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     tauri::async_runtime::spawn_blocking(move || execute(request))
@@ -68,7 +201,7 @@ fn execute(request: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     } else {
         Policy::none()
     };
-    let client = Client::builder()
+    let client = crate::settings::reqwest_client_builder(crate::settings::ProxyScope::Network)?
         .timeout(Duration::from_secs(request.timeout_seconds))
         .redirect(redirect)
         .build()
@@ -165,6 +298,61 @@ fn format_request_error(error: &reqwest::Error) -> String {
     }
 }
 
+fn validate_workspace(workspace: &HttpWorkspaceState) -> Result<(), String> {
+    if workspace.requests.len() > 2_000 {
+        return Err("HTTP 工作区最多保存 2000 个请求".into());
+    }
+    if workspace.environments.len() > 50 {
+        return Err("HTTP 工作区最多保存 50 套环境".into());
+    }
+    for environment in &workspace.environments {
+        if environment.id.trim().is_empty() || environment.name.trim().is_empty() {
+            return Err("环境名称不能为空".into());
+        }
+        if environment.variables.len() > 200 {
+            return Err(format!("环境“{}”的变量不能超过 200 个", environment.name));
+        }
+        for variable in &environment.variables {
+            if variable.key.contains(['\r', '\n']) || variable.value.len() > 64 * 1024 {
+                return Err("环境变量无效或内容过长".into());
+            }
+        }
+    }
+    for request in &workspace.requests {
+        if request.id.trim().is_empty() || request.name.trim().is_empty() {
+            return Err("请求名称不能为空".into());
+        }
+        if request.body.len() > MAX_REQUEST_BODY
+            || request.headers.len() > 200
+            || request.query_params.len() > 200
+        {
+            return Err(format!("请求“{}”内容过大", request.name));
+        }
+    }
+    Ok(())
+}
+
+fn workspace_path(root: &Path) -> PathBuf {
+    root.join("tools/http-workspace.json")
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path.parent().ok_or_else(|| "保存路径无效".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("tmp");
+    let mut file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
+    file.write_all(bytes).map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    match fs::rename(&temporary, path) {
+        Ok(()) => Ok(()),
+        Err(_) if path.exists() => {
+            fs::remove_file(path).map_err(|remove_error| remove_error.to_string())?;
+            fs::rename(temporary, path).map_err(|error| error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,5 +381,19 @@ mod tests {
             value: "yes\r\nInjected: true".into(),
         });
         assert!(validate_request(&input).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_workspace() {
+        let mut workspace = HttpWorkspaceState::default();
+        workspace.environments[0].variables = (0..201)
+            .map(|index| HttpWorkspaceVariable {
+                key: format!("KEY_{index}"),
+                value: String::new(),
+                secret: false,
+                enabled: true,
+            })
+            .collect();
+        assert!(validate_workspace(&workspace).is_err());
     }
 }

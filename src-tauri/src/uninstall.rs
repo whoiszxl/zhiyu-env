@@ -1,18 +1,19 @@
 use crate::commands::{self, ServiceInfo, ServiceKindInput};
 use devbox_core::{
     installer::{
-        caddy_release, consul_release, etcd_release, mailpit_release, meilisearch_release,
-        minio_release, mongodb_release, mysql_release, nats_release, nginx_release,
-        postgres_release, rabbitmq_release, redis_release, rnacos_release, rustfs_release,
-        VerifiedBinaryRelease, CADDY_RELEASES, CONSUL_RELEASES, ETCD_RELEASES, MAILPIT_RELEASES,
-        MEILISEARCH_RELEASES, MINIO_RELEASES, MONGODB_RELEASES, MYSQL_RELEASES, NATS_RELEASES,
-        NGINX_RELEASES, POSTGRES_RELEASES, RABBITMQ_RELEASES, REDIS_RELEASES, RNACOS_RELEASES,
-        RUSTFS_RELEASES,
+        activemq_release, caddy_release, consul_release, etcd_release, ftp_release,
+        influxdb_release, mailpit_release, meilisearch_release, minio_release, mongodb_release,
+        mysql_release, nats_release, nginx_release, postgres_release, rabbitmq_release,
+        redis_release, rnacos_release, rustfs_release, VerifiedBinaryRelease, ACTIVEMQ_RELEASES,
+        CADDY_RELEASES, CONSUL_RELEASES, ETCD_RELEASES, FTP_RELEASES, INFLUXDB_RELEASES,
+        MAILPIT_RELEASES, MEILISEARCH_RELEASES, MINIO_RELEASES, MONGODB_RELEASES, MYSQL_RELEASES,
+        NATS_RELEASES, NGINX_RELEASES, POSTGRES_RELEASES, RABBITMQ_RELEASES, REDIS_RELEASES,
+        RNACOS_RELEASES, RUSTFS_RELEASES,
     },
-    CaddyInstaller, ConsulInstaller, EtcdInstaller, MailpitInstaller, MeilisearchInstaller,
-    MinioInstaller, MongodbInstaller, MysqlInstaller, NatsInstaller, NginxInstaller,
-    PostgresInstaller, RabbitmqInstaller, RedisInstaller, RnacosInstaller, RustfsInstaller,
-    ServiceKind, ServiceStatus,
+    ActivemqInstaller, CaddyInstaller, ConsulInstaller, EtcdInstaller, FtpInstaller,
+    InfluxdbInstaller, MailpitInstaller, MeilisearchInstaller, MinioInstaller, MongodbInstaller,
+    MysqlInstaller, NatsInstaller, NginxInstaller, PostgresInstaller, RabbitmqInstaller,
+    RedisInstaller, RnacosInstaller, RustfsInstaller, ServiceKind, ServiceStatus,
 };
 use serde::Serialize;
 use std::fs;
@@ -221,6 +222,16 @@ fn version_target(
                 release.version.to_string(),
             )
         }
+        ServiceKindInput::Influxdb => {
+            let release = influxdb_release(version)
+                .ok_or_else(|| format!("不支持 InfluxDB 版本 {version}"))?;
+            (
+                InfluxdbInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
         ServiceKindInput::Minio => {
             let release =
                 minio_release(version).ok_or_else(|| format!("不支持 MinIO 版本 {version}"))?;
@@ -266,6 +277,26 @@ fn version_target(
                 .ok_or_else(|| format!("不支持 RabbitMQ 版本 {version}"))?;
             (
                 RabbitmqInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Activemq => {
+            let release = activemq_release(version)
+                .ok_or_else(|| format!("不支持 ActiveMQ Classic 版本 {version}"))?;
+            (
+                ActivemqInstaller::for_version(root, release.version)
+                    .map_err(|error| error.to_string())?
+                    .installation_dir(),
+                release.version.to_string(),
+            )
+        }
+        ServiceKindInput::Ftp => {
+            let release =
+                ftp_release(version).ok_or_else(|| format!("不支持 FTP Server 版本 {version}"))?;
+            (
+                FtpInstaller::for_version(root, release.version)
                     .map_err(|error| error.to_string())?
                     .installation_dir(),
                 release.version.to_string(),
@@ -393,6 +424,12 @@ fn installed_fallback(
                     .is_ok_and(|installer| installer.is_installed())
             })
         }
+        ServiceKindInput::Influxdb => {
+            verified_fallback(INFLUXDB_RELEASES, removed_version, |version| {
+                InfluxdbInstaller::for_version(root, version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+        }
         ServiceKindInput::Minio => verified_fallback(MINIO_RELEASES, removed_version, |version| {
             MinioInstaller::for_version(root, version)
                 .is_ok_and(|installer| installer.is_installed())
@@ -421,6 +458,15 @@ fn installed_fallback(
                     .is_ok_and(|installer| installer.is_installed())
             })
         }
+        ServiceKindInput::Activemq => {
+            verified_fallback(ACTIVEMQ_RELEASES, removed_version, |version| {
+                ActivemqInstaller::for_version(root, version)
+                    .is_ok_and(|installer| installer.is_installed())
+            })
+        }
+        ServiceKindInput::Ftp => verified_fallback(FTP_RELEASES, removed_version, |version| {
+            FtpInstaller::for_version(root, version).is_ok_and(|installer| installer.is_installed())
+        }),
         _ => None,
     }
 }
@@ -503,14 +549,17 @@ fn service_name(kind: ServiceKindInput) -> &'static str {
         ServiceKindInput::Nats => "NATS",
         ServiceKindInput::Kafka => "Kafka Sandbox",
         ServiceKindInput::Meilisearch => "Meilisearch",
+        ServiceKindInput::Influxdb => "InfluxDB",
         ServiceKindInput::Minio => "MinIO",
         ServiceKindInput::Rustfs => "RustFS",
         ServiceKindInput::Etcd => "etcd",
         ServiceKindInput::Consul => "Consul",
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "RabbitMQ",
+        ServiceKindInput::Activemq => "ActiveMQ Classic",
         ServiceKindInput::Nginx => "Nginx",
         ServiceKindInput::Caddy => "Caddy",
+        ServiceKindInput::Ftp => "FTP Server",
     }
 }
 

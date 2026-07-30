@@ -1,26 +1,40 @@
+mod ai_chat;
+mod ai_runtime;
+mod ai_settings;
+mod ai_tools;
 mod clipboard;
 mod commands;
 mod database_tools;
 mod diagnostics;
 mod duckdb_tools;
 mod http_tools;
+mod influxdb_tools;
 mod kafka_tools;
+mod local_domains;
 mod mailpit_tools;
 mod meilisearch_tools;
 mod mock_tools;
 mod mongodb_tools;
 mod nats_tools;
+mod network_tools;
+mod olap_tools;
 mod port_tools;
 mod qr_tools;
 mod redis_tools;
+mod rss_ai;
+mod rss_tools;
+mod runtime_tools;
 mod s3_tools;
+mod scheduled_tasks;
 mod settings;
 mod sqlite_tools;
 mod ssh_tools;
 mod storage_tools;
+mod test_data;
 mod tools;
 mod tray;
 mod uninstall;
+mod zeromq_tools;
 
 use tauri::Manager;
 
@@ -54,11 +68,16 @@ pub fn run() {
         .manage(clipboard::commands::ClipboardState(std::sync::Mutex::new(
             None,
         )))
+        .manage(ai_chat::AiChatState::default())
+        .manage(ai_tools::AiToolState::default())
+        .manage(rss_ai::RssAiState::default())
         .manage(ssh_tools::SshTerminalState::default())
         .setup(|app| {
             let settings = settings::load_settings();
             let _ = settings::apply_log_retention(&settings);
             tray::setup(app)?;
+            rss_tools::start_scheduler();
+            scheduled_tasks::start_scheduler();
 
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             {
@@ -72,6 +91,23 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            ai_settings::ai_settings_get,
+            ai_settings::ai_settings_save,
+            ai_settings::ai_connection_test,
+            ai_settings::ai_avatar_import,
+            ai_settings::ai_avatar_remove,
+            ai_chat::ai_chat_sessions_list,
+            ai_chat::ai_chat_session_create,
+            ai_chat::ai_chat_session_delete,
+            ai_chat::ai_chat_messages_list,
+            ai_chat::ai_chat_send,
+            ai_chat::ai_chat_cancel,
+            ai_tools::ai_tool_generate,
+            ai_tools::ai_tool_cancel,
+            rss_ai::rss_ai_results_list,
+            rss_ai::rss_ai_generate,
+            rss_ai::rss_ai_cancel,
+            rss_ai::rss_ai_result_delete,
             commands::service_list,
             commands::service_install,
             commands::service_install_cancel,
@@ -143,6 +179,12 @@ pub fn run() {
             meilisearch_tools::meilisearch_indexes,
             meilisearch_tools::meilisearch_add_documents,
             meilisearch_tools::meilisearch_search,
+            influxdb_tools::influxdb_overview,
+            influxdb_tools::influxdb_databases,
+            influxdb_tools::influxdb_database_create,
+            influxdb_tools::influxdb_database_delete,
+            influxdb_tools::influxdb_query,
+            influxdb_tools::influxdb_write,
             nats_tools::nats_overview,
             nats_tools::nats_publish,
             nats_tools::nats_receive,
@@ -152,6 +194,19 @@ pub fn run() {
             kafka_tools::kafka_topic_delete,
             kafka_tools::kafka_publish,
             port_tools::port_listeners,
+            network_tools::network_diagnose,
+            network_tools::network_proxy_settings,
+            zeromq_tools::zeromq_publish,
+            zeromq_tools::zeromq_subscribe,
+            zeromq_tools::zeromq_push,
+            zeromq_tools::zeromq_pull,
+            olap_tools::olap_profile_list,
+            olap_tools::olap_profile_save,
+            olap_tools::olap_profile_delete,
+            olap_tools::olap_connection_test,
+            olap_tools::olap_database_list,
+            olap_tools::olap_table_list,
+            olap_tools::olap_execute,
             duckdb_tools::duckdb_status,
             duckdb_tools::duckdb_install,
             duckdb_tools::duckdb_query,
@@ -195,7 +250,46 @@ pub fn run() {
             mock_tools::mock_api_stop,
             mock_tools::mock_api_clear_requests,
             http_tools::http_request_execute,
+            http_tools::http_workspace_get,
+            http_tools::http_workspace_save,
+            local_domains::local_domains_get,
+            local_domains::local_domains_save,
+            local_domains::local_domains_apply,
+            local_domains::local_domains_restore,
+            local_domains::local_domain_target_check,
+            test_data::test_data_export,
             qr_tools::qr_code_generate,
+            rss_tools::rss_feeds_list,
+            rss_tools::rss_feed_add,
+            rss_tools::rss_feed_delete,
+            rss_tools::rss_feed_update,
+            rss_tools::rss_feed_refresh,
+            rss_tools::rss_refresh_due,
+            rss_tools::rss_entries_list,
+            rss_tools::rss_entry_read,
+            rss_tools::rss_entry_star,
+            rss_tools::rss_mark_all_read,
+            rss_tools::rss_import_opml,
+            rss_tools::rss_export_opml,
+            scheduled_tasks::scheduled_tasks_list,
+            scheduled_tasks::scheduled_task_save,
+            scheduled_tasks::scheduled_task_delete,
+            scheduled_tasks::scheduled_task_toggle,
+            scheduled_tasks::scheduled_task_cancel,
+            scheduled_tasks::scheduled_task_run,
+            scheduled_tasks::scheduled_task_history,
+            runtime_tools::runtime_overview,
+            runtime_tools::runtime_install,
+            runtime_tools::runtime_select,
+            runtime_tools::runtime_uninstall,
+            runtime_tools::runtime_diagnose,
+            runtime_tools::runtime_go_proxy_set,
+            runtime_tools::runtime_projects_list,
+            runtime_tools::runtime_project_save,
+            runtime_tools::runtime_project_delete,
+            runtime_tools::runtime_project_manifest_export,
+            runtime_tools::runtime_project_manifest_import,
+            runtime_tools::runtime_open_terminal,
             ssh_tools::ssh_profiles_list,
             ssh_tools::ssh_profile_save,
             ssh_tools::ssh_profile_delete,

@@ -1,25 +1,28 @@
 use devbox_core::{
     installer::{
-        caddy_release, consul_release, etcd_release, mailpit_release, meilisearch_release,
-        minio_release, mongodb_release, mysql_release, nats_release, nginx_release,
-        postgres_release, rabbitmq_release, redis_release, rnacos_release, rustfs_release,
-        MysqlRelease, NginxRelease, PostgresRelease, RedisRelease, VerifiedBinaryRelease,
-        CADDY_RELEASES, CADDY_VERSION, CONSUL_RELEASES, CONSUL_VERSION, ETCD_RELEASES,
-        ETCD_VERSION, KAFKA_SERIES, KAFKA_VERSION, MAILPIT_RELEASES, MAILPIT_VERSION,
-        MEILISEARCH_RELEASES, MEILISEARCH_VERSION, MINIO_RELEASES, MINIO_VERSION, MONGODB_RELEASES,
-        MONGODB_VERSION, MYSQL_RELEASES, MYSQL_VERSION, NATS_RELEASES, NATS_VERSION,
-        NGINX_RELEASES, NGINX_VERSION, POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_RELEASES,
-        RABBITMQ_SERIES, RABBITMQ_VERSION, REDIS_RELEASES, REDIS_VERSION, RNACOS_RELEASES,
-        RNACOS_VERSION, RUSTFS_RELEASES, RUSTFS_VERSION,
+        activemq_release, caddy_release, consul_release, etcd_release, ftp_release,
+        influxdb_release, mailpit_release, meilisearch_release, minio_release, mongodb_release,
+        mysql_release, nats_release, nginx_release, postgres_release, rabbitmq_release,
+        redis_release, rnacos_release, rustfs_release, MysqlRelease, NginxRelease, PostgresRelease,
+        RedisRelease, VerifiedBinaryRelease, ACTIVEMQ_RELEASES, ACTIVEMQ_VERSION, CADDY_RELEASES,
+        CADDY_VERSION, CONSUL_RELEASES, CONSUL_VERSION, ETCD_RELEASES, ETCD_VERSION, FTP_RELEASES,
+        FTP_VERSION, INFLUXDB_RELEASES, INFLUXDB_VERSION, KAFKA_SERIES, KAFKA_VERSION,
+        MAILPIT_RELEASES, MAILPIT_VERSION, MEILISEARCH_RELEASES, MEILISEARCH_VERSION,
+        MINIO_RELEASES, MINIO_VERSION, MONGODB_RELEASES, MONGODB_VERSION, MYSQL_RELEASES,
+        MYSQL_VERSION, NATS_RELEASES, NATS_VERSION, NGINX_RELEASES, NGINX_VERSION,
+        POSTGRES_RELEASES, POSTGRES_VERSION, RABBITMQ_RELEASES, RABBITMQ_SERIES, RABBITMQ_VERSION,
+        REDIS_RELEASES, REDIS_VERSION, RNACOS_RELEASES, RNACOS_VERSION, RUSTFS_RELEASES,
+        RUSTFS_VERSION,
     },
-    report_install_progress, with_install_context, CaddyInstaller, CaddyService, ConfigManager,
-    ConsulInstaller, ConsulService, EtcdInstaller, EtcdService, InstallCancellationToken,
-    InstallReporter, KafkaInstaller, KafkaService, MailpitInstaller, MailpitService,
-    MeilisearchInstaller, MeilisearchService, MinioInstaller, MinioService, MongodbInstaller,
-    MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService, NginxInstaller,
-    NginxService, PostgresInstaller, PostgresService, RabbitmqInstaller, RabbitmqService,
-    RedisInstaller, RedisService, RnacosInstaller, RnacosService, RustfsInstaller, RustfsService,
-    ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
+    report_install_progress, with_install_context, ActivemqInstaller, ActivemqService,
+    CaddyInstaller, CaddyService, ConfigManager, ConsulInstaller, ConsulService, EtcdInstaller,
+    EtcdService, FtpInstaller, FtpService, InfluxdbInstaller, InfluxdbService,
+    InstallCancellationToken, InstallReporter, KafkaInstaller, KafkaService, MailpitInstaller,
+    MailpitService, MeilisearchInstaller, MeilisearchService, MinioInstaller, MinioService,
+    MongodbInstaller, MongodbService, MysqlInstaller, MysqlService, NatsInstaller, NatsService,
+    NginxInstaller, NginxService, PostgresInstaller, PostgresService, RabbitmqInstaller,
+    RabbitmqService, RedisInstaller, RedisService, RnacosInstaller, RnacosService, RustfsInstaller,
+    RustfsService, ServiceConfig, ServiceKind, ServiceManager, ServiceStatus,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -192,14 +195,17 @@ pub enum ServiceKindInput {
     Nats,
     Kafka,
     Meilisearch,
+    Influxdb,
     Minio,
     Rustfs,
     Etcd,
     Consul,
     Rnacos,
     Rabbitmq,
+    Activemq,
     Nginx,
     Caddy,
+    Ftp,
 }
 
 impl From<ServiceKindInput> for ServiceKind {
@@ -213,14 +219,17 @@ impl From<ServiceKindInput> for ServiceKind {
             ServiceKindInput::Nats => Self::Nats,
             ServiceKindInput::Kafka => Self::Kafka,
             ServiceKindInput::Meilisearch => Self::Meilisearch,
+            ServiceKindInput::Influxdb => Self::Influxdb,
             ServiceKindInput::Minio => Self::Minio,
             ServiceKindInput::Rustfs => Self::Rustfs,
             ServiceKindInput::Etcd => Self::Etcd,
             ServiceKindInput::Consul => Self::Consul,
             ServiceKindInput::Rnacos => Self::Rnacos,
             ServiceKindInput::Rabbitmq => Self::Rabbitmq,
+            ServiceKindInput::Activemq => Self::Activemq,
             ServiceKindInput::Nginx => Self::Nginx,
             ServiceKindInput::Caddy => Self::Caddy,
+            ServiceKindInput::Ftp => Self::Ftp,
         }
     }
 }
@@ -542,11 +551,18 @@ fn etcd_service_config(root: &Path, release: &VerifiedBinaryRelease) -> ServiceC
 
 fn caddy_service_config(root: &Path, release: &VerifiedBinaryRelease) -> ServiceConfig {
     let instance = root.join("instances/caddy/default");
+    let gateway_port = fs::read(root.join("tools/local-domains.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| value.get("httpPort")?.as_u64())
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port > 0)
+        .unwrap_or(8082);
     ServiceConfig {
         name: "Caddy".into(),
         kind: ServiceKind::Caddy,
         version: release.version.into(),
-        port: 8082,
+        port: gateway_port,
         executable: root
             .join("installations/caddy")
             .join(release.series)
@@ -591,6 +607,27 @@ fn catalog_service_config(
                 instance.join("conf/meilisearch.toml").display().to_string(),
             ],
         ),
+        ServiceKind::Influxdb => (
+            "InfluxDB",
+            8181,
+            installation.join("bin/influxdb3"),
+            vec![
+                "serve".into(),
+                "--node-id".into(),
+                "zhiyu-local".into(),
+                "--object-store".into(),
+                "file".into(),
+                "--data-dir".into(),
+                instance
+                    .join("data")
+                    .join(release.series)
+                    .display()
+                    .to_string(),
+                "--http-bind".into(),
+                "127.0.0.1:8181".into(),
+                "--without-auth".into(),
+            ],
+        ),
         ServiceKind::Minio => (
             "MinIO",
             9000,
@@ -629,6 +666,40 @@ fn catalog_service_config(
             5672,
             installation.join("server/sbin/rabbitmq-server"),
             Vec::new(),
+        ),
+        ServiceKind::Activemq => (
+            "ActiveMQ Classic",
+            61616,
+            installation.join("home/bin/activemq"),
+            vec!["console".into()],
+        ),
+        ServiceKind::Ftp => (
+            "FTP Server",
+            2121,
+            installation.join("bin/sftpgo"),
+            vec![
+                "portable".into(),
+                "--directory".into(),
+                instance.join("data").display().to_string(),
+                "--username".into(),
+                "zhiyu".into(),
+                "--password-file".into(),
+                instance.join("conf/ftp.password").display().to_string(),
+                "--permissions".into(),
+                "*".into(),
+                "--ftpd-port".into(),
+                "2121".into(),
+                "--sftpd-port".into(),
+                "-1".into(),
+                "--httpd-port".into(),
+                "-1".into(),
+                "--webdav-port".into(),
+                "-1".into(),
+                "--log-level".into(),
+                "info".into(),
+                "--grace-time".into(),
+                "5".into(),
+            ],
         ),
         _ => unreachable!("service does not use the shared binary catalog"),
     };
@@ -687,6 +758,44 @@ fn catalog_service_config(
             ),
             ("RABBITMQ_NODENAME".into(), "rabbit@localhost".into()),
         ]),
+        ServiceKind::Activemq => {
+            let java_home = managed_java_home(root, release.series)
+                .unwrap_or_else(|| root.join("runtimes/java/not-installed/home"));
+            BTreeMap::from([
+                ("JAVA_HOME".into(), java_home.display().to_string()),
+                (
+                    "PATH".into(),
+                    format!("{}:/usr/bin:/bin", java_home.join("bin").display()),
+                ),
+                (
+                    "ACTIVEMQ_HOME".into(),
+                    installation.join("home").display().to_string(),
+                ),
+                ("ACTIVEMQ_BASE".into(), instance.display().to_string()),
+                (
+                    "ACTIVEMQ_CONF".into(),
+                    instance.join("conf").display().to_string(),
+                ),
+                (
+                    "ACTIVEMQ_DATA".into(),
+                    instance.join("data").display().to_string(),
+                ),
+                (
+                    "ACTIVEMQ_TMP".into(),
+                    instance.join("tmp").display().to_string(),
+                ),
+                (
+                    "ACTIVEMQ_OUT".into(),
+                    instance.join("logs/activemq.out").display().to_string(),
+                ),
+                (
+                    "ACTIVEMQ_PIDFILE".into(),
+                    instance.join("run/activemq.pid").display().to_string(),
+                ),
+                ("ACTIVEMQ_OPTS_MEMORY".into(), "-Xms64M -Xmx256M".into()),
+            ])
+        }
+        ServiceKind::Ftp => ftp_environment(&instance),
         _ => BTreeMap::new(),
     };
     ServiceConfig {
@@ -700,6 +809,46 @@ fn catalog_service_config(
         instance_dir: instance,
         wait_for_port: true,
     }
+}
+
+fn managed_java_home(root: &Path, activemq_series: &str) -> Option<PathBuf> {
+    let accepts = |version: &str| {
+        let major = version.split('.').next()?.parse::<u32>().ok()?;
+        Some(if activemq_series == "6.3" {
+            major == 25
+        } else {
+            matches!(major, 17 | 21)
+        })
+    };
+    let settings = fs::read(root.join("runtime-profiles/settings.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    if let Some(version) = settings
+        .as_ref()
+        .and_then(|value| value.get("defaults"))
+        .and_then(|value| value.get("java"))
+        .and_then(|value| value.as_str())
+        .filter(|version| accepts(version) == Some(true))
+    {
+        let home = root.join("runtimes/java").join(version).join("home");
+        if home.join("bin/java").is_file() {
+            return Some(home);
+        }
+    }
+    let directory = root.join("runtimes/java");
+    let mut candidates = fs::read_dir(directory)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|version| accepts(version) == Some(true))
+                && path.join("home/bin/java").is_file()
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.pop().map(|path| path.join("home"))
 }
 
 pub(crate) fn activate_installed_version(
@@ -751,6 +900,11 @@ pub(crate) fn activate_installed_version(
             meilisearch_release(version)
                 .ok_or_else(|| format!("不支持 Meilisearch 版本 {version}"))?,
         ),
+        ServiceKindInput::Influxdb => catalog_service_config(
+            &root,
+            ServiceKind::Influxdb,
+            influxdb_release(version).ok_or_else(|| format!("不支持 InfluxDB 版本 {version}"))?,
+        ),
         ServiceKindInput::Minio => catalog_service_config(
             &root,
             ServiceKind::Minio,
@@ -775,6 +929,16 @@ pub(crate) fn activate_installed_version(
             &root,
             ServiceKind::Rabbitmq,
             rabbitmq_release(version).ok_or_else(|| format!("不支持 RabbitMQ 版本 {version}"))?,
+        ),
+        ServiceKindInput::Activemq => catalog_service_config(
+            &root,
+            ServiceKind::Activemq,
+            activemq_release(version).ok_or_else(|| format!("不支持 ActiveMQ 版本 {version}"))?,
+        ),
+        ServiceKindInput::Ftp => catalog_service_config(
+            &root,
+            ServiceKind::Ftp,
+            ftp_release(version).ok_or_else(|| format!("不支持 FTP Server 版本 {version}"))?,
         ),
         _ => return Err("当前服务不支持版本切换".into()),
     };
@@ -823,11 +987,14 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
             MONGODB_VERSION,
         )),
         ServiceKind::Meilisearch => Some((meilisearch_release, MEILISEARCH_VERSION)),
+        ServiceKind::Influxdb => Some((influxdb_release, INFLUXDB_VERSION)),
         ServiceKind::Minio => Some((minio_release, MINIO_VERSION)),
         ServiceKind::Rustfs => Some((rustfs_release, RUSTFS_VERSION)),
         ServiceKind::Consul => Some((consul_release, CONSUL_VERSION)),
         ServiceKind::Rnacos => Some((rnacos_release, RNACOS_VERSION)),
         ServiceKind::Rabbitmq => Some((rabbitmq_release, RABBITMQ_VERSION)),
+        ServiceKind::Activemq => Some((activemq_release, ACTIVEMQ_VERSION)),
+        ServiceKind::Ftp => Some((ftp_release, FTP_VERSION)),
         _ => None,
     };
     if let Some((resolve, default_version)) = catalog {
@@ -845,6 +1012,7 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
         | ServiceKind::Etcd
         | ServiceKind::Mongodb
         | ServiceKind::Meilisearch
+        | ServiceKind::Influxdb
         | ServiceKind::Minio
         | ServiceKind::Rustfs
         | ServiceKind::Consul
@@ -852,6 +1020,8 @@ pub(crate) fn service_config(kind: ServiceKind) -> Result<ServiceConfig, String>
         | ServiceKind::Rabbitmq => {
             unreachable!()
         }
+        ServiceKind::Activemq => unreachable!(),
+        ServiceKind::Ftp => unreachable!(),
         ServiceKind::Kafka => {
             let instance = root.join("instances/kafka/default");
             (
@@ -1008,6 +1178,53 @@ fn mailpit_environment(instance_dir: &std::path::Path) -> BTreeMap<String, Strin
     environment
 }
 
+fn ftp_environment(instance_dir: &Path) -> BTreeMap<String, String> {
+    const ALLOWED_KEYS: &[&str] = &[
+        "SFTPGO_FTPD__BINDINGS__0__ADDRESS",
+        "SFTPGO_FTPD__PASSIVE_PORT_RANGE__START",
+        "SFTPGO_FTPD__PASSIVE_PORT_RANGE__END",
+        "SFTPGO_FTPD__DISABLE_ACTIVE_MODE",
+    ];
+    let mut environment = BTreeMap::from([
+        (
+            "SFTPGO_FTPD__BINDINGS__0__ADDRESS".into(),
+            "127.0.0.1".into(),
+        ),
+        (
+            "SFTPGO_FTPD__PASSIVE_PORT_RANGE__START".into(),
+            "50000".into(),
+        ),
+        (
+            "SFTPGO_FTPD__PASSIVE_PORT_RANGE__END".into(),
+            "50009".into(),
+        ),
+        ("SFTPGO_FTPD__DISABLE_ACTIVE_MODE".into(), "true".into()),
+    ]);
+    if let Ok(contents) = fs::read_to_string(instance_dir.join("conf/ftp.env")) {
+        for line in contents.lines().map(str::trim) {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let key = key.trim();
+            let value = value.trim();
+            let valid = match key {
+                "SFTPGO_FTPD__BINDINGS__0__ADDRESS" => value == "127.0.0.1",
+                "SFTPGO_FTPD__PASSIVE_PORT_RANGE__START" => value == "50000",
+                "SFTPGO_FTPD__PASSIVE_PORT_RANGE__END" => value == "50009",
+                "SFTPGO_FTPD__DISABLE_ACTIVE_MODE" => value == "true",
+                _ => false,
+            };
+            if valid && ALLOWED_KEYS.contains(&key) {
+                environment.insert(key.into(), value.into());
+            }
+        }
+    }
+    environment
+}
+
 fn mailpit_value_allowed(key: &str, value: &str, instance_dir: &std::path::Path) -> bool {
     match key {
         "MP_SMTP_BIND_ADDR" => value == "127.0.0.1:1025",
@@ -1052,6 +1269,9 @@ fn with_service<T>(
         ServiceKindInput::Meilisearch => {
             operation(&MeilisearchService::new(config).map_err(stringify_error)?)
         }
+        ServiceKindInput::Influxdb => {
+            operation(&InfluxdbService::new(config).map_err(stringify_error)?)
+        }
         ServiceKindInput::Minio => operation(&MinioService::new(config).map_err(stringify_error)?),
         ServiceKindInput::Rustfs => {
             operation(&RustfsService::new(config).map_err(stringify_error)?)
@@ -1066,8 +1286,12 @@ fn with_service<T>(
         ServiceKindInput::Rabbitmq => {
             operation(&RabbitmqService::new(config).map_err(stringify_error)?)
         }
+        ServiceKindInput::Activemq => {
+            operation(&ActivemqService::new(config).map_err(stringify_error)?)
+        }
         ServiceKindInput::Nginx => operation(&NginxService::new(config).map_err(stringify_error)?),
         ServiceKindInput::Caddy => operation(&CaddyService::new(config).map_err(stringify_error)?),
+        ServiceKindInput::Ftp => operation(&FtpService::new(config).map_err(stringify_error)?),
     }
     .map_err(stringify_error)
 }
@@ -1107,14 +1331,17 @@ pub(crate) fn service_info(kind: ServiceKindInput) -> Result<ServiceInfo, String
         ServiceKindInput::Nats => "NATS",
         ServiceKindInput::Kafka => "Kafka Sandbox",
         ServiceKindInput::Meilisearch => "Meilisearch",
+        ServiceKindInput::Influxdb => "InfluxDB",
         ServiceKindInput::Minio => "MinIO",
         ServiceKindInput::Rustfs => "RustFS",
         ServiceKindInput::Etcd => "etcd",
         ServiceKindInput::Consul => "Consul",
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "RabbitMQ",
+        ServiceKindInput::Activemq => "ActiveMQ Classic",
         ServiceKindInput::Nginx => "Nginx",
         ServiceKindInput::Caddy => "Caddy",
+        ServiceKindInput::Ftp => "FTP Server",
     };
     let (install_supported, install_support_label) = install_compatibility(kind);
     Ok(ServiceInfo {
@@ -1241,14 +1468,17 @@ pub fn service_list() -> Result<Vec<ServiceInfo>, String> {
         ServiceKindInput::Nats,
         ServiceKindInput::Kafka,
         ServiceKindInput::Meilisearch,
+        ServiceKindInput::Influxdb,
         ServiceKindInput::Minio,
         ServiceKindInput::Rustfs,
         ServiceKindInput::Etcd,
         ServiceKindInput::Consul,
         ServiceKindInput::Rnacos,
         ServiceKindInput::Rabbitmq,
+        ServiceKindInput::Activemq,
         ServiceKindInput::Nginx,
         ServiceKindInput::Caddy,
+        ServiceKindInput::Ftp,
     ]
     .into_iter()
     .map(service_info)
@@ -1358,6 +1588,19 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .map_err(stringify_error)?;
             service_info(kind)
         }
+        ServiceKindInput::Influxdb => {
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Influxdb)?;
+            InfluxdbInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 InfluxDB 实例配置");
+            InfluxdbService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
+        }
         ServiceKindInput::Minio => {
             let root = devbox_root()?;
             let config = service_config(ServiceKind::Minio)?;
@@ -1436,6 +1679,19 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .map_err(stringify_error)?;
             service_info(kind)
         }
+        ServiceKindInput::Activemq => {
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Activemq)?;
+            ActivemqInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 ActiveMQ 实例配置");
+            ActivemqService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
+        }
         ServiceKindInput::Nginx => {
             let root = devbox_root()?;
             let config = service_config(ServiceKind::Nginx)?;
@@ -1459,6 +1715,19 @@ fn install_service(kind: ServiceKindInput) -> Result<ServiceInfo, String> {
                 .map_err(stringify_error)?;
             report_install_progress(94, "写入配置", "正在创建 Caddy 实例配置");
             CaddyService::new(config)
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+            service_info(kind)
+        }
+        ServiceKindInput::Ftp => {
+            let root = devbox_root()?;
+            let config = service_config(ServiceKind::Ftp)?;
+            FtpInstaller::for_version(&root, &config.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            report_install_progress(94, "写入配置", "正在创建 FTP Server 实例配置");
+            FtpService::new(config)
                 .and_then(|service| service.install())
                 .map_err(stringify_error)?;
             service_info(kind)
@@ -1778,11 +2047,14 @@ fn verified_releases(kind: ServiceKindInput) -> Result<&'static [VerifiedBinaryR
         ServiceKindInput::Caddy => Ok(CADDY_RELEASES),
         ServiceKindInput::Mongodb => Ok(MONGODB_RELEASES),
         ServiceKindInput::Meilisearch => Ok(MEILISEARCH_RELEASES),
+        ServiceKindInput::Influxdb => Ok(INFLUXDB_RELEASES),
         ServiceKindInput::Minio => Ok(MINIO_RELEASES),
         ServiceKindInput::Rustfs => Ok(RUSTFS_RELEASES),
         ServiceKindInput::Consul => Ok(CONSUL_RELEASES),
         ServiceKindInput::Rnacos => Ok(RNACOS_RELEASES),
         ServiceKindInput::Rabbitmq => Ok(RABBITMQ_RELEASES),
+        ServiceKindInput::Activemq => Ok(ACTIVEMQ_RELEASES),
+        ServiceKindInput::Ftp => Ok(FTP_RELEASES),
         _ => Err("当前服务暂未接入通用多版本管理".into()),
     }
 }
@@ -1795,11 +2067,14 @@ fn verified_service_name(kind: ServiceKindInput) -> &'static str {
         ServiceKindInput::Caddy => "Caddy",
         ServiceKindInput::Mongodb => "MongoDB",
         ServiceKindInput::Meilisearch => "Meilisearch",
+        ServiceKindInput::Influxdb => "InfluxDB",
         ServiceKindInput::Minio => "MinIO",
         ServiceKindInput::Rustfs => "RustFS",
         ServiceKindInput::Consul => "Consul",
         ServiceKindInput::Rnacos => "rnacos",
         ServiceKindInput::Rabbitmq => "RabbitMQ",
+        ServiceKindInput::Activemq => "ActiveMQ",
+        ServiceKindInput::Ftp => "FTP Server",
         _ => "服务",
     }
 }
@@ -1822,11 +2097,14 @@ fn verified_installer_state(
         ServiceKindInput::Caddy => state!(CaddyInstaller),
         ServiceKindInput::Mongodb => state!(MongodbInstaller),
         ServiceKindInput::Meilisearch => state!(MeilisearchInstaller),
+        ServiceKindInput::Influxdb => state!(InfluxdbInstaller),
         ServiceKindInput::Minio => state!(MinioInstaller),
         ServiceKindInput::Rustfs => state!(RustfsInstaller),
         ServiceKindInput::Consul => state!(ConsulInstaller),
         ServiceKindInput::Rnacos => state!(RnacosInstaller),
         ServiceKindInput::Rabbitmq => state!(RabbitmqInstaller),
+        ServiceKindInput::Activemq => state!(ActivemqInstaller),
+        ServiceKindInput::Ftp => state!(FtpInstaller),
         _ => return Err("当前服务暂未接入通用多版本管理".into()),
     })
 }
@@ -1928,6 +2206,15 @@ fn install_verified_version(
             .and_then(|service| service.install())
             .map_err(stringify_error)?;
         }
+        ServiceKindInput::Influxdb => {
+            InfluxdbInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            InfluxdbService::new(catalog_service_config(root, ServiceKind::Influxdb, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
         ServiceKindInput::Minio => {
             MinioInstaller::for_version(root, release.version)
                 .map_err(stringify_error)?
@@ -1970,6 +2257,24 @@ fn install_verified_version(
                 .install()
                 .map_err(stringify_error)?;
             RabbitmqService::new(catalog_service_config(root, ServiceKind::Rabbitmq, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Activemq => {
+            ActivemqInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            ActivemqService::new(catalog_service_config(root, ServiceKind::Activemq, release))
+                .and_then(|service| service.install())
+                .map_err(stringify_error)?;
+        }
+        ServiceKindInput::Ftp => {
+            FtpInstaller::for_version(root, release.version)
+                .map_err(stringify_error)?
+                .install()
+                .map_err(stringify_error)?;
+            FtpService::new(catalog_service_config(root, ServiceKind::Ftp, release))
                 .and_then(|service| service.install())
                 .map_err(stringify_error)?;
         }
@@ -2056,8 +2361,10 @@ pub async fn service_stop_all() -> Result<Vec<ServiceInfo>, String> {
             ServiceKindInput::Consul,
             ServiceKindInput::Rnacos,
             ServiceKindInput::Rabbitmq,
+            ServiceKindInput::Activemq,
             ServiceKindInput::Nginx,
             ServiceKindInput::Caddy,
+            ServiceKindInput::Ftp,
         ] {
             match with_service(kind, |service| service.status()) {
                 Ok(ServiceStatus::Running { .. }) => {
@@ -2407,14 +2714,17 @@ pub fn service_logs(kind: ServiceKindInput) -> Result<String, String> {
         | ServiceKind::Nats
         | ServiceKind::Kafka
         | ServiceKind::Meilisearch
+        | ServiceKind::Influxdb
         | ServiceKind::Minio => {}
         ServiceKind::Rustfs => {}
         ServiceKind::Etcd => {}
         ServiceKind::Consul => {}
         ServiceKind::Rnacos => {}
         ServiceKind::Rabbitmq => {}
+        ServiceKind::Activemq => {}
         ServiceKind::Nginx => {}
         ServiceKind::Caddy => {}
+        ServiceKind::Ftp => {}
     }
     for (label, path) in sources {
         if path.is_file() {
@@ -2441,14 +2751,17 @@ fn primary_log_path(config: &ServiceConfig) -> PathBuf {
         | ServiceKind::Nats
         | ServiceKind::Kafka
         | ServiceKind::Meilisearch
+        | ServiceKind::Influxdb
         | ServiceKind::Minio => config.stdout_log_path(),
         ServiceKind::Rustfs => config.stdout_log_path(),
         ServiceKind::Etcd => config.stdout_log_path(),
         ServiceKind::Consul => config.stdout_log_path(),
         ServiceKind::Rnacos => config.stdout_log_path(),
         ServiceKind::Rabbitmq => config.stdout_log_path(),
+        ServiceKind::Activemq => config.stdout_log_path(),
         ServiceKind::Nginx => config.stdout_log_path(),
         ServiceKind::Caddy => config.stdout_log_path(),
+        ServiceKind::Ftp => config.stdout_log_path(),
     }
 }
 
@@ -2462,14 +2775,17 @@ pub(crate) fn native_config_path(config: &ServiceConfig) -> PathBuf {
         ServiceKind::Nats => "nats.conf",
         ServiceKind::Kafka => "kafka.conf",
         ServiceKind::Meilisearch => "meilisearch.toml",
+        ServiceKind::Influxdb => "influxdb.env",
         ServiceKind::Minio => "minio.env",
         ServiceKind::Rustfs => "rustfs.env",
         ServiceKind::Etcd => "etcd.yaml",
         ServiceKind::Consul => "consul.hcl",
         ServiceKind::Rnacos => "rnacos.env",
         ServiceKind::Rabbitmq => "rabbitmq.conf",
+        ServiceKind::Activemq => "activemq.xml",
         ServiceKind::Nginx => "nginx.conf",
         ServiceKind::Caddy => "Caddyfile",
+        ServiceKind::Ftp => "ftp.env",
     };
     config.config_dir().join(name)
 }
@@ -2639,14 +2955,17 @@ fn download_cache_size(downloads_dir: &Path, kind: ServiceKind) -> Result<u64, S
         ServiceKind::Nats => "nats-server",
         ServiceKind::Kafka => "tansu-",
         ServiceKind::Meilisearch => "meilisearch",
+        ServiceKind::Influxdb => "influxdb3-core-",
         ServiceKind::Minio => "minio.",
         ServiceKind::Rustfs => "rustfs-",
         ServiceKind::Etcd => "etcd-",
         ServiceKind::Consul => "consul_",
         ServiceKind::Rnacos => "rnacos-",
         ServiceKind::Rabbitmq => "rabbitmq-",
+        ServiceKind::Activemq => "apache-activemq-",
         ServiceKind::Nginx => "nginx",
         ServiceKind::Caddy => "caddy",
+        ServiceKind::Ftp => "sftpgo_",
     };
     let mut total = 0_u64;
     for entry in fs::read_dir(downloads_dir).map_err(|error| error.to_string())? {
@@ -2903,13 +3222,16 @@ fn connection_target(kind: &ServiceKind) -> (String, u64) {
         ServiceKind::Nats => ("127.0.0.1:4222".into(), 3),
         ServiceKind::Kafka => ("127.0.0.1:9092".into(), 3),
         ServiceKind::Meilisearch => ("127.0.0.1:7700".into(), 3),
+        ServiceKind::Influxdb => ("127.0.0.1:8181".into(), 5),
         ServiceKind::Minio => ("127.0.0.1:9000".into(), 3),
         ServiceKind::Rustfs => ("127.0.0.1:9002".into(), 3),
         ServiceKind::Etcd => ("127.0.0.1:2379".into(), 3),
         ServiceKind::Consul => ("127.0.0.1:8500".into(), 3),
         ServiceKind::Rnacos => ("127.0.0.1:8848".into(), 3),
         ServiceKind::Rabbitmq => ("127.0.0.1:5672".into(), 5),
+        ServiceKind::Activemq => ("127.0.0.1:61616".into(), 8),
         ServiceKind::Nginx => ("127.0.0.1:8081".into(), 3),
         ServiceKind::Caddy => ("127.0.0.1:8082".into(), 3),
+        ServiceKind::Ftp => ("127.0.0.1:2121".into(), 3),
     }
 }

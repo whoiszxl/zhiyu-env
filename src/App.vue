@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { computed, onMounted, onUnmounted, provide, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, provide, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import ServiceDocs from "./components/ServiceDocs.vue";
 import ServiceConnectPanel from "./components/ServiceConnectPanel.vue";
+import InfluxdbPanel from "./components/InfluxdbPanel.vue";
+import ToastViewport from "./components/ToastViewport.vue";
+import AiChatModal from "./components/AiChatModal.vue";
+import AiAssistDialog from "./components/AiAssistDialog.vue";
+import CommandPalette, {
+  type CommandPaletteItem,
+} from "./components/CommandPalette.vue";
 import SshTool from "./components/tools/SshTool.vue";
 import { findTool, TOOLS } from "./tools/registry";
 import { INSTALL_TASK_KEY, type ToolId } from "./tools/types";
@@ -14,6 +22,7 @@ import { formatBytes } from "./utils/format";
 import { setColorTheme, setThemeMode } from "./theme";
 import { applyUiScale } from "./display";
 import { setAppLocale } from "./i18n";
+import { dismissToastByKey, showToast } from "./toast";
 import {
   checkAppUpdate,
   cleanAllInstallCache,
@@ -27,8 +36,10 @@ import {
   forceStopService,
   getEnvironmentDiskUsage,
   getEnvironmentMetrics,
+  getAiSettings,
   getAppSettings,
   importAppBackground,
+  importAiAvatar,
   getMailpitMessageDetail,
   getMailpitOverview,
   getMeilisearchOverview,
@@ -68,8 +79,11 @@ import {
   repairServiceState,
   runAppDiagnostics,
   runServiceAction,
+  runtimeProjectsList,
   saveAppSettings,
+  saveAiSettings,
   removeAppBackground,
+  removeAiAvatar,
   restoreServiceBackup,
   saveServiceConfig,
   scanRedisKeys,
@@ -80,16 +94,23 @@ import {
   selectNginxVersion,
   selectManagedServiceVersion,
   stopAllManagedServices,
+  testAiConnection,
   uninstallServiceVersion,
 } from "./api/services";
 import { databaseTypeInfo } from "./databaseTypeInfo";
 import type {
+  AiApiProtocol,
+  AiAssistOption,
+  AiToolCapability,
+  AiSettings,
+  AiSettingsInput,
   AppSettings,
   AppLocale,
   BackgroundPattern,
   BackgroundPosition,
   BackgroundStyle,
   ColorTheme,
+  ProxyMode,
   ThemeMode,
   UiScale,
   DatabaseInfo,
@@ -120,6 +141,7 @@ import type {
   RedisKeyDetail,
   RedisOverview,
   RedisVersionInfo,
+  RuntimeProject,
   ServiceAction,
   ServiceBackup,
   ServiceDiskUsage,
@@ -148,6 +170,7 @@ type DetailTab =
   | "mail"
   | "messages"
   | "search"
+  | "timeseries"
   | "objectStore"
   | "governance"
   | "broker"
@@ -239,14 +262,32 @@ const activeTool = ref<ToolId | null>(null);
 const sshToolMounted = ref(false);
 const dashboardActive = ref(true);
 const settingsActive = ref(false);
-type SettingsTab = "appearance" | "sidebar" | "application" | "storage";
+const aiChatOpen = ref(false);
+const commandPaletteOpen = ref(false);
+const commandBusyId = ref("");
+const commandProjects = ref<RuntimeProject[]>([]);
+type SettingsTab =
+  | "appearance"
+  | "sidebar"
+  | "ai"
+  | "application"
+  | "network"
+  | "storage"
+  | "about";
 const activeSettingsTab = ref<SettingsTab>("appearance");
 const settingsTabs: SettingsTab[] = [
   "appearance",
   "sidebar",
+  "ai",
   "application",
+  "network",
   "storage",
+  "about",
 ];
+const appVersion = ref("0.1.0");
+const PROJECT_REPOSITORY = "https://github.com/whoiszxl/zhiyu-env";
+const PROJECT_ISSUES = `${PROJECT_REPOSITORY}/issues`;
+const PROJECT_AUTHOR = "https://github.com/whoiszxl";
 const localeOptions: Array<{
   value: AppLocale;
   labelKey: string;
@@ -268,6 +309,94 @@ const localeOptions: Array<{
     hintKey: "languageEnglishHint",
   },
 ];
+type AiProviderId = "openai" | "anthropic" | "deepseek" | "qwen" | "custom";
+type AiProviderPreset = {
+  id: Exclude<AiProviderId, "custom">;
+  name: string;
+  badge: string;
+  descriptionKey: string;
+  baseUrls: Partial<Record<AiApiProtocol, string>>;
+  models: string[];
+  keyUrl: string;
+};
+const aiProviderPresets: AiProviderPreset[] = [
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    badge: "D",
+    descriptionKey: "settings.ai.providers.deepseek",
+    baseUrls: {
+      openai: "https://api.deepseek.com",
+      anthropic: "https://api.deepseek.com/anthropic",
+    },
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    keyUrl: "https://platform.deepseek.com/api_keys",
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    badge: "O",
+    descriptionKey: "settings.ai.providers.openai",
+    baseUrls: {
+      openai: "https://api.openai.com/v1",
+    },
+    models: [
+      "gpt-5-mini",
+      "gpt-5",
+      "gpt-4.1-mini",
+      "gpt-4.1",
+      "gpt-4o-mini",
+      "gpt-4o",
+    ],
+    keyUrl: "https://platform.openai.com/api-keys",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    badge: "A",
+    descriptionKey: "settings.ai.providers.anthropic",
+    baseUrls: {
+      anthropic: "https://api.anthropic.com/v1",
+    },
+    models: [
+      "claude-sonnet-5",
+      "claude-opus-5",
+      "claude-fable-5",
+      "claude-sonnet-4-6",
+      "claude-opus-4-6",
+      "claude-haiku-4-5-20251001",
+    ],
+    keyUrl: "https://console.anthropic.com/settings/keys",
+  },
+  {
+    id: "qwen",
+    name: "通义千问",
+    badge: "Q",
+    descriptionKey: "settings.ai.providers.qwen",
+    baseUrls: {
+      openai: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      anthropic: "https://dashscope.aliyuncs.com/apps/anthropic",
+    },
+    models: [
+      "qwen3.7-flash",
+      "qwen3.7-plus",
+      "qwen3.7-max",
+      "qwen3.6-flash",
+      "qwen3.6-plus",
+      "qwen-long",
+      "qwen-mt-plus",
+    ],
+    keyUrl: "https://help.aliyun.com/zh/model-studio/get-api-key",
+  },
+];
+const aiProviderId = ref<AiProviderId>("openai");
+const aiCustomModel = ref(false);
+const activeAiProvider = computed(() =>
+  aiProviderPresets.find((provider) => provider.id === aiProviderId.value),
+);
+const aiModelSuggestions = computed(
+  () => activeAiProvider.value?.models ?? [],
+);
 const activeToolDefinition = computed(() => findTool(activeTool.value));
 const activeTab = ref<DetailTab>("overview");
 const loading = ref(true);
@@ -308,6 +437,14 @@ const appSettings = ref<AppSettings>({
   toolOrder: [],
   launchAtLogin: false,
   keepServicesRunningOnClose: true,
+  resourceSaverEnabled: false,
+  resourceSaverMode: "remind",
+  resourceSaverMinutes: 60,
+  resourceSaverServices: [],
+  proxyMode: "system",
+  proxyUrl: "",
+  downloadProxyEnabled: true,
+  networkProxyEnabled: true,
   downloadMirror: "",
   publicGithubMirror: true,
   downloadConcurrency: 2,
@@ -319,6 +456,48 @@ const appSettings = ref<AppSettings>({
   onboardingCompleted: false,
 });
 const settingsDraft = ref<AppSettings>({ ...appSettings.value });
+const aiSettings = ref<AiSettings>({
+  enabled: false,
+  protocol: "openai",
+  baseUrl: "https://api.openai.com/v1",
+  model: "",
+  timeoutSeconds: 60,
+  maxOutputTokens: 2048,
+  apiKeyConfigured: false,
+  userAvatarPath: "",
+  assistantAvatarPath: "",
+});
+const aiDraft = ref<AiSettingsInput>({
+  enabled: false,
+  protocol: "openai",
+  baseUrl: "https://api.openai.com/v1",
+  model: "",
+  timeoutSeconds: 60,
+  maxOutputTokens: 2048,
+  userAvatarPath: "",
+  assistantAvatarPath: "",
+  apiKey: "",
+  clearApiKey: false,
+});
+const aiSettingsLoading = ref(false);
+const aiSettingsSaving = ref(false);
+const aiConnectionTesting = ref(false);
+const aiAvatarImporting = ref<"user" | "assistant" | null>(null);
+const aiTestResult = ref<{
+  success: boolean;
+  message: string;
+  latencyMillis?: number;
+} | null>(null);
+const aiUserAvatarUrl = computed(() =>
+  aiSettings.value.userAvatarPath
+    ? convertFileSrc(aiSettings.value.userAvatarPath)
+    : "",
+);
+const aiAssistantAvatarUrl = computed(() =>
+  aiSettings.value.assistantAvatarPath
+    ? convertFileSrc(aiSettings.value.assistantAvatarPath)
+    : "",
+);
 const uiScaleOptions: Array<{ value: UiScale; label: string }> = [
   { value: 90, label: "小" },
   { value: 100, label: "标准" },
@@ -488,13 +667,107 @@ const sidebarServices = computed(() => {
     visualSettings.value.serviceOrder,
   ).filter((service) => !hidden.has(service.kind));
 });
-const sidebarTools = computed(() => {
+const orderedVisibleTools = computed(() => {
   const hidden = new Set(visualSettings.value.hiddenTools);
   return orderByPreference(
     TOOLS,
     (tool) => tool.id,
     visualSettings.value.toolOrder,
   ).filter((tool) => !hidden.has(tool.id));
+});
+const sidebarDevelopment = computed(() =>
+  orderedVisibleTools.value.filter((tool) => tool.group === "development"),
+);
+const sidebarTools = computed(() =>
+  orderedVisibleTools.value.filter((tool) => tool.group !== "development"),
+);
+const commandPaletteItems = computed<CommandPaletteItem[]>(() => {
+  const navigationGroup = t("commandPalette.groups.navigation");
+  const serviceGroup = t("commandPalette.groups.services");
+  const toolGroup = t("commandPalette.groups.tools");
+  const projectGroup = t("commandPalette.groups.projects");
+  const actionGroup = t("commandPalette.groups.actions");
+  const items: CommandPaletteItem[] = [
+    {
+      id: "nav:dashboard",
+      label: t("nav.dashboardTitle"),
+      hint: t("nav.dashboardHint"),
+      group: navigationGroup,
+      icon: "⌂",
+      keywords: "overview dashboard home 全局 概览 首页",
+    },
+    {
+      id: "nav:settings",
+      label: t("settings.title"),
+      hint: t("nav.settingsHint"),
+      group: navigationGroup,
+      icon: "⚙",
+      keywords: "settings preference 设置 配置",
+    },
+  ];
+  for (const service of services.value) {
+    items.push({
+      id: `service:${service.kind}`,
+      label: service.name,
+      hint: `v${service.version} · ${t(`workspace.state.${service.status}`)}`,
+      group: serviceGroup,
+      icon: iconLetter[service.kind],
+      keywords: `${service.kind} ${service.port}`,
+    });
+  }
+  for (const tool of TOOLS) {
+    items.push({
+      id: `tool:${tool.id}`,
+      label: t(`tools.${tool.id}.label`),
+      hint: t(`tools.${tool.id}.hint`),
+      group: toolGroup,
+      icon: tool.icon,
+      keywords: `${tool.navLabel} ${tool.navHint}`,
+    });
+  }
+  for (const project of commandProjects.value) {
+    items.push({
+      id: `project:${project.id}`,
+      label: project.name,
+      hint: project.path,
+      group: projectGroup,
+      icon: project.name.slice(0, 1).toUpperCase(),
+      keywords: `${project.description} ${project.services.join(" ")}`,
+    });
+  }
+  for (const service of services.value) {
+    if (service.status === "stopped") {
+      items.push({
+        id: `action:${service.kind}:start`,
+        label: t("commandPalette.startService", { service: service.name }),
+        hint: `${service.name} · ${service.port}`,
+        group: actionGroup,
+        icon: "▶",
+        keywords: `start 启动 ${service.kind}`,
+      });
+    } else if (service.status === "running") {
+      items.push(
+        {
+          id: `action:${service.kind}:restart`,
+          label: t("commandPalette.restartService", { service: service.name }),
+          hint: `${service.name} · PID ${service.pid ?? "—"}`,
+          group: actionGroup,
+          icon: "↻",
+          keywords: `restart 重启 ${service.kind}`,
+        },
+        {
+          id: `action:${service.kind}:stop`,
+          label: t("commandPalette.stopService", { service: service.name }),
+          hint: `${service.name} · PID ${service.pid ?? "—"}`,
+          group: actionGroup,
+          icon: "■",
+          keywords: `stop 停止 ${service.kind}`,
+          danger: true,
+        },
+      );
+    }
+  }
+  return items;
 });
 const settingsOrderedServices = computed(() =>
   orderByPreference(
@@ -786,6 +1059,10 @@ const tableLoading = ref(false);
 const sqlInput = ref("SELECT 1;");
 const sqlHistory = ref<SqlConsoleEntry[]>([]);
 const sqlRunning = ref(false);
+const aiAssistOpen = ref(false);
+const aiAssistTitle = ref("");
+const aiAssistContext = ref("");
+const aiAssistOptions = ref<AiAssistOption[]>([]);
 const notice = ref("");
 const error = ref("");
 const installTask = ref<InstallTask | null>(null);
@@ -795,11 +1072,14 @@ let serviceTimer: number | undefined;
 let metricTimer: number | undefined;
 let diskTimer: number | undefined;
 let portTimer: number | undefined;
+let resourceSaverTimer: number | undefined;
 let unlistenInstallProgress: UnlistenFn | undefined;
 let unlistenCloseRequested: UnlistenFn | undefined;
 let unlistenTrayNavigation: UnlistenFn | undefined;
 let unlistenTrayAction: UnlistenFn | undefined;
 let hidingWindow = false;
+let lastUserActivityAt = Date.now();
+let resourceSaverHandled = false;
 
 const selectedService = computed(
   () => activeTool.value
@@ -851,13 +1131,16 @@ const genericMultiVersionKinds: ServiceKind[] = [
   "mailpit",
   "nats",
   "meilisearch",
+  "influxdb",
   "minio",
   "rustfs",
   "etcd",
   "consul",
   "rnacos",
   "rabbitmq",
+  "activemq",
   "caddy",
+  "ftp",
 ];
 
 const serviceControlBusy = computed(
@@ -881,9 +1164,30 @@ const installedServiceCount = computed(
     services.value.filter((service) => service.status !== "not_installed")
       .length,
 );
+const stoppedServiceCount = computed(
+  () =>
+    services.value.filter((service) => service.status === "stopped").length,
+);
+const notInstalledServiceCount = computed(
+  () =>
+    services.value.filter((service) => service.status === "not_installed")
+      .length,
+);
 const dashboardCacheBytes = computed(() =>
   Object.values(diskUsageByKind.value).reduce(
     (total, usage) => total + (usage?.cacheBytes ?? 0),
+    0,
+  ),
+);
+const dashboardBackupBytes = computed(() =>
+  Object.values(diskUsageByKind.value).reduce(
+    (total, usage) => total + (usage?.backupBytes ?? 0),
+    0,
+  ),
+);
+const dashboardLogsBytes = computed(() =>
+  Object.values(diskUsageByKind.value).reduce(
+    (total, usage) => total + (usage?.logsBytes ?? 0),
     0,
   ),
 );
@@ -1108,6 +1412,17 @@ const configChanged = computed(
 );
 
 const detailTabs = computed<Array<[DetailTab, string]>>(() => {
+  if (selectedKind.value === "ftp") {
+    return [
+      ["overview", "概览"],
+      ["connect", "连接"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["versions", "版本管理"],
+      ["docs", "使用文档"],
+    ];
+  }
   if (selectedKind.value === "rabbitmq") {
     return [
       ["overview", "概览"],
@@ -1220,6 +1535,18 @@ const detailTabs = computed<Array<[DetailTab, string]>>(() => {
       ["docs", "使用文档"],
     ];
   }
+  if (selectedKind.value === "influxdb") {
+    return [
+      ["overview", "概览"],
+      ["timeseries", "时序数据"],
+      ["connect", "连接"],
+      ["backup", "备份恢复"],
+      ["config", "配置文件"],
+      ["logs", "运行日志"],
+      ["versions", "版本管理"],
+      ["docs", "使用文档"],
+    ];
+  }
   if (selectedKind.value === "minio" || selectedKind.value === "rustfs") {
     return [
       ["overview", "概览"],
@@ -1304,14 +1631,17 @@ const iconLetter: Record<ServiceKind, string> = {
   nats: "N",
   kafka: "K",
   meilisearch: "M",
+  influxdb: "I",
   minio: "M",
   rustfs: "R",
   etcd: "E",
   consul: "C",
   rnacos: "R",
   rabbitmq: "Q",
+  activemq: "A",
   nginx: "N",
   caddy: "C",
+  ftp: "F",
 };
 
 function openExternal(url: string) {
@@ -1647,6 +1977,216 @@ async function loadAppSettings() {
   }
 }
 
+function createAiInput(settings: AiSettings): AiSettingsInput {
+  return {
+    enabled: settings.enabled,
+    protocol: settings.protocol,
+    baseUrl: settings.baseUrl,
+    model: settings.model,
+    timeoutSeconds: settings.timeoutSeconds,
+    maxOutputTokens: settings.maxOutputTokens,
+    userAvatarPath: settings.userAvatarPath,
+    assistantAvatarPath: settings.assistantAvatarPath,
+    apiKey: "",
+    clearApiKey: false,
+  };
+}
+
+function applyAiAvatarSettings(settings: AiSettings) {
+  aiSettings.value = settings;
+  aiDraft.value.userAvatarPath = settings.userAvatarPath;
+  aiDraft.value.assistantAvatarPath = settings.assistantAvatarPath;
+}
+
+async function chooseAiAvatar(role: "user" | "assistant") {
+  if (aiAvatarImporting.value) return;
+  const selected = await open({
+    multiple: false,
+    title: role === "user"
+      ? t("settings.ai.chooseUserAvatar")
+      : t("settings.ai.chooseAssistantAvatar"),
+    filters: [{
+      name: t("settings.ai.avatarImage"),
+      extensions: ["png", "jpg", "jpeg", "webp"],
+    }],
+  });
+  if (typeof selected !== "string") return;
+  aiAvatarImporting.value = role;
+  try {
+    applyAiAvatarSettings(await importAiAvatar(role, selected));
+    showToast({
+      intent: "success",
+      title: t("settings.ai.avatarUpdated"),
+      message: t("settings.ai.avatarUpdatedHint"),
+    });
+  } catch (cause) {
+    showToast({
+      intent: "error",
+      title: t("settings.ai.avatarFailed"),
+      message: String(cause),
+    });
+  } finally {
+    aiAvatarImporting.value = null;
+  }
+}
+
+async function clearAiAvatar(role: "user" | "assistant") {
+  if (aiAvatarImporting.value) return;
+  aiAvatarImporting.value = role;
+  try {
+    applyAiAvatarSettings(await removeAiAvatar(role));
+  } catch (cause) {
+    showToast({
+      intent: "error",
+      title: t("settings.ai.avatarFailed"),
+      message: String(cause),
+    });
+  } finally {
+    aiAvatarImporting.value = null;
+  }
+}
+
+async function loadAiSettings() {
+  aiSettingsLoading.value = true;
+  try {
+    aiSettings.value = await getAiSettings();
+    aiDraft.value = createAiInput(aiSettings.value);
+    const matchedProvider = aiProviderPresets.find((provider) =>
+      Object.values(provider.baseUrls).some(
+        (baseUrl) => baseUrl === aiSettings.value.baseUrl,
+      ),
+    );
+    aiProviderId.value = matchedProvider?.id ?? "custom";
+    aiCustomModel.value = Boolean(
+      matchedProvider &&
+        !matchedProvider.models.includes(aiSettings.value.model),
+    );
+    aiTestResult.value = null;
+  } catch (cause) {
+    error.value = String(cause);
+  } finally {
+    aiSettingsLoading.value = false;
+  }
+}
+
+function selectAiProvider(providerId: AiProviderId) {
+  aiProviderId.value = providerId;
+  aiCustomModel.value = providerId === "custom";
+  aiTestResult.value = null;
+  if (providerId === "custom") return;
+  const provider = aiProviderPresets.find((item) => item.id === providerId);
+  if (!provider) return;
+  const protocol = provider.baseUrls[aiDraft.value.protocol]
+    ? aiDraft.value.protocol
+    : (Object.keys(provider.baseUrls)[0] as AiApiProtocol);
+  aiDraft.value.protocol = protocol;
+  aiDraft.value.baseUrl = provider.baseUrls[protocol] ?? "";
+  aiDraft.value.model = provider.models[0] ?? "";
+}
+
+function selectAiProtocol(protocol: AiApiProtocol) {
+  const provider = activeAiProvider.value;
+  if (provider) {
+    const providerUrl = provider.baseUrls[protocol];
+    if (!providerUrl) return;
+    aiDraft.value.protocol = protocol;
+    aiDraft.value.baseUrl = providerUrl;
+    aiTestResult.value = null;
+    return;
+  }
+  const oldDefault =
+    aiDraft.value.protocol === "anthropic"
+      ? "https://api.anthropic.com/v1"
+      : "https://api.openai.com/v1";
+  const nextDefault =
+    protocol === "anthropic"
+      ? "https://api.anthropic.com/v1"
+      : "https://api.openai.com/v1";
+  if (!aiDraft.value.baseUrl || aiDraft.value.baseUrl === oldDefault) {
+    aiDraft.value.baseUrl = nextDefault;
+  }
+  aiDraft.value.protocol = protocol;
+  aiTestResult.value = null;
+}
+
+function aiProtocolSupported(protocol: AiApiProtocol): boolean {
+  return !activeAiProvider.value || Boolean(activeAiProvider.value.baseUrls[protocol]);
+}
+
+function selectAiModel(event: Event) {
+  const model = (event.currentTarget as HTMLSelectElement).value;
+  if (model === "__custom__") {
+    aiCustomModel.value = true;
+    aiDraft.value.model = "";
+  } else {
+    aiCustomModel.value = false;
+    aiDraft.value.model = model;
+  }
+  aiTestResult.value = null;
+}
+
+function useRecommendedAiModel() {
+  const model = aiModelSuggestions.value[0];
+  if (!model) return;
+  aiDraft.value.model = model;
+  aiCustomModel.value = false;
+  aiTestResult.value = null;
+}
+
+function openAiKeyPage() {
+  const url = activeAiProvider.value?.keyUrl;
+  if (url) openExternal(url);
+}
+
+async function saveAiConfiguration() {
+  aiSettingsSaving.value = true;
+  aiTestResult.value = null;
+  try {
+    const saved = await saveAiSettings({ ...aiDraft.value });
+    aiSettings.value = saved;
+    aiDraft.value = createAiInput(saved);
+    showToast({
+      intent: "success",
+      title: t("settings.ai.saved"),
+      message: t("settings.ai.savedHint"),
+    });
+  } catch (cause) {
+    aiTestResult.value = {
+      success: false,
+      message: String(cause),
+    };
+  } finally {
+    aiSettingsSaving.value = false;
+  }
+}
+
+async function runAiConnectionTest() {
+  aiConnectionTesting.value = true;
+  aiTestResult.value = null;
+  try {
+    const result = await testAiConnection({ ...aiDraft.value });
+    aiTestResult.value = {
+      success: true,
+      message: result.message,
+      latencyMillis: result.latencyMillis,
+    };
+  } catch (cause) {
+    aiTestResult.value = {
+      success: false,
+      message: String(cause),
+    };
+  } finally {
+    aiConnectionTesting.value = false;
+  }
+}
+
+function clearAiApiKey() {
+  aiDraft.value.apiKey = "";
+  aiDraft.value.clearApiKey = true;
+  aiDraft.value.enabled = false;
+  aiTestResult.value = null;
+}
+
 async function selectLocale(locale: AppLocale) {
   settingsDraft.value.locale = locale;
   await setAppLocale(locale);
@@ -1793,6 +2333,14 @@ function previewUiScale(scale: UiScale) {
   void saveSettings();
 }
 
+function selectProxyMode(mode: ProxyMode) {
+  settingsDraft.value.proxyMode = mode;
+  if (mode === "manual" && !settingsDraft.value.proxyUrl) {
+    settingsDraft.value.proxyUrl = "http://127.0.0.1:7890";
+  }
+  void saveSettings();
+}
+
 async function chooseAppBackground() {
   if (backgroundImporting.value) return;
   const selected = await open({
@@ -1854,10 +2402,158 @@ async function openSettings() {
   notice.value = "";
   error.value = "";
   if (settingsSaving.value) return;
-  await loadAppSettings();
+  await Promise.all([loadAppSettings(), loadAiSettings()]);
   if (appSettings.value.autoCheckUpdates && !updateStatus.value) {
     void checkForUpdates();
   }
+}
+
+function openCommandPalette() {
+  commandPaletteOpen.value = true;
+  void runtimeProjectsList()
+    .then((projects) => {
+      commandProjects.value = projects;
+    })
+    .catch(() => {
+      commandProjects.value = [];
+    });
+}
+
+async function handleCommandSelect(item: CommandPaletteItem) {
+  if (commandBusyId.value) return;
+  commandBusyId.value = item.id;
+  try {
+    const [type, id, action] = item.id.split(":");
+    if (type === "nav" && id === "dashboard") {
+      commandPaletteOpen.value = false;
+      await openDashboard();
+    } else if (type === "nav" && id === "settings") {
+      commandPaletteOpen.value = false;
+      await openSettings();
+    } else if (type === "tool") {
+      commandPaletteOpen.value = false;
+      selectTool(id as ToolId);
+    } else if (type === "service") {
+      commandPaletteOpen.value = false;
+      await selectService(id as ServiceKind);
+    } else if (type === "project") {
+      commandPaletteOpen.value = false;
+      selectTool("workspace");
+      await nextTick();
+      window.dispatchEvent(
+        new CustomEvent("zhiyu:project-open", { detail: { id } }),
+      );
+    } else if (type === "action" && action) {
+      commandPaletteOpen.value = false;
+      await selectService(id as ServiceKind);
+      await execute(action as ServiceAction);
+    }
+  } finally {
+    commandBusyId.value = "";
+  }
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (commandPaletteOpen.value) {
+      commandPaletteOpen.value = false;
+    } else {
+      openCommandPalette();
+    }
+  }
+}
+
+function markUserActivity() {
+  lastUserActivityAt = Date.now();
+  resourceSaverHandled = false;
+  dismissToastByKey("resource-saver");
+}
+
+async function stopResourceSaverTargets(targets?: ServiceInfo[]) {
+  const selected =
+    targets ??
+    services.value.filter(
+      (service) =>
+        service.status === "running" &&
+        appSettings.value.resourceSaverServices.includes(service.kind),
+    );
+  if (!selected.length) return;
+  const failed: string[] = [];
+  for (const service of selected) {
+    try {
+      await runServiceAction("stop", service.kind);
+    } catch {
+      failed.push(service.name);
+    }
+  }
+  await Promise.all([refreshServices(true), refreshEnvironmentMetrics()]);
+  showToast({
+    key: "resource-saver",
+    intent: failed.length ? "warning" : "success",
+    title: failed.length
+      ? t("resourceSaver.partialStop")
+      : t("resourceSaver.stopped", { count: selected.length }),
+    message: failed.length
+      ? t("resourceSaver.failedServices", { services: failed.join("、") })
+      : undefined,
+  });
+}
+
+async function checkResourceSaver() {
+  const settings = appSettings.value;
+  if (
+    !settings.resourceSaverEnabled ||
+    resourceSaverHandled ||
+    Date.now() - lastUserActivityAt < settings.resourceSaverMinutes * 60_000
+  ) {
+    return;
+  }
+  const targets = services.value.filter(
+    (service) =>
+      service.status === "running" &&
+      settings.resourceSaverServices.includes(service.kind),
+  );
+  if (!targets.length) return;
+  resourceSaverHandled = true;
+  if (settings.resourceSaverMode === "stop") {
+    await stopResourceSaverTargets(targets);
+  } else {
+    showToast({
+      key: "resource-saver",
+      intent: "warning",
+      title: t("resourceSaver.idleTitle", {
+        minutes: settings.resourceSaverMinutes,
+      }),
+      message: t("resourceSaver.idleMessage", {
+        services: targets.map((service) => service.name).join("、"),
+      }),
+      duration: 0,
+      actionLabel: t("resourceSaver.stopNow"),
+      onAction: () => void stopResourceSaverTargets(targets),
+    });
+  }
+}
+
+function handleWorkspaceNavigation(event: Event) {
+  const detail = (
+    event as CustomEvent<{ type?: string; id?: ServiceKind | ToolId }>
+  ).detail;
+  if (detail?.type === "service" && detail.id) {
+    void selectService(detail.id as ServiceKind);
+  } else if (detail?.type === "tool" && detail.id) {
+    selectTool(detail.id as ToolId);
+  }
+}
+
+async function openAiSettingsFromChat() {
+  aiChatOpen.value = false;
+  await openSettings();
+  activeSettingsTab.value = "ai";
+}
+
+function handleOpenAiSettingsRequest() {
+  void openAiSettingsFromChat();
 }
 
 async function chooseInstallRoot() {
@@ -2764,6 +3460,7 @@ async function execute(action: ServiceAction) {
   const service = selectedService.value;
   if (!service || serviceControlBusy.value) return;
 
+  const lifecycleToastKey = `service:${service.kind}:lifecycle`;
   pendingAction.value = action;
   notice.value = "";
   error.value = "";
@@ -2777,6 +3474,14 @@ async function execute(action: ServiceAction) {
     stop: "停止",
     restart: "重启",
   }[action];
+  if (action !== "install") {
+    showToast({
+      key: lifecycleToastKey,
+      intent: "progress",
+      title: t(`serviceToast.${action}Progress`, { service: service.name }),
+      duration: 0,
+    });
+  }
   try {
     const updated = await runServiceAction(
       action,
@@ -2788,8 +3493,15 @@ async function execute(action: ServiceAction) {
       (item) => item.kind === updated.kind,
     );
     if (index >= 0) services.value[index] = updated;
-    notice.value = `${service.name} ${activityAction}成功`;
-    recordActivity(updated, activityAction, true, notice.value);
+    const successMessage = t(`serviceToast.${action}Success`, {
+      service: service.name,
+    });
+    showToast({
+      key: lifecycleToastKey,
+      intent: "success",
+      title: successMessage,
+    });
+    recordActivity(updated, activityAction, true, successMessage);
     databaseOverview.value = null;
     mongoOverview.value = null;
     mailpitOverview.value = null;
@@ -2826,8 +3538,15 @@ async function execute(action: ServiceAction) {
           (item) => item.kind === updated.kind,
         );
         if (index >= 0) services.value[index] = updated;
-        notice.value = `${service.name} 已强制停止`;
-        recordActivity(updated, "强制停止", true, notice.value);
+        const successMessage = t("serviceToast.forceStopSuccess", {
+          service: service.name,
+        });
+        showToast({
+          key: lifecycleToastKey,
+          intent: "success",
+          title: successMessage,
+        });
+        recordActivity(updated, "强制停止", true, successMessage);
         await Promise.all([
           refreshMetrics(),
           refreshEnvironmentMetrics(),
@@ -2835,14 +3554,32 @@ async function execute(action: ServiceAction) {
         ]);
         return;
       } catch (forceCause) {
-        error.value = String(forceCause);
-        recordActivity(service, "强制停止", false, error.value);
+        const forceMessage = String(forceCause);
+        showToast({
+          key: lifecycleToastKey,
+          intent: "error",
+          title: t("serviceToast.forceStopFailed", { service: service.name }),
+          message: forceMessage,
+          duration: 0,
+        });
+        recordActivity(service, "强制停止", false, forceMessage);
         return;
       }
     }
     if (operationId) recordInstallFailure(operationId, cause);
     recordActivity(service, activityAction, false, message);
-    error.value = message;
+    if (action === "install") {
+      dismissToastByKey(lifecycleToastKey);
+      error.value = message;
+    } else {
+      showToast({
+        key: lifecycleToastKey,
+        intent: "error",
+        title: t(`serviceToast.${action}Failed`, { service: service.name }),
+        message,
+        duration: 0,
+      });
+    }
     if (action === "start" && message.includes("最后 50 行日志")) {
       activeTab.value = "logs";
       await loadLogs();
@@ -3506,6 +4243,227 @@ async function runSqlCommand(confirmed = false) {
   }
 }
 
+function openSqlAiAssistant() {
+  const latest = sqlHistory.value.at(-1);
+  aiAssistTitle.value = `${selectedService.value?.name ?? "Database"} AI 助手`;
+  aiAssistOptions.value = [
+    { id: "database_sql", label: "生成 SQL", hint: "描述希望查询或处理的数据", canApply: true },
+    { id: "database_explain", label: "分析与优化", hint: "分析当前 SQL 或粘贴 EXPLAIN 结果" },
+    { id: "database_error", label: "修复错误", hint: "说明遇到的问题，AI 会结合最近一次错误诊断" },
+  ];
+  aiAssistContext.value = JSON.stringify({
+    engine: selectedKind.value,
+    database: selectedDatabase.value,
+    databases: databases.value.map((item) => item.name),
+    tables: tables.value.map((item) => item.name),
+    selectedTable: tableDetail.value
+      ? {
+          name: selectedTable.value?.name,
+          schema: selectedTable.value?.schema,
+          columns: tableDetail.value.columns.map((column) => ({
+            name: column.name,
+            type: column.dataType,
+            nullable: column.nullable,
+            key: column.key,
+          })),
+        }
+      : null,
+    currentSql: sqlInput.value,
+    latestResult: latest
+      ? { sql: latest.sql, error: latest.error, summary: latest.result?.summary }
+      : null,
+  }, null, 2);
+  aiAssistOpen.value = true;
+}
+
+function openRedisAiAssistant() {
+  const latest = consoleHistory.value.at(-1);
+  aiAssistTitle.value = "Redis AI 助手";
+  aiAssistOptions.value = [
+    { id: "redis_command", label: "生成命令", hint: "描述希望完成的 Redis 操作", canApply: true },
+    { id: "redis_analysis", label: "分析与建议", hint: "分析当前 Key、命令输出、内存、TTL 或慢查询问题" },
+  ];
+  aiAssistContext.value = JSON.stringify({
+    database: redisDatabase.value,
+    currentCommand: consoleInput.value,
+    selectedKey: redisKeyDetail.value,
+    overview: redisOverview.value,
+    latestCommand: latest ?? null,
+  }, null, 2);
+  aiAssistOpen.value = true;
+}
+
+function openMongoAiAssistant() {
+  const latest = mongoCommandHistory.value.at(-1);
+  aiAssistTitle.value = "MongoDB AI 助手";
+  aiAssistOptions.value = [
+    { id: "mongodb_command", label: "生成命令", hint: "描述希望查询、聚合或修改的文档", canApply: true },
+    { id: "mongodb_analysis", label: "分析与优化", hint: "分析当前命令、聚合管道、索引或最近错误" },
+  ];
+  aiAssistContext.value = JSON.stringify({
+    database: selectedMongoDatabase.value,
+    collection: selectedMongoCollection.value?.name ?? null,
+    collectionDetail: mongoCollectionDetail.value,
+    currentCommand: mongoCommandInput.value,
+    latestCommand: latest ?? null,
+  }, null, 2);
+  aiAssistOpen.value = true;
+}
+
+function openMessageAiAssistant() {
+  const broker = selectedKind.value;
+  aiAssistTitle.value = `${selectedService.value?.name ?? "消息系统"} AI 设计助手`;
+  aiAssistOptions.value = [{
+    id: "message_design",
+    label: "设计消息",
+    hint: "描述业务事件、生产者、消费者和期望的消息字段",
+    canApply: broker === "nats" || broker === "kafka",
+  }];
+  aiAssistContext.value = JSON.stringify({
+    broker,
+    nats: broker === "nats" ? {
+      publishSubject: natsPublishSubject.value,
+      subscribeSubject: natsSubscribeSubject.value,
+      payload: natsPublishPayload.value,
+      overview: natsOverview.value,
+    } : null,
+    kafka: broker === "kafka" ? {
+      topics: kafkaTopics.value,
+      selectedTopic: kafkaSelectedTopic.value,
+      draftTopic: kafkaTopicName.value,
+      key: kafkaMessageKey.value,
+      payload: kafkaMessagePayload.value,
+      overview: kafkaOverview.value,
+    } : null,
+    rabbitmq: broker === "rabbitmq" ? {
+      endpoint: "amqp://127.0.0.1:5672/",
+      mode: "local single node",
+    } : null,
+  }, null, 2);
+  aiAssistOpen.value = true;
+}
+
+function openLogAiAssistant() {
+  aiAssistTitle.value = `${selectedService.value?.name ?? "Service"} 日志诊断`;
+  aiAssistOptions.value = [{
+    id: "service_logs",
+    label: "诊断日志",
+    hint: "说明当前现象，AI 会结合最近的运行日志分析",
+  }];
+  aiAssistContext.value = [
+    `服务：${selectedService.value?.name ?? ""}`,
+    `状态：${selectedService.value?.status ?? ""}`,
+    "最近日志：",
+    logs.value.slice(-24_000),
+  ].join("\n");
+  aiAssistOpen.value = true;
+}
+
+function openConfigAiAssistant() {
+  aiAssistTitle.value = `${selectedService.value?.name ?? "Web"} 配置助手`;
+  aiAssistOptions.value = [{
+    id: "web_config",
+    label: "生成配置",
+    hint: "描述反向代理、静态目录、端口或本地开发需求",
+    canApply: true,
+  }];
+  aiAssistContext.value = `服务：${selectedService.value?.name}\n当前配置：\n${configContent.value}`;
+  aiAssistOpen.value = true;
+}
+
+function applyAiAssist(content: string, capability: AiToolCapability) {
+  if (capability === "database_sql") {
+    sqlInput.value = content.replace(/^```sql\s*|```$/gi, "").trim();
+  } else if (capability === "redis_command") {
+    const command = content.split(/\r?\n/)[0].replace(/^```.*?\s*|```$/g, "").trim();
+    if (/^(FLUSHALL|FLUSHDB|SHUTDOWN|DEBUG|MODULE|CONFIG\s+SET)\b/i.test(command)
+      || /^KEYS\s+\*$/i.test(command)) {
+      showToast({
+        intent: "error",
+        title: "已拦截高风险命令",
+        message: "AI 生成的 Redis 命令包含危险操作，未写入命令行。",
+      });
+      return;
+    }
+    consoleInput.value = command;
+  } else if (capability === "mongodb_command") {
+    try {
+      const value = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+      const commandName = value && typeof value === "object"
+        ? Object.keys(value)[0]?.toLowerCase()
+        : "";
+      const blockedCommands = new Set([
+        "shutdown",
+        "setparameter",
+        "eval",
+        "createuser",
+        "updateuser",
+        "dropuser",
+        "dropdatabase",
+      ]);
+      if (!commandName || blockedCommands.has(commandName)) {
+        showToast({
+          intent: "error",
+          title: "已拦截高风险 MongoDB 命令",
+          message: "AI 结果包含实例管理、用户权限或高风险操作，未写入命令台。",
+        });
+        return;
+      }
+      mongoCommandInput.value = JSON.stringify(value, null, 2);
+    } catch {
+      showToast({ intent: "error", title: "MongoDB 命令格式无效", message: "AI 没有返回合法 JSON，未写入命令台。" });
+      return;
+    }
+  } else if (capability === "message_design") {
+    try {
+      const value = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+      const broker = String(value.broker || "").toLowerCase();
+      if (broker !== selectedKind.value) {
+        throw new Error("AI 返回的消息系统与当前服务不一致");
+      }
+      const payload = typeof value.payload === "string"
+        ? value.payload
+        : JSON.stringify(value.payload ?? {}, null, 2);
+      if (new TextEncoder().encode(payload).length > 1024 * 1024) {
+        throw new Error("AI 生成的 Payload 超过 1 MiB");
+      }
+      if (selectedKind.value === "nats") {
+        const subject = String(value.destination || "").trim();
+        if (!subject || /\s|[*>]/.test(subject)) {
+          throw new Error("AI 生成的 NATS 发布 Subject 无效");
+        }
+        natsPublishSubject.value = subject;
+        natsSubscribeSubject.value = String(value.subscription || natsSubscribeSubject.value);
+        natsPublishPayload.value = payload;
+      } else if (selectedKind.value === "kafka") {
+        const topic = String(value.destination || "").trim();
+        if (!/^[A-Za-z0-9._-]{1,249}$/.test(topic) || topic === "." || topic === "..") {
+          throw new Error("AI 生成的 Kafka Topic 名称无效");
+        }
+        kafkaTopicName.value = topic;
+        kafkaPartitions.value = Math.min(12, Math.max(1, Number(value.partitions) || 3));
+        kafkaMessageKey.value = String(value.key || "");
+        kafkaMessagePayload.value = payload;
+        if (kafkaTopics.value.some((item) => item.name === topic)) {
+          kafkaSelectedTopic.value = topic;
+        }
+      }
+    } catch (cause) {
+      showToast({
+        intent: "error",
+        title: "消息设计格式无效",
+        message: cause instanceof Error
+          ? cause.message
+          : "AI 没有返回合法 JSON，未修改当前表单。",
+      });
+      return;
+    }
+  } else if (capability === "web_config") {
+    configContent.value = content.replace(/^```[\w-]*\s*|```$/g, "").trim();
+  }
+  aiAssistOpen.value = false;
+}
+
 function tableIdentity(table: TableInfo) {
   return `${table.schema}.${table.name}`;
 }
@@ -3630,6 +4588,14 @@ function chartPoints(values: number[], width = 560, height = 112) {
 }
 
 onMounted(async () => {
+  void getVersion().then((version) => {
+    appVersion.value = version;
+  }).catch(() => undefined);
+  window.addEventListener("zhiyu:open-ai-settings", handleOpenAiSettingsRequest);
+  window.addEventListener("keydown", handleGlobalKeydown);
+  window.addEventListener("keydown", markUserActivity);
+  window.addEventListener("pointerdown", markUserActivity);
+  window.addEventListener("zhiyu:navigate", handleWorkspaceNavigation);
   await loadAppSettings();
   try {
     unlistenCloseRequested = await getCurrentWindow().onCloseRequested(
@@ -3722,12 +4688,20 @@ onMounted(async () => {
   portTimer = window.setInterval(() => {
     if (dashboardActive.value) void refreshPortListeners();
   }, 10_000);
+  resourceSaverTimer = window.setInterval(() => {
+    void checkResourceSaver();
+  }, 60_000);
   if (appSettings.value.autoCheckUpdates) {
     void checkForUpdates();
   }
 });
 
 onUnmounted(() => {
+  window.removeEventListener("zhiyu:open-ai-settings", handleOpenAiSettingsRequest);
+  window.removeEventListener("keydown", handleGlobalKeydown);
+  window.removeEventListener("keydown", markUserActivity);
+  window.removeEventListener("pointerdown", markUserActivity);
+  window.removeEventListener("zhiyu:navigate", handleWorkspaceNavigation);
   endSidebarPointerDrag();
   unlistenInstallProgress?.();
   unlistenCloseRequested?.();
@@ -3737,6 +4711,7 @@ onUnmounted(() => {
   if (metricTimer) window.clearInterval(metricTimer);
   if (diskTimer) window.clearInterval(diskTimer);
   if (portTimer) window.clearInterval(portTimer);
+  if (resourceSaverTimer) window.clearInterval(resourceSaverTimer);
 });
 </script>
 
@@ -3751,6 +4726,28 @@ onUnmounted(() => {
     ]"
     :style="backgroundShellStyle"
   >
+    <ToastViewport />
+    <CommandPalette
+      :open="commandPaletteOpen"
+      :items="commandPaletteItems"
+      :busy-id="commandBusyId"
+      @close="commandPaletteOpen = false"
+      @select="handleCommandSelect"
+    />
+    <AiChatModal
+      v-if="aiChatOpen"
+      @close="aiChatOpen = false"
+      @configure="openAiSettingsFromChat"
+    />
+    <AiAssistDialog
+      :open="aiAssistOpen"
+      :title="aiAssistTitle"
+      :context="aiAssistContext"
+      :options="aiAssistOptions"
+      @close="aiAssistOpen = false"
+      @settings="openAiSettingsFromChat"
+      @apply="applyAiAssist"
+    />
     <div v-if="hasCustomBackground" class="app-background-image"></div>
     <div v-if="hasCustomBackground" class="app-background-veil"></div>
     <aside class="sidebar">
@@ -3821,6 +4818,32 @@ onUnmounted(() => {
           <i class="nav-state" :class="service.status"></i>
         </button>
 
+        <p
+          v-if="sidebarDevelopment.length"
+          class="nav-label tool-label"
+        >
+          {{ t("nav.development").toUpperCase() }}
+        </p>
+        <button
+          v-for="tool in sidebarDevelopment"
+          :key="tool.id"
+          type="button"
+          class="service-nav-item"
+          :class="{
+            active:
+              !dashboardActive &&
+              !settingsActive &&
+              activeTool === tool.id,
+          }"
+          @click="selectTool(tool.id)"
+        >
+          <span class="nav-icon" :class="tool.id">{{ tool.icon }}</span>
+          <span class="nav-copy">
+            <strong>{{ t(`tools.${tool.id}.label`) }}</strong>
+            <small>{{ t(`tools.${tool.id}.hint`) }}</small>
+          </span>
+        </button>
+
         <p class="nav-label tool-label">{{ t("nav.tools").toUpperCase() }}</p>
         <button
           v-for="tool in sidebarTools"
@@ -3862,11 +4885,38 @@ onUnmounted(() => {
       </nav>
 
       <div class="sidebar-footer">
-        <span class="core-dot"></span>
-        <div>
-          <strong>{{ t("brand.core") }}</strong>
-          <small>{{ t("brand.coreStatus") }}<template v-if="selectedService?.platformLabel"> · {{ selectedService.platformLabel }}</template></small>
+        <div class="sidebar-footer-core">
+          <span class="core-dot"></span>
+          <div>
+            <strong>Core</strong>
+            <small>{{ t("brand.coreReady") }}</small>
+          </div>
         </div>
+        <button
+          type="button"
+          class="sidebar-command-button"
+          :title="t('commandPalette.open')"
+          @click="openCommandPalette"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="5.7" />
+            <path d="m14.8 14.8 4.2 4.2" />
+          </svg>
+          <span>⌘K</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-ai-button"
+          :title="t('aiChat.open')"
+          @click="aiChatOpen = true"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5" />
+            <path d="M12 7.4a4.6 4.6 0 1 0 4.6 4.6" />
+            <path d="M18.4 3.5v4.1h4.1M12 10.4V12l1.2 1.2" />
+          </svg>
+          <span>AI</span>
+        </button>
       </div>
     </aside>
 
@@ -4464,6 +5514,373 @@ onUnmounted(() => {
           </section>
 
           <section
+            v-show="activeSettingsTab === 'ai'"
+            id="settings-panel-ai"
+            class="settings-section ai-settings-section"
+            role="tabpanel"
+            aria-labelledby="settings-tab-ai"
+          >
+            <div class="settings-section-title">
+              <div>
+                <h2>{{ t("settings.ai.title") }}</h2>
+                <p>{{ t("settings.ai.subtitle") }}</p>
+              </div>
+              <span
+                class="ai-config-status"
+                :class="{ ready: aiSettings.apiKeyConfigured }"
+              >
+                {{
+                  aiSettings.apiKeyConfigured
+                    ? t("settings.ai.keyConfigured")
+                    : t("settings.ai.keyMissing")
+                }}
+              </span>
+            </div>
+
+            <div v-if="aiSettingsLoading" class="ai-settings-loading">
+              <span class="spinner"></span>
+              {{ t("common.loading") }}…
+            </div>
+
+            <template v-else>
+              <label class="settings-toggle-row">
+                <span>
+                  <strong>{{ t("settings.ai.enableTitle") }}</strong>
+                  <small>{{ t("settings.ai.enableHint") }}</small>
+                </span>
+                <input v-model="aiDraft.enabled" type="checkbox" />
+                <i></i>
+              </label>
+
+              <div class="ai-avatar-setting">
+                <div class="ai-field-heading">
+                  <strong>{{ t("settings.ai.avatarTitle") }}</strong>
+                  <small>{{ t("settings.ai.avatarHint") }}</small>
+                </div>
+                <div class="ai-avatar-options">
+                  <article>
+                    <span class="ai-avatar-preview user">
+                      <img
+                        v-if="aiUserAvatarUrl"
+                        :src="aiUserAvatarUrl"
+                        alt=""
+                      />
+                      <svg v-else viewBox="0 0 28 28" aria-hidden="true">
+                        <circle cx="14" cy="10" r="4.2" />
+                        <path d="M6.5 23c.8-4.3 3.3-6.5 7.5-6.5s6.7 2.2 7.5 6.5" />
+                      </svg>
+                    </span>
+                    <div>
+                      <strong>{{ t("settings.ai.userAvatar") }}</strong>
+                      <small>{{ t("settings.ai.userAvatarHint") }}</small>
+                    </div>
+                    <button
+                      type="button"
+                      :disabled="Boolean(aiAvatarImporting)"
+                      @click="chooseAiAvatar('user')"
+                    >
+                      {{
+                        aiAvatarImporting === "user"
+                          ? t("common.loading")
+                          : t("settings.ai.chooseAvatar")
+                      }}
+                    </button>
+                    <button
+                      v-if="aiSettings.userAvatarPath"
+                      type="button"
+                      class="subtle"
+                      :disabled="Boolean(aiAvatarImporting)"
+                      @click="clearAiAvatar('user')"
+                    >
+                      {{ t("settings.ai.restoreDefault") }}
+                    </button>
+                  </article>
+                  <article>
+                    <span class="ai-avatar-preview assistant">
+                      <img
+                        v-if="aiAssistantAvatarUrl"
+                        :src="aiAssistantAvatarUrl"
+                        alt=""
+                      />
+                      <svg v-else viewBox="0 0 28 28" aria-hidden="true">
+                        <path d="M14 3.5a10.5 10.5 0 1 0 10.5 10.5" />
+                        <path d="M14 8a6 6 0 1 0 6 6" />
+                        <path d="M20.7 3.7v5.1h5.1M14 11.2V14l2 2" />
+                      </svg>
+                    </span>
+                    <div>
+                      <strong>{{ t("settings.ai.assistantAvatar") }}</strong>
+                      <small>{{ t("settings.ai.assistantAvatarHint") }}</small>
+                    </div>
+                    <button
+                      type="button"
+                      :disabled="Boolean(aiAvatarImporting)"
+                      @click="chooseAiAvatar('assistant')"
+                    >
+                      {{
+                        aiAvatarImporting === "assistant"
+                          ? t("common.loading")
+                          : t("settings.ai.chooseAvatar")
+                      }}
+                    </button>
+                    <button
+                      v-if="aiSettings.assistantAvatarPath"
+                      type="button"
+                      class="subtle"
+                      :disabled="Boolean(aiAvatarImporting)"
+                      @click="clearAiAvatar('assistant')"
+                    >
+                      {{ t("settings.ai.restoreDefault") }}
+                    </button>
+                  </article>
+                </div>
+              </div>
+
+              <div class="ai-provider-setting">
+                <div class="ai-field-heading">
+                  <strong>{{ t("settings.ai.providerTitle") }}</strong>
+                  <small>{{ t("settings.ai.providerHint") }}</small>
+                </div>
+                <div class="ai-provider-options">
+                  <button
+                    v-for="provider in aiProviderPresets"
+                    :key="provider.id"
+                    type="button"
+                    :class="{ selected: aiProviderId === provider.id }"
+                    @click="selectAiProvider(provider.id)"
+                  >
+                    <span>{{ provider.badge }}</span>
+                    <strong>{{ provider.name }}</strong>
+                    <small>{{ t(provider.descriptionKey) }}</small>
+                    <i v-if="aiProviderId === provider.id">✓</i>
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ selected: aiProviderId === 'custom' }"
+                    @click="selectAiProvider('custom')"
+                  >
+                    <span>+</span>
+                    <strong>{{ t("settings.ai.customProvider") }}</strong>
+                    <small>{{ t("settings.ai.providers.custom") }}</small>
+                    <i v-if="aiProviderId === 'custom'">✓</i>
+                  </button>
+                </div>
+              </div>
+
+              <div class="ai-protocol-setting">
+                <div class="ai-field-heading">
+                  <strong>{{ t("settings.ai.protocolTitle") }}</strong>
+                  <small>{{ t("settings.ai.protocolHint") }}</small>
+                </div>
+                <div class="ai-protocol-options">
+                  <button
+                    type="button"
+                    :disabled="!aiProtocolSupported('openai')"
+                    :class="{ selected: aiDraft.protocol === 'openai' }"
+                    @click="selectAiProtocol('openai')"
+                  >
+                    <span>O</span>
+                    <strong>OpenAI Compatible</strong>
+                    <small>POST /chat/completions</small>
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="!aiProtocolSupported('anthropic')"
+                    :class="{ selected: aiDraft.protocol === 'anthropic' }"
+                    @click="selectAiProtocol('anthropic')"
+                  >
+                    <span>A</span>
+                    <strong>Anthropic Compatible</strong>
+                    <small>POST /messages</small>
+                  </button>
+                </div>
+              </div>
+
+              <div class="ai-form-grid">
+                <label class="ai-form-field ai-form-field-wide">
+                  <span>{{ t("settings.ai.baseUrl") }}</span>
+                  <input
+                    v-model.trim="aiDraft.baseUrl"
+                    type="url"
+                    spellcheck="false"
+                    :readonly="aiProviderId !== 'custom'"
+                    :placeholder="
+                      aiDraft.protocol === 'anthropic'
+                        ? 'https://api.anthropic.com/v1'
+                        : 'https://api.openai.com/v1'
+                    "
+                    @input="aiTestResult = null"
+                  />
+                  <small>
+                    {{
+                      aiProviderId === "custom"
+                        ? t("settings.ai.baseUrlHint")
+                        : t("settings.ai.baseUrlPresetHint")
+                    }}
+                  </small>
+                </label>
+
+                <label class="ai-form-field">
+                  <span class="ai-field-label">{{ t("settings.ai.model") }}</span>
+                  <select
+                    v-if="aiModelSuggestions.length && !aiCustomModel"
+                    class="ai-model-select"
+                    :value="aiDraft.model"
+                    @change="selectAiModel"
+                  >
+                    <option
+                      v-for="model in aiModelSuggestions"
+                      :key="model"
+                      :value="model"
+                    >
+                      {{ model }}
+                    </option>
+                    <option value="__custom__">
+                      {{ t("settings.ai.customModel") }}
+                    </option>
+                  </select>
+                  <div v-else class="ai-model-custom-input">
+                    <input
+                      v-model.trim="aiDraft.model"
+                      type="text"
+                      spellcheck="false"
+                      :placeholder="t('settings.ai.modelPlaceholder')"
+                      @input="aiTestResult = null"
+                    />
+                    <button
+                      v-if="aiModelSuggestions.length"
+                      type="button"
+                      @click="useRecommendedAiModel"
+                    >
+                      {{ t("settings.ai.recommendedModels") }}
+                    </button>
+                  </div>
+                  <small v-if="aiModelSuggestions.length">
+                    {{ t("settings.ai.modelHint") }}
+                  </small>
+                </label>
+
+                <label class="ai-form-field">
+                  <span class="ai-api-key-label">
+                    {{ t("settings.ai.apiKey") }}
+                    <button
+                      v-if="activeAiProvider"
+                      type="button"
+                      @click="openAiKeyPage"
+                    >
+                      {{ t("settings.ai.getKey") }} ↗
+                    </button>
+                  </span>
+                  <div class="ai-secret-input">
+                    <input
+                      v-model="aiDraft.apiKey"
+                      type="password"
+                      autocomplete="new-password"
+                      spellcheck="false"
+                      :placeholder="
+                        aiSettings.apiKeyConfigured && !aiDraft.clearApiKey
+                          ? t('settings.ai.keyRetained')
+                          : t('settings.ai.keyPlaceholder')
+                      "
+                      @input="
+                        aiDraft.clearApiKey = false;
+                        aiTestResult = null;
+                      "
+                    />
+                    <button
+                      v-if="aiSettings.apiKeyConfigured && !aiDraft.clearApiKey"
+                      type="button"
+                      @click="clearAiApiKey"
+                    >
+                      {{ t("settings.ai.clearKey") }}
+                    </button>
+                  </div>
+                  <small>{{ t("settings.ai.apiKeyHint") }}</small>
+                </label>
+
+                <label class="ai-form-field">
+                  <span>{{ t("settings.ai.timeout") }}</span>
+                  <div class="settings-number">
+                    <input
+                      v-model.number="aiDraft.timeoutSeconds"
+                      type="number"
+                      min="5"
+                      max="600"
+                    />
+                    <em>{{ t("settings.storage.seconds") }}</em>
+                  </div>
+                </label>
+
+                <label class="ai-form-field">
+                  <span>{{ t("settings.ai.maxTokens") }}</span>
+                  <input
+                    v-model.number="aiDraft.maxOutputTokens"
+                    type="number"
+                    min="16"
+                    max="65536"
+                    step="128"
+                  />
+                </label>
+              </div>
+
+              <div
+                v-if="aiTestResult"
+                class="ai-test-result"
+                :class="{ success: aiTestResult.success, danger: !aiTestResult.success }"
+              >
+                <span>{{ aiTestResult.success ? "✓" : "!" }}</span>
+                <div>
+                  <strong>
+                    {{
+                      aiTestResult.success
+                        ? t("settings.ai.testSucceeded")
+                        : t("settings.ai.testFailed")
+                    }}
+                  </strong>
+                  <small>
+                    {{ aiTestResult.message }}
+                    <template v-if="aiTestResult.latencyMillis !== undefined">
+                      · {{ aiTestResult.latencyMillis }} ms
+                    </template>
+                  </small>
+                </div>
+              </div>
+
+              <div class="ai-settings-actions">
+                <p>{{ t("settings.ai.localStorageHint") }}</p>
+                <div>
+                  <button
+                    type="button"
+                    class="secondary"
+                    :disabled="aiConnectionTesting || aiSettingsSaving"
+                    @click="runAiConnectionTest"
+                  >
+                    <span v-if="aiConnectionTesting" class="spinner"></span>
+                    {{
+                      aiConnectionTesting
+                        ? t("settings.ai.testing")
+                        : t("settings.ai.test")
+                    }}
+                  </button>
+                  <button
+                    type="button"
+                    class="primary"
+                    :disabled="aiSettingsSaving || aiConnectionTesting"
+                    @click="saveAiConfiguration"
+                  >
+                    <span v-if="aiSettingsSaving" class="spinner"></span>
+                    {{
+                      aiSettingsSaving
+                        ? t("settings.ai.saving")
+                        : t("settings.ai.save")
+                    }}
+                  </button>
+                </div>
+              </div>
+            </template>
+          </section>
+
+          <section
             v-show="activeSettingsTab === 'application'"
             id="settings-panel-application"
             class="settings-section"
@@ -4500,12 +5917,160 @@ onUnmounted(() => {
               />
               <i></i>
             </label>
+            <label class="settings-toggle-row">
+              <span>
+                <strong>{{ t("settings.application.resourceSaverTitle") }}</strong>
+                <small>{{ t("settings.application.resourceSaverHint") }}</small>
+              </span>
+              <input
+                v-model="settingsDraft.resourceSaverEnabled"
+                type="checkbox"
+                @change="saveSettings"
+              />
+              <i></i>
+            </label>
+            <div
+              v-if="settingsDraft.resourceSaverEnabled"
+              class="resource-saver-settings"
+            >
+              <div class="resource-saver-fields">
+                <label>
+                  <span>{{ t("settings.application.idleAfter") }}</span>
+                  <div>
+                    <input
+                      v-model.number="settingsDraft.resourceSaverMinutes"
+                      type="number"
+                      min="15"
+                      max="1440"
+                      @change="saveSettings"
+                    />
+                    <em>{{ t("settings.application.minutes") }}</em>
+                  </div>
+                </label>
+                <label>
+                  <span>{{ t("settings.application.idleAction") }}</span>
+                  <select
+                    v-model="settingsDraft.resourceSaverMode"
+                    @change="saveSettings"
+                  >
+                    <option value="remind">
+                      {{ t("settings.application.remindOnly") }}
+                    </option>
+                    <option value="stop">
+                      {{ t("settings.application.autoStop") }}
+                    </option>
+                  </select>
+                </label>
+              </div>
+              <div class="resource-saver-services">
+                <strong>{{ t("settings.application.managedServices") }}</strong>
+                <small>{{ t("settings.application.managedServicesHint") }}</small>
+                <div>
+                  <label v-for="service in services" :key="service.kind">
+                    <input
+                      v-model="settingsDraft.resourceSaverServices"
+                      type="checkbox"
+                      :value="service.kind"
+                      @change="saveSettings"
+                    />
+                    <span>{{ service.name }}</span>
+                  </label>
+                </div>
+              </div>
+            </div>
             <div class="settings-guide-row">
               <span>
                 <strong>{{ t("settings.application.onboardingTitle") }}</strong>
                 <small>{{ t("settings.application.onboardingHint") }}</small>
               </span>
               <button type="button" @click="showOnboarding">{{ t("settings.application.viewAgain") }}</button>
+            </div>
+          </section>
+
+          <section
+            v-show="activeSettingsTab === 'network'"
+            id="settings-panel-network"
+            class="settings-section proxy-settings-section"
+            role="tabpanel"
+            aria-labelledby="settings-tab-network"
+          >
+            <div class="settings-section-title">
+              <div>
+                <h2>{{ t("settings.network.title") }}</h2>
+                <p>{{ t("settings.network.subtitle") }}</p>
+              </div>
+            </div>
+
+            <div class="proxy-mode-setting">
+              <div class="proxy-mode-heading">
+                <strong>{{ t("settings.network.modeTitle") }}</strong>
+                <small>{{ t("settings.network.modeHint") }}</small>
+              </div>
+              <div class="proxy-mode-options" role="radiogroup" :aria-label="t('settings.network.modeTitle')">
+                <button
+                  v-for="mode in (['system', 'manual', 'disabled'] as ProxyMode[])"
+                  :key="mode"
+                  type="button"
+                  role="radio"
+                  :aria-checked="settingsDraft.proxyMode === mode"
+                  :class="{ selected: settingsDraft.proxyMode === mode }"
+                  @click="selectProxyMode(mode)"
+                >
+                  <span>{{ mode === "system" ? "◐" : mode === "manual" ? "↗" : "×" }}</span>
+                  <strong>{{ t(`settings.network.modes.${mode}.label`) }}</strong>
+                  <small>{{ t(`settings.network.modes.${mode}.hint`) }}</small>
+                  <em>✓</em>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="settingsDraft.proxyMode === 'manual'" class="settings-field proxy-url-field">
+              <label for="proxy-url">{{ t("settings.network.proxyUrl") }}</label>
+              <div>
+                <input
+                  id="proxy-url"
+                  v-model.trim="settingsDraft.proxyUrl"
+                  type="url"
+                  placeholder="http://127.0.0.1:7890"
+                  @change="saveSettings"
+                />
+                <small>{{ t("settings.network.proxyUrlHint") }}</small>
+              </div>
+            </div>
+
+            <div class="proxy-scope-heading">
+              <strong>{{ t("settings.network.scopeTitle") }}</strong>
+              <small>{{ t("settings.network.scopeHint") }}</small>
+            </div>
+            <label class="settings-toggle-row">
+              <span>
+                <strong>{{ t("settings.network.downloadTitle") }}</strong>
+                <small>{{ t("settings.network.downloadHint") }}</small>
+              </span>
+              <input
+                v-model="settingsDraft.downloadProxyEnabled"
+                type="checkbox"
+                :disabled="settingsDraft.proxyMode === 'disabled'"
+                @change="saveSettings"
+              />
+              <i></i>
+            </label>
+            <label class="settings-toggle-row">
+              <span>
+                <strong>{{ t("settings.network.requestTitle") }}</strong>
+                <small>{{ t("settings.network.requestHint") }}</small>
+              </span>
+              <input
+                v-model="settingsDraft.networkProxyEnabled"
+                type="checkbox"
+                :disabled="settingsDraft.proxyMode === 'disabled'"
+                @change="saveSettings"
+              />
+              <i></i>
+            </label>
+            <div class="proxy-local-note">
+              <span>LOCAL BYPASS</span>
+              <p>{{ t("settings.network.localBypass") }}</p>
             </div>
           </section>
 
@@ -4683,6 +6248,102 @@ onUnmounted(() => {
               </button>
             </div>
           </section>
+
+          <section
+            v-show="activeSettingsTab === 'about'"
+            id="settings-panel-about"
+            class="settings-section about-settings-section"
+            role="tabpanel"
+            aria-labelledby="settings-tab-about"
+          >
+            <div class="about-hero">
+              <div class="about-mark" aria-hidden="true">
+                <svg viewBox="0 0 48 48" role="img">
+                  <rect x="3" y="3" width="42" height="42" rx="11" />
+                  <path d="M13 15h23L20 33h16" />
+                  <circle cx="13" cy="11" r="1.6" />
+                  <circle cx="18" cy="11" r="1.6" />
+                </svg>
+              </div>
+              <div>
+                <span>ZHIYU ENVIRONMENT</span>
+                <h2>{{ t("settings.about.productName") }}</h2>
+                <p>{{ t("settings.about.tagline") }}</p>
+              </div>
+              <div class="about-version">
+                <small>{{ t("settings.about.version") }}</small>
+                <strong>v{{ appVersion }}</strong>
+              </div>
+            </div>
+
+            <div class="about-introduction">
+              <div>
+                <span>ABOUT</span>
+                <h3>{{ t("settings.about.introTitle") }}</h3>
+              </div>
+              <p>{{ t("settings.about.intro") }}</p>
+            </div>
+
+            <div class="about-capabilities">
+              <article>
+                <span>01</span>
+                <div>
+                  <strong>{{ t("settings.about.capabilities.services.title") }}</strong>
+                  <small>{{ t("settings.about.capabilities.services.hint") }}</small>
+                </div>
+              </article>
+              <article>
+                <span>02</span>
+                <div>
+                  <strong>{{ t("settings.about.capabilities.tools.title") }}</strong>
+                  <small>{{ t("settings.about.capabilities.tools.hint") }}</small>
+                </div>
+              </article>
+              <article>
+                <span>03</span>
+                <div>
+                  <strong>{{ t("settings.about.capabilities.local.title") }}</strong>
+                  <small>{{ t("settings.about.capabilities.local.hint") }}</small>
+                </div>
+              </article>
+            </div>
+
+            <div class="about-links">
+              <div>
+                <span>OPEN SOURCE</span>
+                <h3>{{ t("settings.about.contactTitle") }}</h3>
+                <p>{{ t("settings.about.contactHint") }}</p>
+              </div>
+              <div class="about-link-list">
+                <button type="button" @click="openExternal(PROJECT_REPOSITORY)">
+                  <span>
+                    <strong>{{ t("settings.about.repository") }}</strong>
+                    <small>github.com/whoiszxl/zhiyu-env</small>
+                  </span>
+                  <em>↗</em>
+                </button>
+                <button type="button" @click="openExternal(PROJECT_ISSUES)">
+                  <span>
+                    <strong>{{ t("settings.about.feedback") }}</strong>
+                    <small>{{ t("settings.about.feedbackHint") }}</small>
+                  </span>
+                  <em>↗</em>
+                </button>
+                <button type="button" @click="openExternal(PROJECT_AUTHOR)">
+                  <span>
+                    <strong>{{ t("settings.about.author") }}</strong>
+                    <small>@whoiszxl</small>
+                  </span>
+                  <em>↗</em>
+                </button>
+              </div>
+            </div>
+
+            <footer class="about-footer">
+              <span>Apache License 2.0</span>
+              <p>{{ t("settings.about.footer") }}</p>
+            </footer>
+          </section>
         </div>
       </section>
 
@@ -4730,15 +6391,44 @@ onUnmounted(() => {
 
         <div class="dashboard-body">
           <div class="dashboard-metrics">
-            <article>
+            <article class="metric-accent-success">
               <span>{{ t("dashboard.runningServices") }}</span>
               <strong>{{ runningServices.length }}</strong>
               <small>{{ t("dashboard.totalServices", { count: services.length }) }}</small>
             </article>
+            <article class="metric-accent-muted">
+              <span>{{ t("dashboard.stopped") }}</span>
+              <strong>{{ stoppedServiceCount }}</strong>
+              <small>{{ t("dashboard.stoppedHint") }}</small>
+            </article>
             <article>
-              <span>已安装</span>
+              <span>{{ t("dashboard.installed") }}</span>
               <strong>{{ installedServiceCount }}</strong>
-              <small>可直接启动</small>
+              <small>{{ t("dashboard.installedHint") }}</small>
+            </article>
+            <article class="metric-accent-muted">
+              <span>{{ t("dashboard.notInstalled") }}</span>
+              <strong>{{ notInstalledServiceCount }}</strong>
+              <small>{{ t("dashboard.notInstalledHint") }}</small>
+            </article>
+            <article>
+              <span>{{ t("dashboard.ports") }}</span>
+              <strong>{{ dashboardPortListeners.length }}</strong>
+              <small>{{ t("dashboard.portsHint") }}</small>
+            </article>
+            <article
+              :class="{
+                healthy: dashboardAlerts.length === 0,
+                danger: dashboardAlerts.length > 0,
+              }"
+            >
+              <span>{{ t("dashboard.exceptionsMetric") }}</span>
+              <strong>{{ dashboardAlerts.length }}</strong>
+              <small>{{
+                dashboardAlerts.length === 0
+                  ? t("dashboard.exceptionsHealthy")
+                  : t("dashboard.exceptionsAttention")
+              }}</small>
             </article>
             <article>
               <span>{{ t("dashboard.totalCpu") }}</span>
@@ -4751,31 +6441,24 @@ onUnmounted(() => {
               <small>{{ t("dashboard.memoryHint") }}</small>
             </article>
             <article>
-              <span>监听端口</span>
-              <strong>{{ dashboardPortListeners.length }}</strong>
-              <small>相关服务端口</small>
-            </article>
-            <article
-              :class="{
-                healthy: dashboardAlerts.length === 0,
-                danger: dashboardAlerts.length > 0,
-              }"
-            >
-              <span>异常项</span>
-              <strong>{{ dashboardAlerts.length }}</strong>
-              <small>{{
-                dashboardAlerts.length === 0 ? "环境正常" : "需要处理"
-              }}</small>
-            </article>
-            <article>
-              <span>安装缓存</span>
-              <strong>{{ formatBytes(dashboardCacheBytes) }}</strong>
-              <small>可在设置中清理</small>
-            </article>
-            <article>
               <span>{{ t("dashboard.totalDisk") }}</span>
               <strong>{{ formatBytes(environmentDiskBytes) }}</strong>
-              <small>程序、数据与备份</small>
+              <small>{{ t("dashboard.diskHint") }}</small>
+            </article>
+            <article class="metric-accent-muted">
+              <span>{{ t("dashboard.backupSize") }}</span>
+              <strong>{{ formatBytes(dashboardBackupBytes) }}</strong>
+              <small>{{ t("dashboard.backupHint") }}</small>
+            </article>
+            <article class="metric-accent-muted">
+              <span>{{ t("dashboard.logsSize") }}</span>
+              <strong>{{ formatBytes(dashboardLogsBytes) }}</strong>
+              <small>{{ t("dashboard.logsHint") }}</small>
+            </article>
+            <article class="metric-accent-warning">
+              <span>{{ t("dashboard.cacheSize") }}</span>
+              <strong>{{ formatBytes(dashboardCacheBytes) }}</strong>
+              <small>{{ t("dashboard.cacheHint") }}</small>
             </article>
           </div>
 
@@ -6245,6 +7928,9 @@ onUnmounted(() => {
             >
               {{ redisKeysLoading ? "查询中" : "查询" }}
             </button>
+            <button type="button" @click="openRedisAiAssistant">
+              ✦ AI 分析
+            </button>
           </div>
 
           <div
@@ -6336,6 +8022,9 @@ onUnmounted(() => {
                 </option>
               </select>
             </label>
+            <button type="button" @click="openRedisAiAssistant">
+              ✦ AI 助手
+            </button>
             <button
               type="button"
               :disabled="consoleHistory.length === 0"
@@ -6790,6 +8479,9 @@ onUnmounted(() => {
                 </option>
               </select>
             </label>
+            <button type="button" @click="openSqlAiAssistant">
+              ✦ AI 助手
+            </button>
             <button
               type="button"
               :disabled="sqlHistory.length === 0"
@@ -6910,6 +8602,9 @@ onUnmounted(() => {
                 </option>
               </select>
             </label>
+            <button type="button" @click="openMongoAiAssistant">
+              ✦ AI 助手
+            </button>
             <button
               type="button"
               :disabled="mongoCommandHistory.length === 0"
@@ -7099,6 +8794,15 @@ onUnmounted(() => {
             </div>
             <span class="legacy-badge">内置 Erlang/OTP 27</span>
           </div>
+          <div class="message-ai-toolbar">
+            <div>
+              <p>AI MESSAGE DESIGN</p>
+              <span>生成 Exchange、Queue、Routing Key 与消息结构建议</span>
+            </div>
+            <button type="button" @click="openMessageAiAssistant">
+              ✦ AI 设计消息
+            </button>
+          </div>
           <div
             v-if="selectedService.status !== 'running'"
             class="workbench-empty"
@@ -7250,6 +8954,12 @@ S3_FORCE_PATH_STYLE=true</pre>
         </section>
 
         <section
+          v-else-if="activeTab === 'timeseries' && selectedKind === 'influxdb'"
+        >
+          <InfluxdbPanel :running="selectedService.status === 'running'" />
+        </section>
+
+        <section
           v-else-if="activeTab === 'search'"
           class="meilisearch-workbench"
         >
@@ -7381,6 +9091,15 @@ S3_FORCE_PATH_STYLE=true</pre>
             启动 Kafka Sandbox 后即可创建主题和发送测试消息
           </div>
           <template v-else>
+            <div class="message-ai-toolbar">
+              <div>
+                <p>AI MESSAGE DESIGN</p>
+                <span>根据业务事件生成 Topic、Key、分区数与 Payload</span>
+              </div>
+              <button type="button" @click="openMessageAiAssistant">
+                ✦ AI 设计消息
+              </button>
+            </div>
             <div class="nats-endpoint-strip">
               <div>
                 <p>KAFKA BROKER</p>
@@ -7512,6 +9231,15 @@ S3_FORCE_PATH_STYLE=true</pre>
             启动 NATS 后即可发布和订阅本地消息
           </div>
           <template v-else>
+            <div class="message-ai-toolbar">
+              <div>
+                <p>AI MESSAGE DESIGN</p>
+                <span>根据业务事件生成 Subject、订阅模式与 Payload</span>
+              </div>
+              <button type="button" @click="openMessageAiAssistant">
+                ✦ AI 设计消息
+              </button>
+            </div>
             <div class="nats-endpoint-strip">
               <div>
                 <p>CLIENT ENDPOINT</p>
@@ -7750,6 +9478,13 @@ S3_FORCE_PATH_STYLE=true</pre>
             <div class="editor-actions">
               <span v-if="configChanged">有未保存修改</span>
               <button
+                v-if="selectedKind === 'nginx' || selectedKind === 'caddy'"
+                type="button"
+                @click="openConfigAiAssistant"
+              >
+                ✦ AI 配置
+              </button>
+              <button
                 type="button"
                 :disabled="!configChanged || configSaving"
                 @click="saveConfig"
@@ -7778,6 +9513,9 @@ S3_FORCE_PATH_STYLE=true</pre>
             </div>
             <button type="button" :disabled="logsLoading" @click="loadLogs">
               {{ logsLoading ? "读取中" : "刷新日志" }}
+            </button>
+            <button type="button" @click="openLogAiAssistant">
+              ✦ AI 诊断
             </button>
           </div>
           <pre>{{ logs }}</pre>
@@ -7997,129 +9735,132 @@ S3_FORCE_PATH_STYLE=true</pre>
         </section>
       </div>
 
-      <div
-        v-if="diagnosticsOpen"
-        class="diagnostics-backdrop"
-        role="presentation"
-        @click.self="diagnosticsOpen = false"
-      >
-        <section
-          class="diagnostics-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="diagnostics-title"
+      <Teleport to="body">
+        <div
+          v-if="diagnosticsOpen"
+          v-tool-i18n
+          class="diagnostics-backdrop"
+          role="presentation"
+          @click.self="diagnosticsOpen = false"
         >
-          <header class="diagnostics-header">
-            <div>
-              <span>SYSTEM HEALTH</span>
-              <h2 id="diagnostics-title">一键诊断与修复</h2>
-              <p>检查安装目录、服务文件、PID、端口和安装残留</p>
-            </div>
-            <button
-              type="button"
-              class="diagnostics-close"
-              aria-label="关闭诊断"
-              @click="diagnosticsOpen = false"
-            >
-              ×
-            </button>
-          </header>
-
-          <div
-            v-if="diagnosticsRunning && !diagnosticReport"
-            class="diagnostics-loading"
+          <section
+            class="diagnostics-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="diagnostics-title"
           >
-            <span class="spinner"></span>
-            <strong>正在检查本地环境</strong>
-            <small>通常只需要几秒钟</small>
-          </div>
-
-          <template v-else-if="diagnosticReport">
-            <div class="diagnostics-summary">
-              <article class="passed">
-                <span>通过</span>
-                <strong>{{ diagnosticReport.summary.passed }}</strong>
-              </article>
-              <article class="warning">
-                <span>警告</span>
-                <strong>{{ diagnosticReport.summary.warnings }}</strong>
-              </article>
-              <article class="error">
-                <span>错误</span>
-                <strong>{{ diagnosticReport.summary.errors }}</strong>
-              </article>
-              <article class="repairable">
-                <span>可自动修复</span>
-                <strong>{{ diagnosticReport.summary.repairable }}</strong>
-              </article>
-            </div>
-
-            <div class="diagnostics-results">
-              <article
-                v-for="item in diagnosticReport.items"
-                :key="item.id"
-                class="diagnostics-item"
-                :class="item.status"
-              >
-                <i></i>
-                <div>
-                  <div class="diagnostics-item-title">
-                    <span>{{ item.scope }}</span>
-                    <strong>{{ item.title }}</strong>
-                    <em v-if="item.repairable">可修复</em>
-                  </div>
-                  <p>{{ item.message }}</p>
-                  <details v-if="item.detail">
-                    <summary>查看详细信息</summary>
-                    <pre>{{ item.detail }}</pre>
-                  </details>
-                </div>
-              </article>
-            </div>
-
-            <footer class="diagnostics-footer">
-              <span>
-                {{
-                  new Date(
-                    diagnosticReport.generatedAtMillis,
-                  ).toLocaleTimeString()
-                }}
-                完成
-              </span>
+            <header class="diagnostics-header">
               <div>
-                <button type="button" @click="copyDiagnosticReport">
-                  复制报告
-                </button>
-                <button
-                  type="button"
-                  :disabled="diagnosticsRunning || diagnosticsRepairing"
-                  @click="runDiagnostics"
-                >
-                  <span v-if="diagnosticsRunning" class="spinner"></span>
-                  重新诊断
-                </button>
-                <button
-                  type="button"
-                  class="diagnostics-repair"
-                  :disabled="
-                    diagnosticsRepairing ||
-                    diagnosticsRunning ||
-                    diagnosticReport.summary.repairable === 0
-                  "
-                  @click="repairDiagnostics"
-                >
-                  <span v-if="diagnosticsRepairing" class="spinner"></span>
-                  {{
-                    diagnosticsRepairing
-                      ? "正在修复"
-                      : `一键修复 (${diagnosticReport.summary.repairable})`
-                  }}
-                </button>
+                <span>SYSTEM HEALTH</span>
+                <h2 id="diagnostics-title">一键诊断与修复</h2>
+                <p>检查安装目录、服务文件、PID、端口和安装残留</p>
               </div>
-            </footer>
-          </template>
-        </section>
-      </div>
+              <button
+                type="button"
+                class="diagnostics-close"
+                aria-label="关闭诊断"
+                @click="diagnosticsOpen = false"
+              >
+                ×
+              </button>
+            </header>
+
+            <div
+              v-if="diagnosticsRunning && !diagnosticReport"
+              class="diagnostics-loading"
+            >
+              <span class="spinner"></span>
+              <strong>正在检查本地环境</strong>
+              <small>通常只需要几秒钟</small>
+            </div>
+
+            <template v-else-if="diagnosticReport">
+              <div class="diagnostics-summary">
+                <article class="passed">
+                  <span>通过</span>
+                  <strong>{{ diagnosticReport.summary.passed }}</strong>
+                </article>
+                <article class="warning">
+                  <span>警告</span>
+                  <strong>{{ diagnosticReport.summary.warnings }}</strong>
+                </article>
+                <article class="error">
+                  <span>错误</span>
+                  <strong>{{ diagnosticReport.summary.errors }}</strong>
+                </article>
+                <article class="repairable">
+                  <span>可自动修复</span>
+                  <strong>{{ diagnosticReport.summary.repairable }}</strong>
+                </article>
+              </div>
+
+              <div class="diagnostics-results">
+                <article
+                  v-for="item in diagnosticReport.items"
+                  :key="item.id"
+                  class="diagnostics-item"
+                  :class="item.status"
+                >
+                  <i></i>
+                  <div>
+                    <div class="diagnostics-item-title">
+                      <span>{{ item.scope }}</span>
+                      <strong>{{ item.title }}</strong>
+                      <em v-if="item.repairable">可修复</em>
+                    </div>
+                    <p>{{ item.message }}</p>
+                    <details v-if="item.detail">
+                      <summary>查看详细信息</summary>
+                      <pre>{{ item.detail }}</pre>
+                    </details>
+                  </div>
+                </article>
+              </div>
+
+              <footer class="diagnostics-footer">
+                <span>
+                  {{
+                    new Date(
+                      diagnosticReport.generatedAtMillis,
+                    ).toLocaleTimeString()
+                  }}
+                  完成
+                </span>
+                <div>
+                  <button type="button" @click="copyDiagnosticReport">
+                    复制报告
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="diagnosticsRunning || diagnosticsRepairing"
+                    @click="runDiagnostics"
+                  >
+                    <span v-if="diagnosticsRunning" class="spinner"></span>
+                    重新诊断
+                  </button>
+                  <button
+                    type="button"
+                    class="diagnostics-repair"
+                    :disabled="
+                      diagnosticsRepairing ||
+                      diagnosticsRunning ||
+                      diagnosticReport.summary.repairable === 0
+                    "
+                    @click="repairDiagnostics"
+                  >
+                    <span v-if="diagnosticsRepairing" class="spinner"></span>
+                    {{
+                      diagnosticsRepairing
+                        ? "正在修复"
+                        : `一键修复 (${diagnosticReport.summary.repairable})`
+                    }}
+                  </button>
+                </div>
+              </footer>
+            </template>
+          </section>
+        </div>
+      </Teleport>
     </main>
   </div>
 </template>

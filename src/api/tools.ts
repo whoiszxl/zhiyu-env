@@ -1,5 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  OlapConnectionTest,
+  OlapDatabaseInfo,
+  OlapEngine,
+  OlapProfile,
+  OlapProfileInput,
+  OlapQueryResult,
+  OlapTableInfo,
+} from "../types";
+import type {
   DataFormat,
   CsvDelimiter,
   CsvDirection,
@@ -27,11 +36,64 @@ import type {
   HttpRequestInput,
   HttpResponseOutput,
   QrCodeResult,
+  QrCodeOptions,
   SshCommandResult,
   SshHostKey,
   SshProfile,
   SshTerminalConnection,
+  HttpWorkspaceState,
+  LocalDomainsState,
+  LocalDomainCheck,
+  TestDataExportInput,
+  TestDataExportResult,
+  NetworkDiagnosticInput,
+  NetworkDiagnosticResult,
+  ZeroMqResult,
+  NetworkProxySetting,
 } from "../types";
+
+export function publishZeroMq(
+  endpoint: string,
+  bind: boolean,
+  topic: string,
+  payload: string,
+): Promise<ZeroMqResult> {
+  return invoke<ZeroMqResult>("zeromq_publish", { endpoint, bind, topic, payload });
+}
+
+export function subscribeZeroMq(
+  endpoint: string,
+  bind: boolean,
+  topic: string,
+  timeoutSeconds: number,
+): Promise<ZeroMqResult> {
+  return invoke<ZeroMqResult>("zeromq_subscribe", {
+    endpoint,
+    bind,
+    topic,
+    timeoutSeconds,
+  });
+}
+
+export function pushZeroMq(
+  endpoint: string,
+  bind: boolean,
+  payload: string,
+): Promise<ZeroMqResult> {
+  return invoke<ZeroMqResult>("zeromq_push", { endpoint, bind, payload });
+}
+
+export function pullZeroMq(
+  endpoint: string,
+  bind: boolean,
+  timeoutSeconds: number,
+): Promise<ZeroMqResult> {
+  return invoke<ZeroMqResult>("zeromq_pull", {
+    endpoint,
+    bind,
+    timeoutSeconds,
+  });
+}
 
 export function transformDataFormat(
   input: string,
@@ -216,15 +278,61 @@ export function executeHttpRequest(
   return invoke<HttpResponseOutput>("http_request_execute", { request });
 }
 
+export function getHttpWorkspace(): Promise<HttpWorkspaceState> {
+  return invoke<HttpWorkspaceState>("http_workspace_get");
+}
+
+export function saveHttpWorkspace(
+  workspace: HttpWorkspaceState,
+): Promise<HttpWorkspaceState> {
+  return invoke<HttpWorkspaceState>("http_workspace_save", { workspace });
+}
+
+export function getLocalDomains(): Promise<LocalDomainsState> {
+  return invoke<LocalDomainsState>("local_domains_get");
+}
+
+export function saveLocalDomains(
+  state: LocalDomainsState,
+): Promise<LocalDomainsState> {
+  return invoke<LocalDomainsState>("local_domains_save", { state });
+}
+
+export function applyLocalDomains(
+  state: LocalDomainsState,
+): Promise<LocalDomainsState> {
+  return invoke<LocalDomainsState>("local_domains_apply", { state });
+}
+
+export function restoreLocalDomains(): Promise<LocalDomainsState> {
+  return invoke<LocalDomainsState>("local_domains_restore");
+}
+
+export function checkLocalDomainTarget(target: string): Promise<LocalDomainCheck> {
+  return invoke<LocalDomainCheck>("local_domain_target_check", { target });
+}
+
+export function exportTestData(
+  input: TestDataExportInput,
+): Promise<TestDataExportResult> {
+  return invoke<TestDataExportResult>("test_data_export", { input });
+}
+
+export function diagnoseNetwork(
+  input: NetworkDiagnosticInput,
+): Promise<NetworkDiagnosticResult> {
+  return invoke<NetworkDiagnosticResult>("network_diagnose", { input });
+}
+
+export function getNetworkProxySettings(): Promise<NetworkProxySetting[]> {
+  return invoke<NetworkProxySetting[]>("network_proxy_settings");
+}
+
 export function generateQrCode(
-  content: string,
-  errorCorrection: string,
-  size: number,
+  options: QrCodeOptions,
 ): Promise<QrCodeResult> {
   return invoke<QrCodeResult>("qr_code_generate", {
-    content,
-    errorCorrection,
-    size,
+    ...options,
   });
 }
 
@@ -313,4 +421,45 @@ export function resizeSshTerminal(
 
 export function disconnectSshTerminal(sessionId: string): Promise<void> {
   return invoke<void>("ssh_terminal_disconnect", { sessionId });
+}
+
+export function listOlapProfiles(engine: OlapEngine): Promise<OlapProfile[]> {
+  return invoke<OlapProfile[]>("olap_profile_list", { engine });
+}
+
+export function saveOlapProfile(input: OlapProfileInput): Promise<OlapProfile> {
+  return invoke<OlapProfile>("olap_profile_save", { input });
+}
+
+export function deleteOlapProfile(id: string): Promise<void> {
+  return invoke<void>("olap_profile_delete", { id });
+}
+
+export function testOlapConnection(id: string): Promise<OlapConnectionTest> {
+  return invoke<OlapConnectionTest>("olap_connection_test", { id });
+}
+
+export function listOlapDatabases(id: string): Promise<OlapDatabaseInfo[]> {
+  return invoke<OlapDatabaseInfo[]>("olap_database_list", { id });
+}
+
+export function listOlapTables(
+  id: string,
+  database: string,
+): Promise<OlapTableInfo[]> {
+  return invoke<OlapTableInfo[]>("olap_table_list", { id, database });
+}
+
+export function executeOlapSql(
+  id: string,
+  database: string,
+  sql: string,
+  confirmed = false,
+): Promise<OlapQueryResult> {
+  return invoke<OlapQueryResult>("olap_execute", {
+    id,
+    database,
+    sql,
+    confirmed,
+  });
 }

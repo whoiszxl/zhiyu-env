@@ -101,15 +101,18 @@ fn service_prefix(kind: ServiceKind) -> &'static str {
         ServiceKind::Mailpit => "mailpit",
         ServiceKind::Nats => "nats",
         ServiceKind::Meilisearch => "meilisearch",
+        ServiceKind::Influxdb => "influxdb3-core-",
         ServiceKind::Minio => "minio.",
         ServiceKind::Rustfs => "rustfs-",
         ServiceKind::Etcd => "etcd-",
         ServiceKind::Consul => "consul_",
         ServiceKind::Rnacos => "rnacos-",
         ServiceKind::Rabbitmq => "rabbitmq-",
+        ServiceKind::Activemq => "apache-activemq-",
         ServiceKind::Kafka => "kafka-",
         ServiceKind::Nginx => "nginx",
         ServiceKind::Caddy => "caddy",
+        ServiceKind::Ftp => "sftpgo_",
     }
 }
 

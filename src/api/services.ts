@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AiConnectionTestResult,
+  AiSettings,
+  AiSettingsInput,
   AppSettings,
   CacheCleanupResult,
   DatabaseInfo,
@@ -101,6 +104,33 @@ export function repairAppDiagnostics(): Promise<DiagnosticRepairResult> {
 
 export function getAppSettings(): Promise<AppSettings> {
   return invoke<AppSettings>("app_settings_get");
+}
+
+export function getAiSettings(): Promise<AiSettings> {
+  return invoke<AiSettings>("ai_settings_get");
+}
+
+export function saveAiSettings(input: AiSettingsInput): Promise<AiSettings> {
+  return invoke<AiSettings>("ai_settings_save", { input });
+}
+
+export function testAiConnection(
+  input: AiSettingsInput,
+): Promise<AiConnectionTestResult> {
+  return invoke<AiConnectionTestResult>("ai_connection_test", { input });
+}
+
+export function importAiAvatar(
+  role: "user" | "assistant",
+  sourcePath: string,
+): Promise<AiSettings> {
+  return invoke<AiSettings>("ai_avatar_import", { role, sourcePath });
+}
+
+export function removeAiAvatar(
+  role: "user" | "assistant",
+): Promise<AiSettings> {
+  return invoke<AiSettings>("ai_avatar_remove", { role });
 }
 
 export function saveAppSettings(settings: AppSettings): Promise<AppSettings> {
@@ -545,4 +575,180 @@ export function queryDuckdbFile(
   sql: string,
 ): Promise<DuckdbQueryResult> {
   return invoke<DuckdbQueryResult>("duckdb_query", { path, sql });
+}
+
+// ── RSS 订阅 ──────────────────────────────────────────────
+
+import type {
+  RssEntry,
+  RssAiAction,
+  RssAiResult,
+  RssFeed,
+  RssFeedUpdate,
+  RssImportResult,
+  RssRefreshResult,
+} from "../types";
+
+export function rssFeedsList(): Promise<RssFeed[]> {
+  return invoke<RssFeed[]>("rss_feeds_list");
+}
+
+export function rssFeedAdd(feedUrl: string): Promise<RssRefreshResult> {
+  return invoke<RssRefreshResult>("rss_feed_add", { feedUrl });
+}
+
+export function rssFeedDelete(id: number): Promise<void> {
+  return invoke<void>("rss_feed_delete", { id });
+}
+
+export function rssFeedUpdate(id: number, update: RssFeedUpdate): Promise<void> {
+  return invoke<void>("rss_feed_update", { id, update });
+}
+
+export function rssFeedRefresh(id: number): Promise<RssRefreshResult> {
+  return invoke<RssRefreshResult>("rss_feed_refresh", { id });
+}
+
+export function rssRefreshDue(): Promise<RssRefreshResult[]> {
+  return invoke<RssRefreshResult[]>("rss_refresh_due");
+}
+
+export function rssEntriesList(
+  feedId?: number,
+  filter = "all",
+  search?: string,
+  limit = 200,
+  offset = 0,
+): Promise<RssEntry[]> {
+  return invoke<RssEntry[]>("rss_entries_list", {
+    feedId,
+    filter,
+    search,
+    limit,
+    offset,
+  });
+}
+
+export function rssEntryRead(id: number, read: boolean): Promise<void> {
+  return invoke<void>("rss_entry_read", { id, read });
+}
+
+export function rssEntryStar(id: number, starred: boolean): Promise<void> {
+  return invoke<void>("rss_entry_star", { id, starred });
+}
+
+export function rssMarkAllRead(feedId?: number): Promise<number> {
+  return invoke<number>("rss_mark_all_read", { feedId });
+}
+
+export function rssImportOpml(content: string): Promise<RssImportResult> {
+  return invoke<RssImportResult>("rss_import_opml", { content });
+}
+
+export function rssExportOpml(): Promise<string> {
+  return invoke<string>("rss_export_opml");
+}
+
+export function rssAiResultsList(entryId: number): Promise<RssAiResult[]> {
+  return invoke<RssAiResult[]>("rss_ai_results_list", { entryId });
+}
+
+export function rssAiGenerate(input: {
+  entryId: number;
+  requestId: string;
+  action: RssAiAction;
+  question: string;
+  outputLanguage: string;
+}): Promise<void> {
+  return invoke<void>("rss_ai_generate", { input });
+}
+
+export function rssAiCancel(requestId: string): Promise<void> {
+  return invoke<void>("rss_ai_cancel", { requestId });
+}
+
+export function rssAiResultDelete(id: number): Promise<void> {
+  return invoke<void>("rss_ai_result_delete", { id });
+}
+
+// ── 开发运行时 ────────────────────────────────────────────
+
+import type {
+  RuntimeDiagnostic,
+  RuntimeKind,
+  RuntimeOverview,
+  RuntimeProject,
+} from "../types";
+
+export function runtimeOverview(kind: RuntimeKind): Promise<RuntimeOverview> {
+  return invoke<RuntimeOverview>("runtime_overview", { kind });
+}
+
+export function runtimeInstall(
+  kind: RuntimeKind,
+  version: string,
+  operationId: string,
+): Promise<RuntimeOverview> {
+  return invoke<RuntimeOverview>("runtime_install", {
+    kind,
+    version,
+    operationId,
+  });
+}
+
+export function runtimeSelect(
+  kind: RuntimeKind,
+  version: string,
+): Promise<RuntimeOverview> {
+  return invoke<RuntimeOverview>("runtime_select", { kind, version });
+}
+
+export function runtimeUninstall(
+  kind: RuntimeKind,
+  version: string,
+): Promise<RuntimeOverview> {
+  return invoke<RuntimeOverview>("runtime_uninstall", { kind, version });
+}
+
+export function runtimeDiagnose(
+  kind: RuntimeKind,
+  version?: string,
+): Promise<RuntimeDiagnostic> {
+  return invoke<RuntimeDiagnostic>("runtime_diagnose", { kind, version });
+}
+
+export function runtimeSetGoProxy(proxy: string): Promise<RuntimeOverview> {
+  return invoke<RuntimeOverview>("runtime_go_proxy_set", { proxy });
+}
+
+export function runtimeProjectsList(): Promise<RuntimeProject[]> {
+  return invoke<RuntimeProject[]>("runtime_projects_list");
+}
+
+export function runtimeProjectSave(
+  project: RuntimeProject,
+): Promise<RuntimeProject[]> {
+  return invoke<RuntimeProject[]>("runtime_project_save", { project });
+}
+
+export function runtimeProjectDelete(id: string): Promise<RuntimeProject[]> {
+  return invoke<RuntimeProject[]>("runtime_project_delete", { id });
+}
+
+export function runtimeProjectManifestExport(id: string): Promise<string> {
+  return invoke<string>("runtime_project_manifest_export", { id });
+}
+
+export function runtimeProjectManifestImport(
+  path: string,
+): Promise<RuntimeProject[]> {
+  return invoke<RuntimeProject[]>("runtime_project_manifest_import", { path });
+}
+
+export function runtimeOpenTerminal(
+  kind: RuntimeKind,
+  projectPath?: string,
+  version?: string,
+): Promise<void> {
+  return invoke<void>("runtime_open_terminal", { kind, projectPath, version });
 }

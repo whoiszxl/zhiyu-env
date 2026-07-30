@@ -111,12 +111,14 @@ fn managed_service_pids() -> BTreeMap<u32, String> {
         ("mailpit", "Mailpit"),
         ("nats", "NATS"),
         ("meilisearch", "Meilisearch"),
+        ("influxdb", "InfluxDB"),
         ("minio", "MinIO"),
         ("rustfs", "RustFS"),
         ("etcd", "etcd"),
         ("consul", "Consul"),
         ("rnacos", "rnacos"),
         ("rabbitmq", "RabbitMQ"),
+        ("ftp", "FTP Server"),
     ]
     .into_iter()
     .filter_map(|(directory, name)| {
@@ -134,6 +136,7 @@ fn common_service(port: u16) -> Option<&'static str> {
         80 => Some("HTTP"),
         443 => Some("HTTPS"),
         1025 => Some("Mailpit SMTP"),
+        2121 => Some("FTP Server"),
         2379 => Some("etcd Client"),
         2380 => Some("etcd Peer"),
         3000 => Some("常用前端开发端口"),
@@ -144,6 +147,7 @@ fn common_service(port: u16) -> Option<&'static str> {
         5672 => Some("RabbitMQ AMQP"),
         6379 => Some("Redis"),
         7700 => Some("Meilisearch"),
+        8181 => Some("InfluxDB"),
         8000 | 8080 => Some("常用 HTTP 开发端口"),
         8025 => Some("Mailpit Web"),
         8222 => Some("NATS Monitoring"),

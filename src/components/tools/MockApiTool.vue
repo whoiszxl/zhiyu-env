@@ -8,6 +8,13 @@ import {
   mockApiStop,
 } from "../../api/tools";
 import type { MockApiState, MockRoute } from "../../types";
+import type { AiAssistOption } from "../../types";
+import AiAssistDialog from "../AiAssistDialog.vue";
+
+type AiRouteCandidate = MockRoute & {
+  selected: boolean;
+  conflict: boolean;
+};
 
 const state = ref<MockApiState>({
   running: false,
@@ -20,6 +27,23 @@ const selectedId = ref("");
 const busy = ref(false);
 const saving = ref(false);
 const error = ref("");
+const aiOpen = ref(false);
+const aiPreviewOpen = ref(false);
+const aiCandidates = ref<AiRouteCandidate[]>([]);
+const aiOptions: AiAssistOption[] = [{
+  id: "mock_api",
+  label: "批量生成",
+  hint: "描述业务模块、接口、字段，以及希望覆盖的成功或异常场景",
+  canApply: true,
+}];
+const aiContext = computed(() => JSON.stringify({
+  server: state.value.baseUrl,
+  existingRoutes: state.value.routes.map((route) => ({
+    method: route.method,
+    path: route.path,
+    statusCode: route.statusCode,
+  })),
+}, null, 2));
 let refreshTimer: number | undefined;
 let saveTimer: number | undefined;
 let stopWatchingRoutes: (() => void) | undefined;
@@ -144,6 +168,90 @@ function formatTime(value: number) {
   return new Date(value).toLocaleTimeString("zh-CN", { hour12: false });
 }
 
+function cleanJsonOutput(content: string) {
+  return content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+}
+
+function previewAiRoutes(content: string) {
+  try {
+    const parsed = JSON.parse(cleanJsonOutput(content));
+    if (!Array.isArray(parsed.routes) || parsed.routes.length === 0) {
+      throw new Error("AI 没有返回可导入的接口");
+    }
+    if (parsed.routes.length > 30) {
+      throw new Error("单次最多导入 30 个接口");
+    }
+    const identities = new Set(
+      state.value.routes.map((route) => `${route.method.toUpperCase()} ${route.path}`),
+    );
+    const generated = new Set<string>();
+    aiCandidates.value = parsed.routes.map((value: Record<string, unknown>, index: number) => {
+      const method = String(value.method ?? "GET").trim().toUpperCase();
+      const path = String(value.path ?? "").trim();
+      const statusCode = Number(value.statusCode ?? 200);
+      const delayMs = Number(value.delayMs ?? 0);
+      if (!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(method)) {
+        throw new Error(`第 ${index + 1} 个接口的方法不受支持`);
+      }
+      if (!path.startsWith("/") || path.includes("?")) {
+        throw new Error(`第 ${index + 1} 个接口路径无效`);
+      }
+      if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599) {
+        throw new Error(`第 ${index + 1} 个接口状态码无效`);
+      }
+      if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 10_000) {
+        throw new Error(`第 ${index + 1} 个接口延迟无效`);
+      }
+      const identity = `${method} ${path}`;
+      const conflict = identities.has(identity) || generated.has(identity);
+      generated.add(identity);
+      const body = typeof value.responseBody === "string"
+        ? value.responseBody
+        : JSON.stringify(value.responseBody ?? {}, null, 2);
+      if (body.length > 1024 * 1024) throw new Error(`第 ${index + 1} 个响应过大`);
+      if (/<script\b|on\w+\s*=|javascript:/i.test(body)) {
+        throw new Error(`第 ${index + 1} 个响应包含脚本或事件处理器，已拒绝导入`);
+      }
+      return {
+        id: `ai-route-${Date.now()}-${index}`,
+        method,
+        path,
+        statusCode,
+        contentType: String(value.contentType || "application/json; charset=utf-8"),
+        responseBody: body,
+        delayMs,
+        enabled: value.enabled !== false,
+        selected: !conflict,
+        conflict,
+      };
+    });
+    aiOpen.value = false;
+    aiPreviewOpen.value = true;
+    error.value = "";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+function importAiRoutes() {
+  const routes = aiCandidates.value
+    .filter((route) => route.selected && !route.conflict)
+    .map(({ selected: _selected, conflict: _conflict, ...route }) => route);
+  if (!routes.length) {
+    error.value = "没有选择可导入的接口";
+    return;
+  }
+  state.value.routes.push(...routes);
+  selectedId.value = routes[0].id;
+  aiPreviewOpen.value = false;
+  aiCandidates.value = [];
+  scheduleSave(0);
+}
+
+function openAiSettings() {
+  window.dispatchEvent(new CustomEvent("zhiyu:open-ai-settings"));
+}
+
 onMounted(async () => {
   await load();
   stopWatchingRoutes = watch(
@@ -173,6 +281,7 @@ onUnmounted(() => {
       </div>
     </div>
     <div class="header-actions mock-server-actions">
+      <button type="button" @click="aiOpen = true">✦ AI 批量生成</button>
       <label class="port-input">端口 <input v-model.number="state.port" type="number" min="1024" max="65535" :disabled="state.running" /></label>
       <button class="primary" type="button" :disabled="busy" @click="toggleServer">
         <span v-if="busy" class="spinner"></span>
@@ -268,6 +377,58 @@ onUnmounted(() => {
       </div>
     </div>
   </section>
+  <AiAssistDialog
+    :open="aiOpen"
+    title="AI Mock API 生成器"
+    :context="aiContext"
+    :options="aiOptions"
+    @close="aiOpen = false"
+    @settings="openAiSettings"
+    @apply="previewAiRoutes"
+  />
+  <Teleport to="body">
+    <div
+      v-if="aiPreviewOpen"
+      v-tool-i18n
+      class="ai-route-backdrop"
+      @mousedown.self="aiPreviewOpen = false"
+    >
+      <section class="ai-route-preview" role="dialog" aria-modal="true">
+        <header>
+          <div><p>IMPORT PREVIEW</p><h2>确认 AI 生成的接口</h2></div>
+          <button type="button" @click="aiPreviewOpen = false">×</button>
+        </header>
+        <div class="ai-route-summary">
+          <span>{{ aiCandidates.length }} 个候选接口</span>
+          <span>{{ aiCandidates.filter((item) => item.conflict).length }} 个冲突</span>
+          <small>冲突接口不会覆盖现有配置</small>
+        </div>
+        <div class="ai-route-list">
+          <label
+            v-for="route in aiCandidates"
+            :key="route.id"
+            :class="{ conflict: route.conflict }"
+          >
+            <input v-model="route.selected" type="checkbox" :disabled="route.conflict" />
+            <b :class="route.method.toLowerCase()">{{ route.method }}</b>
+            <code>{{ route.path }}</code>
+            <span>{{ route.statusCode }} · {{ route.delayMs }} ms</span>
+            <em>{{ route.conflict ? "与现有接口冲突" : "可导入" }}</em>
+          </label>
+        </div>
+        <footer>
+          <small>导入后会自动保存；服务运行中也会立即更新路由。</small>
+          <button type="button" @click="aiPreviewOpen = false">取消</button>
+          <button
+            class="primary"
+            type="button"
+            :disabled="!aiCandidates.some((item) => item.selected && !item.conflict)"
+            @click="importAiRoutes"
+          >导入所选接口</button>
+        </footer>
+      </section>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -276,6 +437,14 @@ onUnmounted(() => {
   gap: 14px;
   padding: 24px 32px 36px;
 }
+
+.ai-route-backdrop{position:fixed;z-index:10030;inset:0;display:grid;place-items:center;padding:24px;background:color-mix(in srgb,var(--color-bg-sidebar) 52%,transparent);backdrop-filter:blur(8px)}
+.ai-route-preview{display:flex;width:min(720px,100%);max-height:min(650px,calc(100vh - 48px));flex-direction:column;overflow:hidden;border:1px solid var(--color-border-strong);border-radius:8px;background:var(--color-bg-content);box-shadow:0 24px 70px rgb(0 0 0/.3)}
+.ai-route-preview>header{display:flex;min-height:62px;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--color-border);background:var(--color-header)}
+.ai-route-preview p{margin:0 0 3px;color:var(--color-text-muted);font:8px "SFMono-Regular",Consolas,monospace;letter-spacing:.12em}.ai-route-preview h2{margin:0;font-size:14px}.ai-route-preview>header button{width:30px;height:30px;border:0;background:transparent;color:var(--color-text-muted);font-size:18px}
+.ai-route-summary{display:flex;align-items:center;gap:16px;padding:10px 14px;border-bottom:1px solid var(--color-border);background:var(--color-bg-muted);font-size:9px}.ai-route-summary small{margin-left:auto;color:var(--color-text-muted)}
+.ai-route-list{min-height:180px;overflow:auto}.ai-route-list label{display:grid;grid-template-columns:18px 62px minmax(0,1fr) 90px 100px;min-height:48px;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--color-border);font-size:9px}.ai-route-list label.conflict{opacity:.58}.ai-route-list b{font:700 8px "SFMono-Regular",Consolas,monospace;color:var(--color-accent)}.ai-route-list code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-route-list span,.ai-route-list em{color:var(--color-text-muted);font-style:normal}.ai-route-list label.conflict em{color:var(--color-danger-text)}
+.ai-route-preview>footer{display:flex;align-items:center;gap:8px;padding:11px 14px;border-top:1px solid var(--color-border);background:var(--color-header)}.ai-route-preview>footer small{margin-right:auto;color:var(--color-text-muted);font-size:8px}.ai-route-preview>footer button{min-height:32px;padding:0 13px;font-size:9px}
 
 .mock-server-actions,
 .port-input {

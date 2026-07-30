@@ -30,6 +30,8 @@ import type {
   SshTerminalEvent,
 } from "../../types";
 import { toolUiText } from "../../i18n/toolUi";
+import AiAssistDialog from "../AiAssistDialog.vue";
+import type { AiAssistOption } from "../../types";
 
 const props = withDefaults(defineProps<{ visible?: boolean }>(), {
   visible: true,
@@ -77,6 +79,23 @@ const profileListCollapsed = ref(
   window.localStorage.getItem("zhiyu.ssh.profile-list-collapsed") === "true",
 );
 const profileListMotion = ref<"" | "opening" | "closing">("");
+const aiOpen = ref(false);
+const aiOptions: AiAssistOption[] = [{
+  id: "ssh",
+  label: "命令建议",
+  hint: "描述希望在远程服务器完成的操作；AI 只提供建议，不会执行",
+  canApply: false,
+}];
+const aiContext = computed(() => {
+  const profile = selectedProfile.value;
+  return profile
+    ? `目标系统：未知\n连接：${profile.username}@${profile.host}:${profile.port}\n认证方式：${profile.authMethod}`
+    : "尚未选择服务器连接";
+});
+
+function openAiSettings() {
+  window.dispatchEvent(new CustomEvent("zhiyu:open-ai-settings"));
+}
 const terminalElement = ref<HTMLDivElement | null>(null);
 const terminalSessionId = ref("");
 const terminalConnecting = ref(false);
@@ -632,6 +651,9 @@ onBeforeUnmount(() => {
         <p>安全直连远程服务器，支持密钥和密码认证</p>
       </div>
     </div>
+    <div class="header-actions">
+      <button type="button" @click="aiOpen = true">✦ AI 命令建议</button>
+    </div>
   </header>
 
   <div v-if="notice" class="notice">
@@ -872,6 +894,15 @@ onBeforeUnmount(() => {
       </article>
     </div>
   </section>
+
+  <AiAssistDialog
+    :open="aiOpen"
+    title="AI SSH 助手"
+    :context="aiContext"
+    :options="aiOptions"
+    @close="aiOpen = false"
+    @settings="openAiSettings"
+  />
 
   <Teleport to="body">
     <div
